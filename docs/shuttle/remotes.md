@@ -2,7 +2,7 @@
 
 Each machine that runs workers needs its own Shuttle daemon, agent login, and project files.
 The board on one machine can show and control work on the others.
-Start with [one working installation](setup.md), then repeat that setup on the remote before connecting them.
+Start with [one working installation](../getting-started.md), then repeat that setup on the remote before connecting them.
 
 Call the machine whose board you open the **hub**.
 The hub can be your laptop; a worker on an awake remote keeps running when that laptop disconnects.

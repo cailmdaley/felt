@@ -1,7 +1,7 @@
 # Guide a Shuttle setup
 
 Help the user reach one working task, then add the machines and conversation views they need.
-The public [setup guide](https://cailmdaley.github.io/felt/shuttle/setup/) carries the human explanation; [installation](https://cailmdaley.github.io/felt/shuttle/installation/) carries the service and configuration reference.
+The public [Setup & Tutorial](https://cailmdaley.github.io/felt/getting-started/) page carries the human prompts and quickstart; [installation](https://cailmdaley.github.io/felt/shuttle/installation/) carries the service and configuration reference.
 Read the pages for the branch you're setting up, and check the installed CLI's `--help` before using commands that may differ by release.
 In a source checkout, use `docs/shuttle/` so guidance matches the code being built.
 
@@ -9,7 +9,7 @@ In a source checkout, use `docs/shuttle/` so guidance matches the code being bui
 
 Read the public [agent setup guide](https://cailmdaley.github.io/felt/shuttle/agent-setup/), or `docs/shuttle/agent-setup.md` in a source checkout.
 That page is the canonical onboarding procedure and is readable by the human following along.
-The [setup page](https://cailmdaley.github.io/felt/shuttle/setup/) supplies the copyable prompt; don't send a newcomer through a command catalogue first.
+The [Setup & Tutorial](https://cailmdaley.github.io/felt/getting-started/) page supplies the copyable prompts; don't send a newcomer through a command catalogue first.
 
 Reuse existing configuration and stores.
 For a fresh installation, use the installer's default notes collection rather than making the user design a store layout.

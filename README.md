@@ -17,16 +17,22 @@ You and your agents read and write the same notes; Git keeps their history.
 
 ## Set up with your agent
 
-**Shuttle** is the optional task board that launches agents and follows their work.
-We recommend asking your existing agent to help you set it up.
-Give it this prompt:
+**Shuttle** is the optional layer that launches agents and follows their work.
+We recommend asking your existing agent to guide you through setup and the interactive tutorial.
+
+Install and set up:
 
 ```text
-Read https://cailmdaley.github.io/felt/shuttle/agent-setup/ and help me set up Shuttle. Record this setup as a task on the board, and give me the board URL when it is ready.
+Read https://cailmdaley.github.io/felt/shuttle/agent-setup/ and help me install felt and set up Shuttle on this machine. Use existing configuration where possible, explain the choices I need to make, and record this setup as a task on the board. Give me the board URL when it is ready.
 ```
 
-The [setup guide](https://cailmdaley.github.io/felt/shuttle/setup/) explains what to expect.
-To use felt for notes on its own, follow the commands below.
+Interactive hands-on tutorial:
+
+```text
+Read https://cailmdaley.github.io/felt/tutorial/ and walk me through an interactive, hands-on tutorial of felt and Shuttle. Ask what I want to learn first, use a disposable scratch folder, and use the cheapest available model for any demo threads.
+```
+
+See **[Setup & Tutorial](https://cailmdaley.github.io/felt/getting-started/)** for both prompts and the manual walkthrough, or give your agent [`llms.txt`](https://cailmdaley.github.io/felt/llms.txt) to index the full docs.
 
 ## Keep project notes
 
@@ -58,8 +64,7 @@ Start on one machine, then connect others if you need remote execution.
 ![Shuttle board showing tasks for a small workshop](docs/assets/shuttle-board-example.png)
 
 This repository ships the `felt` and `shuttle` Go CLIs, plus the optional Shuttle service and board.
-[Getting started](https://cailmdaley.github.io/felt/getting-started/) walks through a first note.
-[Set up Shuttle](https://cailmdaley.github.io/felt/shuttle/setup/) walks through a first agent task.
+Start with **[Setup & Tutorial](https://cailmdaley.github.io/felt/getting-started/)** for guided setup, the interactive tutorial, or a manual felt quickstart.
 
 ## Install
 
@@ -90,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | S
 
 Put `SHUTTLE_DAEMON=1` after the pipe, on `sh`, so the installer sees it. The daemon release
 carries its own Erlang runtime and board bundle; running it needs tmux plus both Go CLIs on
-`PATH`. Follow [Set up Shuttle](https://cailmdaley.github.io/felt/shuttle/setup/) for a first task,
+`PATH`. Follow [Setup & Tutorial](https://cailmdaley.github.io/felt/getting-started/) for a first task,
 [connect your machines](https://cailmdaley.github.io/felt/shuttle/remotes/) for a multi-machine setup, and
 [choose where conversations open](https://cailmdaley.github.io/felt/shuttle/conversations/) for terminal, desktop, or browser use.
 
@@ -123,7 +128,7 @@ The [documentation site](https://cailmdaley.github.io/felt/) covers the next ste
 - [Organize notes and tasks](https://cailmdaley.github.io/felt/concepts/organizing/): nesting, links, statuses, and useful conclusions.
 - [Integrate coding agents](https://cailmdaley.github.io/felt/agents/): Claude Code, Codex, and pi.
 - [Keep files with notes](https://cailmdaley.github.io/felt/concepts/companions/): plots, PDFs, and reports.
-- [Run tasks with Shuttle](https://cailmdaley.github.io/felt/shuttle/): task descriptions, the board, and review.
+- [Run tasks with Shuttle](https://cailmdaley.github.io/felt/shuttle/constitutions/): constitutions, lifecycle, the board, and review.
 - [Look up commands](https://cailmdaley.github.io/felt/reference/cli/).
 
 ## Contributing

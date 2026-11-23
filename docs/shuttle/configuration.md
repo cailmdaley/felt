@@ -279,10 +279,11 @@ It is off by default.
 `SHUTTLE_AMBIENT` overrides the file (`1`, `true`, `on` or `yes`; `0`, `false`, `off` or `no`), and `shuttle host --json` reports the resolved value.
 A value in the file that isn't a boolean is refused.
 
-With it on, the start-of-session hook of an unattached agent session adds a short note: load the felt skill, and when the request turns into substantive work, run `shuttle adopt` with the session's own id, directory, store and terminal filled in.
+With it on, the start-of-session hook of an unattached agent session adds a short note: load the felt skill, and when the request turns into substantive work, run `shuttle adopt <parent>/<slug> "<title>"` with the session's own id, directory, store, and terminal filled in.
+`shuttle adopt` creates the fiber, installs it as a draft, claims the live session, and activates it, in that order; if claiming fails (for instance without tmux or Rex), the fiber stays an open draft so Shuttle never launches a duplicate worker.
+An adopted session ends when it runs `shuttle close`, `handoff`, or `rest` on its own fiber; while active, exiting starts a successor unless you park it first with `shuttle pause <fiber> --no-kill`.
 A session Shuttle launched gets no note, and neither does one whose daemon doesn't answer.
 Nothing is adopted until the agent runs the command.
-[Set up Shuttle](setup.md#ambient-mode) describes what adoption does.
 
 ## Store auto fast-forward
 

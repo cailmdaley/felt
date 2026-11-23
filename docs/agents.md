@@ -118,7 +118,7 @@ codex plugin remove felt-skills@cailmdaley-felt
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
 CLI it finds on `PATH`, with no opt-out flag — see
-[Getting started](getting-started.md#install).
+[Setup & Tutorial](getting-started.md#install-felt-yourself-notes-only).
 
 ### Skills only
 
@@ -143,7 +143,7 @@ same two skills; hooks on Claude/Codex correspond to extension events on pi.
   bodies, additional YAML fields, end-of-session sweeps, maintenance passes.
 - **shuttle** (`felt-skills:shuttle` in Codex) — the dispatch practice: authoring constitutions, worker
   dispatch, operating the board. Only relevant once you're using the
-  optional [shuttle](shuttle/index.md) layer.
+  optional [shuttle](shuttle/constitutions.md) layer.
 
 Skills activate the way any Claude Code / Codex / pi skill does — by the harness
 matching the user's request against the skill's description. `felt setup

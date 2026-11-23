@@ -1,6 +1,6 @@
 # Installation reference
 
-For a guided first installation, start with [Set up Shuttle](setup.md).
+For a guided first installation, start with [Setup & Tutorial](../getting-started.md).
 [Connect your machines](remotes.md) covers the multi-host path, and [Opening conversations](conversations.md) covers terminals and Remote Control.
 This page covers installing, upgrading and supervising the daemon;
 [Configuration](configuration.md) covers stores, agents, host trust and remotes, and

@@ -1,119 +1,96 @@
-# Getting started
+# Setup & Tutorial
 
-**For Shuttle, we recommend letting your agent guide setup.**
-[Set up Shuttle](shuttle/setup.md) gives you one prompt to copy: your agent installs the service, prepares a notes collection, and puts the setup task on your board.
-The linked instructions are readable by you as well as the agent.
+**We recommend having your coding agent guide you through setup and the interactive tutorial.**
+Give Claude Code, Codex, Antigravity, or Pi either prompt below, or follow the manual felt quickstart further down if you want notes only.
 
-The walkthrough below is for using **felt on its own**: install the command-line tools, create a note, and record a decision.
-felt is the notes, and it needs no background service; Shuttle adds the live side (launching agents, the board, messages between sessions) and can be set up later or never.
-You can follow it yourself or ask your agent to work through it with you.
+## 1. Install and set up with your agent
 
-## Install
+Copy this prompt to install `felt` and `shuttle`, start the optional background service, prepare a notes collection, and put a **Set up Shuttle** card on your board:
 
-On macOS or Linux, install the latest release:
+```{.text .agent-prompt}
+Read https://cailmdaley.github.io/felt/shuttle/agent-setup/ and help me install felt and set up Shuttle on this machine. Use existing configuration where possible, explain the choices I need to make, and record this setup as a task on the board. Give me the board URL when it is ready.
+```
+
+Your agent doesn't need the felt plugin beforehand — installing the integration is part of setup.
+The [agent setup checklist](shuttle/agent-setup.md) is written for humans to read alongside the agent; it explains every file created and how each check is verified.
+
+## 2. Take the interactive tutorial
+
+Once felt (or Shuttle) is installed — or to try things out first — give your agent this prompt:
+
+```{.text .agent-prompt}
+Read https://cailmdaley.github.io/felt/tutorial/ and walk me through an interactive, hands-on tutorial of felt and Shuttle. Ask what I want to learn first, use a disposable scratch folder, and use the cheapest available model for any demo threads.
+```
+
+The tutor checks what is installed, works inside a disposable scratch folder, always picks the cheapest available model at low effort, asks before changing any host configuration, and runs real commands one small step at a time.
+
+| # | Module | You will | Needs |
+|---|---|---|---|
+| 1 | felt, your Git-backed wiki | write, link, search, and close workshop notes | `felt` |
+| 2 | Ambient mode | let an everyday agent session adopt itself into a thread | daemon, tmux or Rex |
+| 3 | Running and steering a thread | write a goal, launch an agent, message it, and review the result | daemon, a signed-in agent |
+| 4 | Trees of threads | give a parent two child threads and review what they return | Module 3's setup |
+| 5 | Messages, files, and tapestries | follow the work entirely from a terminal | Module 3's setup |
+| 6 | Multi-machine fleets | see which machine owns which work | daemon; second machine optional |
+| 7 | The default UI, and your own | tour the board, then build a small personal UI with no build step | daemon, a browser |
+
+Read or follow the full exercises yourself on the [Interactive tutorial](tutorial.md) page.
+
+## Install felt yourself (notes only)
+
+To use **felt on its own** with no background service, install the prebuilt release on macOS or Linux (x86_64 and arm64; no Windows build):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
 ```
 
-The installer downloads the `felt` and `shuttle` commands and prints where it puts them.
-It uses `/usr/local/bin` if writable, otherwise `~/.local/bin`; add that directory to `PATH` if your shell cannot find the commands.
-Both x86_64 and arm64 are supported.
-There is no Windows build.
-
-It also installs felt's integration for supported agent CLIs it finds, including Claude Code and Codex.
-That writes to those agents' configuration folders; `felt uninstall` reverses the integration.
-Homebrew installs the same release:
+Or with Homebrew:
 
 ```sh
 brew install cailmdaley/tap/felt
 ```
 
-For source builds and other installation choices, see the [installation reference](shuttle/installation.md).
-Check your installation with `felt --version`, and move to a newer release with `felt update`.
+The installer places both `felt` and `shuttle` in `/usr/local/bin` (if writable) or `~/.local/bin`, and registers felt's integration for supported agent CLIs it finds on `PATH`.
+Add `SHUTTLE_DAEMON=1` after the pipe (`... | SHUTTLE_DAEMON=1 sh`) to include the prebuilt Shuttle daemon, or see the [installation reference](shuttle/installation.md) for source builds.
+Upgrade later with `felt update` and reverse agent integration with `felt uninstall`.
 
-## Create a store
+### Create a store and record a decision
 
-A **store** is a folder containing your felt notes in a `.felt/` directory.
-From the project directory where you want to keep notes:
+From your project directory:
 
 ```sh
 felt init
-```
-
-You can run this again safely; it creates or repairs the store without replacing its notes.
-If you use Git, commit `.felt/` with your project to keep the history.
-You can connect projects to a [shared store](concepts/cross-project.md) later.
-
-## File a fiber
-
-Each note is called a **fiber**.
-Suppose you're planning a small workshop and need to choose a venue:
-
-```sh
 felt add workshop-venue "Choose a workshop venue" -s open
 ```
 
 This creates `.felt/workshop-venue/workshop-venue.md`.
-Open it in your editor and write your constraints below the metadata:
-
-```markdown
-We expect 25 people, and several will arrive by train.
-Compare the library meeting room with the café's back room.
-```
-
-The short name `workshop-venue` is how you address the note in commands.
-The title is what you and your agents see when reading it.
-`-s open` marks it as a task you haven't finished.
-An existing decision or reference note doesn't need a status.
-
-## Close it with a real outcome
-
-When you've made the decision:
+Open it in your editor and write your constraints below the YAML header.
+Once you've decided, close it with a standalone outcome and search for it later:
 
 ```sh
 felt edit workshop-venue -s closed \
   -o "Use the library meeting room: it seats 30 and is near the station."
-```
-
-Add the reasoning to the body so someone can understand the choice later:
-
-```markdown
-We expect 25 people, and several will arrive by train.
-The café is closer, but its back room only seats 18.
-```
-
-The outcome is the conclusion you can read without opening the whole note.
-Closing the task keeps that conclusion and the reasoning in your project.
-
-## Find it again
-
-```sh
 felt show workshop-venue
 felt ls -s all "workshop"
 ```
 
-`felt ls` by itself lists unfinished tasks.
-`-s all` includes closed tasks so you can retrieve completed decisions.
-Notes remain ordinary Markdown files you can read in any editor.
-
-When the workshop grows, keep related notes in nested folders and connect them with `[[wikilinks]]` in their text.
-[Organizing](concepts/organizing.md) explains when to split a note, nest it, or link it.
-[Companion files](concepts/companions.md) shows how to keep a programme, plot, or report beside the note it belongs to.
-
-## Work with your agent
-
-If the installer didn't already add your agent's integration, run the matching command:
+`felt ls` shows open and active tasks; `-s all` includes closed decisions.
+Status is optional — leave `-s` off for reference notes or decisions already made.
+If you installed your agent CLI after felt, register its integration with:
 
 ```sh
 felt setup claude
-# Or: felt setup codex
-# Or: felt setup pi
+# Or: felt setup codex | felt setup pi
 ```
 
-The integration gives the agent project context at session start and instructions for recording what it learns.
-You and the agent read and write the same notes.
-For example, an agent preparing the participant guide can read the venue decision instead of asking you to repeat it.
-[Agent integration](agents.md) explains the details.
+## Read the in-depth documentation
 
-To assign tasks and follow agents on a board, continue with [Set up Shuttle](shuttle/setup.md).
+| Topic | Start here |
+|---|---|
+| Organizing notes, nesting, links, and file format | [Fibers](concepts/fibers.md), [Organizing](concepts/organizing.md), [Frontmatter](concepts/frontmatter.md) |
+| Plots, PDFs, roles, diffs, and shared stores | [Companions](concepts/companions.md), [Roles](concepts/roles.md), [Changes](concepts/changes.md), [Cross-project stores](concepts/cross-project.md) |
+| Agent plugins, skills, and hooks | [Agents & Plugin](agents.md) |
+| Writing tasks and following workers | [Constitutions](shuttle/constitutions.md), [Lifecycle](shuttle/lifecycle.md), [The board](shuttle/board.md) |
+| Terminals, multi-machine fleets, and custom UIs | [Opening conversations](shuttle/conversations.md), [Connect your machines](shuttle/remotes.md), [UI layers & SDK](shuttle/ui-architecture.md) |
+| Daemon install, config, and troubleshooting | [Installation](shuttle/installation.md), [Configuration](shuttle/configuration.md), [Sharp edges](shuttle/troubleshooting.md) |
+| Complete command and HTTP reference | [CLI reference](reference/cli.md), [Daemon HTTP API](reference/api.md) |

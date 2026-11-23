@@ -1,6 +1,6 @@
 # Agent setup guide
 
-This is the checklist behind [Set up Shuttle](setup.md).
+This is the checklist behind [Setup & Tutorial](../getting-started.md).
 It is written for the agent doing the work and the person following along.
 The result is a working board with a **Set up Shuttle** task that records this setup, plus a clear account of what was verified.
 

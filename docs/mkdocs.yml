@@ -50,23 +50,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Interactive Tutorial: tutorial.md
-  - Getting Started: getting-started.md
-  - shuttle orchestration:
-      - Overview: shuttle/index.md
-      - Set up Shuttle: shuttle/setup.md
-      - Agent setup guide: shuttle/agent-setup.md
-      - Connect your machines: shuttle/remotes.md
-      - Opening conversations: shuttle/conversations.md
-      - Installation reference: shuttle/installation.md
-      - Configuration reference: shuttle/configuration.md
-      - Sharp edges: shuttle/troubleshooting.md
-      - Constitutions: shuttle/constitutions.md
-      - Lifecycle: shuttle/lifecycle.md
-      - The board: shuttle/board.md
-      - "UI layers & SDK": shuttle/ui-architecture.md
-      - Cycles and eras: shuttle/cycles.md
-      - Telemetry and the ledgers: shuttle/telemetry.md
+  - Setup & Tutorial: getting-started.md
   - Concepts:
       - Fibers: concepts/fibers.md
       - Organizing: concepts/organizing.md
@@ -76,7 +60,25 @@ nav:
       - Changes: concepts/changes.md
       - Constitution themes: concepts/themes.md
       - Cross-Project: concepts/cross-project.md
-  - Agents & Plugin: agents.md
+  - Shuttle:
+      - Constitutions: shuttle/constitutions.md
+      - Lifecycle: shuttle/lifecycle.md
+      - The board: shuttle/board.md
+      - "UI layers & SDK": shuttle/ui-architecture.md
+      - Opening conversations: shuttle/conversations.md
+      - Connect your machines: shuttle/remotes.md
+      - Cycles and eras: shuttle/cycles.md
+      - Telemetry and the ledgers: shuttle/telemetry.md
+      - Installation reference: shuttle/installation.md
+      - Configuration reference: shuttle/configuration.md
+      - Sharp edges: shuttle/troubleshooting.md
+  - Agents & Guides:
+      - Agents & Plugin: agents.md
+      - Interactive tutorial: tutorial.md
+      - Agent setup checklist: shuttle/agent-setup.md
+  - Reference:
+      - CLI: reference/cli.md
+      - Daemon HTTP API: reference/api.md
   - Development:
       - Architecture: dev/architecture.md
       - Building and deploying: dev/build-and-deploy.md
