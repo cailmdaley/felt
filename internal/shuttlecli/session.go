@@ -142,7 +142,7 @@ func (a *app) shuttleAddressFiber(query string) (*felt.Felt, error) {
 	if len(lookup.Fibers) > 1 || lookup.refused() {
 		return nil, fmt.Errorf("fiber target %q is ambiguous or only resolves by guessing; candidates: %s", query, strings.Join(lookup.candidateLabels(), ", "))
 	}
-	return nil, fmt.Errorf("no fiber found matching %q", query)
+	return nil, &felt.NoFiberMatchError{Query: query}
 }
 
 func (a *app) sessionNameCmd() *cobra.Command {

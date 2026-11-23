@@ -12,7 +12,7 @@ import (
 )
 
 func (a *app) shuttleSentFilesCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "sent-files", Short: "Manage the sent-files trail"}
+	cmd := &cobra.Command{Use: "sent-files", Short: "List or clear the sent-files trail"}
 	clear := &cobra.Command{
 		Use: "clear <fiber> [--path <file>]", Short: "Hide a fiber's sent files without deleting them",
 		Long: `Record a sent_files_cleared event for the fiber's canonical UID on this host.
@@ -57,7 +57,7 @@ A fiber assigned to another host must be cleared there.`,
 	}
 	clear.Flags().String("path", "", "Clear only this exact absolute fullPath (not expanded)")
 	clear.Flags().Bool("local", false, "Address the local stream (does not bypass fiber host checks)")
-	cmd.AddCommand(clear)
+	cmd.AddCommand(a.sentFilesListCmd(), clear)
 	return cmd
 }
 

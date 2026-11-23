@@ -272,6 +272,7 @@ is then given back to the human rather than closed.
 | `shuttle ps` | Live terminal worker sessions |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon, carrying this host's copy (`--carry` insists on it over a copy the owner holds), and an owner without the fiber has it created from that copy first. `--message <text>` or `--message-file <path>` adds a launch directive |
+| `shuttle sent-files ls <fiber>` | List the files a fiber's workers sent, newest first, with caption and URL (`--json`) |
 | `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With `--since <time>` (what `shuttle find --since` takes: `30d`, `12h`, a date, or an RFC3339 time), list every Claude, Codex, Pi and Antigravity session on this host — or on `--host <host>`, through that host's daemon — with a transcript message since then, live or ended, newest first: last activity, `live`, harness, the `shuttle show` address on that host, and the fibers it worked on (`--harness`, `--json`). With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
 | `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which sends through its owner's durable inbox (`--attach`, `--file`, `--context-only`, `--notify-when-idle`, `--notify-wake`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry. A fiber message is refused, sending nothing, when the local daemon reports a CLI contract level other than this shuttle's, or when the fiber's owner reports that its own CLIs are at another level than it was built for: such a daemon queues the message and does not deliver it until it runs level with its CLIs |
 | `shuttle transcript [--date YYYY-MM-DD] [--fiber <id\|slug>] [--since HH:MM[:SS]] [--recorder HOST]` | Read the day's spoken transcript, including the card each line went to (`--json` for the daemon response) |
@@ -302,8 +303,8 @@ is then given back to the human rather than closed.
 | `shuttle attach <fiber>` | Attach to tmux or ask the local daemon to open a Rex worker in the Rex app; recreate a missing terminal Codex viewer of the same owned thread without starting a turn. Remote Rex has no SSH TTY renderer |
 | `shuttle session-name <fiber>` | Print the canonical worker name for a fiber |
 
-`attach`, `session-name`, and fiber message targets require one exact match across
-configured stores; they refuse guessed paths and duplicate matches.
+`attach`, `session-name`, `sent-files ls`, and fiber message
+targets require one exact match across configured stores; they refuse guessed paths and duplicate matches.
 
 ### `shuttle change <fiber> [--pr N | --base B | --list]`
 
@@ -709,6 +710,16 @@ receiver is invisible to ancestry); else the first set of
 The event stream uses the same configuration as `shuttle hook event`; recording
 works offline and confirms registration, not a completed client download.
 The daemon also reads `SendUserFile` hook events as sends, with their `caption`.
+
+### `shuttle sent-files ls <fiber> [--json]`
+
+List a fiber's sent files from its owner, through the local daemon, newest first: when each was sent, its absolute path on the owning host, its caption, and the `/api/v1/file` URL that serves it.
+Each path appears once, at its newest send, and at most 50 are listed.
+`--json` gives `{fiber, uid, host, source, files}`; each file is the daemon's `/sent-files` entry plus `url`.
+
+With the daemon unreachable, a fiber this host owns is read from the host's event stream instead, without URLs (`source` is `events` rather than `daemon`).
+A fiber another host owns needs the daemon.
+A daemon that listens on a unix socket has no URL to give.
 
 ### `shuttle sent-files clear <fiber> [--path <file>]`
 
