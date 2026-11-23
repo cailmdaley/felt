@@ -18,18 +18,30 @@
 // unreachable for the tailnet lease, SHUTTLE_DEPLOY_TAILNET_LEASE_SECONDS (300
 // by default), after which the run, hearing no polls, cancels itself. A run
 // without --attached is a short probe and is given ten minutes.
+//
+// For https:// targets, the relay honors the same Tailscale dial settings as
+// the daemon and shuttle CLI: defaults.tailscale_socket or defaults.https_proxy
+// in remotes.json (SHUTTLE_REMOTES_FILE), or on Linux the private default
+// $HOME/.local/state/tailscale/tailscaled.sock when its ancestry is owned by
+// the current user and not group- or world-writable.
 package main
 
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -37,11 +49,327 @@ import (
 	"time"
 )
 
-// A poll that hangs counts as a failed one; an upload of a release is slow.
+const (
+	systemTailscaleSocket      = "system"
+	defaultTailscaleSocketPath = ".local/state/tailscale/tailscaled.sock"
+)
+
 var (
+	// A poll that hangs counts as a failed one; an upload of a release is slow.
 	client   = &http.Client{Timeout: 10 * time.Second}
 	uploader = &http.Client{Timeout: 30 * time.Minute}
+
+	remoteSocketPattern = regexp.MustCompile(`^/[A-Za-z0-9._/@+-]+$`)
 )
+
+type remotesDefaults struct {
+	HTTPSProxy      string `json:"https_proxy"`
+	TailscaleSocket string `json:"tailscale_socket"`
+}
+
+type remotesDoc struct {
+	Defaults *remotesDefaults `json:"defaults"`
+}
+
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) {
+	return c.r.Read(p)
+}
+
+func validateSocketPath(path string) error {
+	if !remoteSocketPattern.MatchString(path) {
+		return fmt.Errorf("must be an absolute path of letters, digits and . _ / @ + - only")
+	}
+	if filepath.Clean(path) != path {
+		return fmt.Errorf("must be a clean path (no '..', '.', '//' or trailing '/')")
+	}
+	return nil
+}
+
+func parseHTTPSProxy(raw string) (*url.URL, error) {
+	rest := strings.TrimSpace(raw)
+	if rest == "" {
+		return nil, nil
+	}
+	if i := strings.Index(rest, "://"); i >= 0 {
+		s := strings.ToLower(rest[:i])
+		if s != "http" && s != "https" {
+			return nil, fmt.Errorf("scheme %q is not http or https", rest[:i])
+		}
+		rest = rest[i+len("://"):]
+	}
+	if strings.ContainsAny(rest, "/?#") {
+		return nil, fmt.Errorf("a proxy address has no path, query, or fragment")
+	}
+	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	host, portText, err := net.SplitHostPort(rest)
+	if err != nil {
+		return nil, fmt.Errorf("want host:port with the port written out")
+	}
+	if host == "" {
+		return nil, fmt.Errorf("no host")
+	}
+	if portText == "" || strings.TrimLeft(portText, "0123456789") != "" {
+		return nil, fmt.Errorf("port %q must be in 1..65535", portText)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return nil, fmt.Errorf("port %q must be in 1..65535", portText)
+	}
+	return &url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port))}, nil
+}
+
+func unsafeDirReason(info os.FileInfo, euid int) string {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if ok && int(st.Uid) != euid && st.Uid != 0 {
+		return fmt.Sprintf("owned by uid %d", st.Uid)
+	}
+	mode := info.Mode()
+	if mode.Perm()&0o022 != 0 && mode&os.ModeSticky == 0 {
+		return fmt.Sprintf("mode %04o is group- or other-writable without the sticky bit", mode.Perm())
+	}
+	return ""
+}
+
+func literalSocketProblem(path, top string, euid int) string {
+	rel, err := filepath.Rel(top, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return fmt.Sprintf("%s is not under %s", path, top)
+	}
+	info, err := os.Stat(top)
+	if err != nil {
+		return fmt.Sprintf("%s: %v", top, err)
+	}
+	if !info.IsDir() {
+		return top + ": not a directory"
+	}
+	if reason := unsafeDirReason(info, euid); reason != "" {
+		return fmt.Sprintf("%s: %s", top, reason)
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	current := top
+	for i, name := range parts {
+		current = filepath.Join(current, name)
+		info, err := os.Lstat(current)
+		switch {
+		case err != nil:
+			return fmt.Sprintf("%s: %v", current, err)
+		case info.Mode()&os.ModeSymlink != 0:
+			return current + " is a symlink"
+		case i < len(parts)-1:
+			if !info.IsDir() {
+				return current + ": not a directory"
+			}
+			if reason := unsafeDirReason(info, euid); reason != "" {
+				return fmt.Sprintf("%s: %s", current, reason)
+			}
+		case info.Mode()&os.ModeSocket == 0:
+			return current + ": not a Unix socket"
+		default:
+			if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != euid {
+				return fmt.Sprintf("%s: owned by uid %d, not this uid %d", current, st.Uid, euid)
+			}
+		}
+	}
+	return ""
+}
+
+func readRemotesDefaults(path string) (remotesDefaults, error) {
+	if path == "" {
+		return remotesDefaults{}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return remotesDefaults{}, nil
+		}
+		return remotesDefaults{}, err
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] == '[' {
+		var list []json.RawMessage
+		if len(trimmed) > 0 {
+			if err := json.Unmarshal(trimmed, &list); err != nil {
+				return remotesDefaults{}, fmt.Errorf("%s: %w", path, err)
+			}
+		}
+		return remotesDefaults{}, nil
+	}
+	var doc remotesDoc
+	if err := json.Unmarshal(trimmed, &doc); err != nil {
+		return remotesDefaults{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if doc.Defaults == nil {
+		return remotesDefaults{}, nil
+	}
+	return *doc.Defaults, nil
+}
+
+func resolveDialSettings(remotesFile, home, goos string, euid int) (socketPath string, proxyURL *url.URL, warning string, err error) {
+	if remotesFile == "" && home != "" {
+		remotesFile = filepath.Join(home, ".config", "shuttle", "remotes.json")
+	}
+	defaults, err := readRemotesDefaults(remotesFile)
+	if err != nil {
+		return "", nil, "", err
+	}
+	proxyURL, err = parseHTTPSProxy(defaults.HTTPSProxy)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("defaults.https_proxy %q: %w", strings.TrimSpace(defaults.HTTPSProxy), err)
+	}
+	rawSock := strings.TrimSpace(defaults.TailscaleSocket)
+	switch rawSock {
+	case systemTailscaleSocket:
+		return "", proxyURL, "", nil
+	case "":
+		if proxyURL != nil {
+			return "", proxyURL, "", nil
+		}
+		if goos != "linux" || !filepath.IsAbs(home) {
+			return "", nil, "", nil
+		}
+		candidate := filepath.Join(home, defaultTailscaleSocketPath)
+		if validateSocketPath(candidate) != nil {
+			return "", nil, "", nil
+		}
+		if _, err := os.Lstat(candidate); err != nil {
+			return "", nil, "", nil
+		}
+		if reason := literalSocketProblem(candidate, home, euid); reason != "" {
+			return "", nil, fmt.Sprintf("default tailscale LocalAPI socket %s refused: %s", candidate, reason), nil
+		}
+		return candidate, nil, "", nil
+	default:
+		if err := validateSocketPath(rawSock); err != nil {
+			return "", nil, "", fmt.Errorf("defaults.tailscale_socket %q: %w", rawSock, err)
+		}
+		if proxyURL != nil {
+			return "", nil, "", errors.New("defaults.https_proxy and defaults.tailscale_socket are mutually exclusive")
+		}
+		return rawSock, nil, "", nil
+	}
+}
+
+func headerHasToken(values []string, want string) bool {
+	for _, v := range values {
+		for _, tok := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(tok), want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dialLocalAPI(ctx context.Context, socketPath, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if strings.ContainsAny(host, "\r\n") || strings.ContainsAny(port, "\r\n") {
+		return nil, fmt.Errorf("invalid dial target %q", addr)
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("localapi connect %s: %w", socketPath, err)
+	}
+	if deadline, ok := dialCtx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	stop := context.AfterFunc(dialCtx, func() {
+		_ = conn.SetDeadline(time.Now())
+	})
+	defer stop()
+
+	reqText := fmt.Sprintf(
+		"POST /localapi/v0/dial HTTP/1.1\r\n"+
+			"Host: local-tailscaled.sock\r\n"+
+			"Upgrade: ts-dial\r\n"+
+			"Connection: upgrade\r\n"+
+			"Dial-Host: %s\r\n"+
+			"Dial-Port: %s\r\n"+
+			"Sec-Tailscale: localapi\r\n"+
+			"Content-Length: 0\r\n\r\n",
+		host, port,
+	)
+	if _, err := io.WriteString(conn, reqText); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("localapi write: %w", err)
+	}
+	br := bufio.NewReader(conn)
+	dummyReq, _ := http.NewRequest("POST", "http://local-tailscaled.sock/localapi/v0/dial", nil)
+	resp, err := http.ReadResponse(br, dummyReq)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("localapi read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols ||
+		!headerHasToken(resp.Header.Values("Upgrade"), "ts-dial") ||
+		!headerHasToken(resp.Header.Values("Connection"), "upgrade") {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		conn.Close()
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			detail = resp.Status
+		}
+		return nil, fmt.Errorf("localapi dial %s: HTTP %d: %s", addr, resp.StatusCode, detail)
+	}
+	if !stop() && dialCtx.Err() != nil {
+		conn.Close()
+		return nil, dialCtx.Err()
+	}
+	_ = conn.SetDeadline(time.Time{})
+	if br.Buffered() > 0 {
+		return &bufferedConn{Conn: conn, r: br}, nil
+	}
+	return conn, nil
+}
+
+func transportForBase(base, remotesFile, home, goos string, euid int) (*http.Transport, error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return nil, err
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if !strings.EqualFold(u.Scheme, "https") {
+		return tr, nil
+	}
+	sock, proxyURL, warning, err := resolveDialSettings(remotesFile, home, goos, euid)
+	if err != nil {
+		return nil, err
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, "deploy-relay: warning:", warning)
+	}
+	tr.Proxy = nil
+	if sock != "" {
+		tr.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return dialLocalAPI(ctx, sock, addr)
+		}
+	} else if proxyURL != nil {
+		tr.Proxy = http.ProxyURL(proxyURL)
+	}
+	return tr, nil
+}
+
+func initClients(base string) error {
+	tr, err := transportForBase(base, os.Getenv("SHUTTLE_REMOTES_FILE"), os.Getenv("HOME"), runtime.GOOS, os.Geteuid())
+	if err != nil {
+		return err
+	}
+	client = &http.Client{Timeout: 10 * time.Second, Transport: tr}
+	uploader = &http.Client{Timeout: 30 * time.Minute, Transport: tr}
+	return nil
+}
 
 // call makes one request and fails unless its status is one of ok.
 func call(c *http.Client, method, url string, body io.Reader, ok ...int) ([]byte, error) {
@@ -203,15 +531,21 @@ func main() {
 	code := 0
 	switch {
 	case len(args) == 2 && args[0] == "create":
-		err = create(args[1])
+		if err = initClients(args[1]); err == nil {
+			err = create(args[1])
+		}
 	case len(args) == 5 && args[0] == "put":
-		var file *os.File
-		if file, err = os.Open(args[4]); err == nil {
-			err = put(args[1], args[2], args[3], file)
-			file.Close()
+		if err = initClients(args[1]); err == nil {
+			var file *os.File
+			if file, err = os.Open(args[4]); err == nil {
+				err = put(args[1], args[2], args[3], file)
+				file.Close()
+			}
 		}
 	case (len(args) == 4 || len(args) == 5 && args[4] == "--attached") && args[0] == "run":
-		code, err = run(args[1], args[2], args[3], len(args) == 5)
+		if err = initClients(args[1]); err == nil {
+			code, err = run(args[1], args[2], args[3], len(args) == 5)
+		}
 	default:
 		err = errors.New("usage: deploy-relay create URL | put URL RUN NAME FILE | run URL RUN LAUNCH [--attached]")
 	}

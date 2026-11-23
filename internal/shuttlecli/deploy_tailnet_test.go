@@ -1,9 +1,11 @@
 package shuttlecli
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -185,5 +187,68 @@ func TestDeployTailnetCancelsWithItsDeployer(t *testing.T) {
 	deployAwait(t, "lock free: "+log, func() bool { return f.lockFree(t) })
 	if strings.Contains(fleetRead(f.events), "cycle\n") {
 		t.Fatalf("cancelled deploy cycled the daemon: %s", fleetRead(f.events))
+	}
+}
+
+// A tailnet deploy against an https:// remote whose host does not resolve in
+// OS DNS dials through defaults.tailscale_socket via LocalAPI /localapi/v0/dial
+// rather than failing on host DNS lookup.
+func TestDeployTailnetDialsLocalAPISocket(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	controller := filepath.Join(f.repo, "daemon/lib/shuttle_web/controllers/deploy_run_controller.ex")
+	os.MkdirAll(filepath.Dir(controller), 0o700)
+	if err := os.WriteFile(controller, []byte("# routes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.git(t, f.repo, "add", ".")
+	f.git(t, f.repo, "commit", "-m", "routes")
+	f.git(t, f.repo, "push")
+	f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
+	sock := filepath.Join(t.TempDir(), "tailscaled.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	var gotHost, gotPort string
+	var mu sync.Mutex
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				req, err := http.ReadRequest(bufio.NewReader(conn))
+				if err != nil {
+					return
+				}
+				mu.Lock()
+				gotHost = req.Header.Get("Dial-Host")
+				gotPort = req.Header.Get("Dial-Port")
+				mu.Unlock()
+				msg := "simulated peer unreachable"
+				fmt.Fprintf(conn, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: %d\r\n\r\n%s", len(msg), msg)
+			}(c)
+		}
+	}()
+	fleet := fmt.Sprintf(`{"defaults":{"tailscale_socket":%q},"remotes":[{"name":"fake","ssh":"fake","url":"https://fake.tailnet.invalid","checkout":%q,"build_ui":false}]}`, sock, f.remote)
+	if err := os.WriteFile(filepath.Join(f.root, "remotes.json"), []byte(fleet), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd, log := f.start(t, "tailnet-localapi")
+	if err := f.deployWait(t, cmd); err == nil {
+		t.Fatalf("expected failure from 502 fake localapi, got nil: %s", fleetRead(log))
+	}
+	out := fleetRead(log)
+	if !strings.Contains(out, "HTTP 502: simulated peer unreachable") {
+		t.Fatalf("expected LocalAPI 502 in log, got:\n%s", out)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotHost != "fake.tailnet.invalid" || gotPort != "443" {
+		t.Fatalf("LocalAPI saw Dial-Host=%q Dial-Port=%q, want fake.tailnet.invalid:443", gotHost, gotPort)
 	}
 }
