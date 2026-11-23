@@ -5,6 +5,7 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,47 +95,76 @@ func TestThreadRemoteDirectoryValidation(t *testing.T) {
 	}
 }
 
+// An untracked draft moves to its owner; a committed one stays on disk, since
+// deleting it would leave a tracked deletion that conflicts when the owner's
+// report syncs back to the same path.
 func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 	t.Parallel()
-	env := remoteLifecycleEnv(t)
-	dir, st := newStore(t)
-	seedShuttleRole(t, st, "parent", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "hub", "project_dir": t.TempDir(), "agent": "claude-opus"}, nil)
-	var create requestBodies
-	ownerPath := filepath.Join(t.TempDir(), "owner.md")
-	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/document-changed":
-			w.WriteHeader(http.StatusOK)
-		case "/api/v1/project-dir/resolve":
-			_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
-		case "/api/v1/lifecycle":
-			workerFiberMissing(w)
-		case "/api/v1/state/composite":
-			fmt.Fprint(w, `{"remotes":{"worker":{"snapshot":{"boot_quarantine":true}}}}`)
-		case "/api/v1/fiber/create":
-			create.record(t, r)
-			payload := create.last()
-			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q,"path":%q,"host":"worker","status":"active"}`, payload["id"], payload["uid"], ownerPath)
-		default:
-			t.Errorf("unexpected request %s", r.URL.String())
-			http.NotFound(w, r)
-		}
-	}))
-	if _, _, err := executeIn(t, env, dir, "thread", "parent", "Measure", "--host", "worker", "--project-dir", "/remote/project", "--disabled"); err != nil {
-		t.Fatal(err)
-	}
-	draft := mustRead(t, st, "parent/measure")
-	if draft.Status != felt.StatusOpen {
-		t.Fatalf("draft status = %s", draft.Status)
-	}
-	if _, _, err := executeIn(t, env, dir, "resume", "parent/measure"); err != nil {
-		t.Fatal(err)
-	}
-	if got := create.last(); got["origin"] != "worker" || got["id"] != "parent/measure" {
-		t.Fatalf("owner create payload = %#v", got)
-	}
-	if _, err := st.Read("parent/measure"); err == nil {
-		t.Fatal("local draft remains after transfer")
+	for _, committed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "untracked", true: "committed"}[committed], func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			dir, st := newStore(t)
+			seedShuttleRole(t, st, "parent", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "hub", "project_dir": t.TempDir(), "agent": "claude-opus"}, nil)
+			var create requestBodies
+			ownerPath := filepath.Join(t.TempDir(), "owner.md")
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/document-changed":
+					w.WriteHeader(http.StatusOK)
+				case "/api/v1/project-dir/resolve":
+					_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
+				case "/api/v1/lifecycle":
+					workerFiberMissing(w)
+				case "/api/v1/state/composite":
+					fmt.Fprint(w, `{"remotes":{"worker":{"snapshot":{"boot_quarantine":true}}}}`)
+				case "/api/v1/fiber/create":
+					create.record(t, r)
+					payload := create.last()
+					_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q,"path":%q,"host":"worker","status":"active"}`, payload["id"], payload["uid"], ownerPath)
+				default:
+					t.Errorf("unexpected request %s", r.URL.String())
+					http.NotFound(w, r)
+				}
+			}))
+			if _, _, err := executeIn(t, env, dir, "thread", "parent", "Measure", "--host", "worker", "--project-dir", "/remote/project", "--disabled"); err != nil {
+				t.Fatal(err)
+			}
+			draft := mustRead(t, st, "parent/measure")
+			if draft.Status != felt.StatusOpen {
+				t.Fatalf("draft status = %s", draft.Status)
+			}
+			if committed {
+				for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-q", "-m", "draft"}} {
+					if err := runGit(dir, args...); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if _, _, err := executeIn(t, env, dir, "resume", "parent/measure"); err != nil {
+				t.Fatal(err)
+			}
+			if got := create.last(); got["origin"] != "worker" || got["id"] != "parent/measure" {
+				t.Fatalf("owner create payload = %#v", got)
+			}
+			_, err := os.Stat(draft.Path)
+			if !committed {
+				if err == nil {
+					t.Fatal("untracked local draft remains after transfer")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("committed local draft removed: %v", err)
+			}
+			status, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(status) != 0 {
+				t.Fatalf("resume left the checkout dirty:\n%s", status)
+			}
+		})
 	}
 }
 

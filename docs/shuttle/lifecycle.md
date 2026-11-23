@@ -370,7 +370,7 @@ Use a store containing the constitution and a CLI that can route to both owners.
    Keep `status: open` and preserve the intrinsic `id:` UID.
 3. Run `shuttle resume <fiber>` through the destination.
    If the destination authoritatively reports the draft missing, the CLI transfers it through the create API, preserving its UID.
-   It removes the local draft only after the response confirms the identity, owner, armed status and destination path.
+   It removes an untracked local draft only after the response confirms the identity, owner, armed status and destination path; a draft Git already tracks stays in place, so the owner's copy syncs over it without a conflicting deletion.
    A separate Git sync is unnecessary for that path; if the destination already has a copy, synchronize the disarmed document there before resuming it.
    A duplicate UID is refused rather than overwritten.
 4. Confirm the destination's persisted document and execution state, then commit and sync the archive so every copy records the destination owner.

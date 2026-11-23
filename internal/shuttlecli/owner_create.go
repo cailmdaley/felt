@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -76,6 +77,9 @@ type movedDraftError struct{ message string }
 func (e movedDraftError) Error() string { return e.message }
 
 // moveRemoteDraft removes the source only after the owner confirms creation.
+// A draft Git already tracks stays on disk: deleting it would leave a tracked
+// deletion that conflicts when the owner's report syncs back to the same path,
+// and the file names the owner as its host, so no other daemon dispatches it.
 func (a *app) moveRemoteDraft(owner string, f *felt.Felt, block *shuttle.Block) error {
 	path, err := a.createRemoteFiberWithPath(owner, f, block)
 	if err != nil {
@@ -91,6 +95,10 @@ func (a *app) moveRemoteDraft(owner string, f *felt.Felt, block *shuttle.Block) 
 	ownerInfo, err := os.Stat(path)
 	if err != nil && !os.IsNotExist(err) {
 		return movedDraftError{fmt.Sprintf("created %s on %s, but cannot inspect owner path: %v", f.ID, owner, err)}
+	}
+	if _, tracked := a.gitOutput(filepath.Dir(f.Path), "ls-files", "--error-unmatch", "--", filepath.Base(f.Path)); tracked {
+		fmt.Fprintf(a.env.Stdout, "created %s on %s and armed it; its committed local draft stays in place for the owner's copy to sync over\n", f.ID, owner)
+		return nil
 	}
 	if err != nil || !os.SameFile(localInfo, ownerInfo) {
 		if err := os.Remove(f.Path); err != nil {
