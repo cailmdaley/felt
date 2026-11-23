@@ -43,8 +43,20 @@ func newDeployFleet(t *testing.T) *deployFleet {
 	}
 	t.Cleanup(func() {
 		// Signal every gated fixture wait loop to exit promptly if a test
-		// aborted or timed out before opening its gates.
+		// aborted or timed out before opening its gates, then wait for any
+		// remote transaction holding this fleet's host lock to exit before
+		// TempDir removes the fixture directory.
 		_ = os.WriteFile(filepath.Join(f.root, "abort"), nil, 0600)
+		lockPath := filepath.Join(f.home, ".shuttle/deploy.lock")
+		if _, err := os.Stat(lockPath); err == nil {
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				if f.lockFree(t) {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
 	})
 	f.repo = filepath.Join(f.root, "repo")
 	f.remote = filepath.Join(f.root, "remote")
@@ -85,8 +97,8 @@ func newDeployFleet(t *testing.T) *deployFleet {
 	write(filepath.Join(f.repo, "scripts/ci-status-hook.sh"), `#!/bin/sh
 if [ "${CI_GATE:-}" = 1 ]; then
  touch "$FLEET_ROOT/ci-entered"
- n=0; while [ ! -f "$FLEET_ROOT/ci-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
- [ ! -f "$FLEET_ROOT/abort" ] || exit 1
+ n=0; while [ -d "$FLEET_ROOT" ] && [ ! -f "$FLEET_ROOT/ci-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+ [ -d "$FLEET_ROOT" ] && [ ! -f "$FLEET_ROOT/abort" ] || exit 1
 fi
 `)
 	write(filepath.Join(f.repo, "tracked"), "target\n")
@@ -98,8 +110,8 @@ if (: >&3) 2>/dev/null || (: >&4) 2>/dev/null; then echo launcher-inherited-depl
 bash -c 'trap -p TERM' > "$FLEET_ROOT/launcher-term-trap"
 if [ "${ACTIVATION_GATE:-0}" = 1 ]; then
  touch "$FLEET_ROOT/activation-entered"
- n=0; while [ ! -f "$FLEET_ROOT/activation-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
- [ ! -f "$FLEET_ROOT/abort" ] || exit 1
+ n=0; while [ -d "$FLEET_ROOT" ] && [ ! -f "$FLEET_ROOT/activation-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+ [ -d "$FLEET_ROOT" ] && [ ! -f "$FLEET_ROOT/abort" ] || exit 1
 fi
 sha=$(git -C "${TEST_RELEASE%/bin/*}" rev-parse HEAD)
 printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","incarnation":"fixture-incarnation","contract":{"ok":true},"reconciliation_hold":null,"ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
@@ -165,8 +177,8 @@ done
 case "$*" in *SHUTTLE_DEPLOY_DONE_*) case "$*" in *BatchMode=yes*) ;; *) echo transaction-ssh-may-prompt >&2; exit 93;; esac;; esac
 if [ "${SSH_GATE:-0}" = 1 ]; then
  touch "$FLEET_ROOT/ssh-entered"
- n=0; while [ ! -f "$FLEET_ROOT/ssh-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
- [ ! -f "$FLEET_ROOT/abort" ] || exit 1
+ n=0; while [ -d "$FLEET_ROOT" ] && [ ! -f "$FLEET_ROOT/ssh-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+ [ -d "$FLEET_ROOT" ] && [ ! -f "$FLEET_ROOT/abort" ] || exit 1
 fi
 while :; do case "${1:-}" in -o) shift 2;; -n) shift;; *) break;; esac; done
 shift
@@ -184,8 +196,8 @@ case "$1" in
   echo "umask $(umask)" >> "$EVENTS"
   echo "build $(git rev-parse HEAD) $*" >> "$EVENTS"
   touch "$FLEET_ROOT/build-entered"
-  n=0; while [ ! -f "$BUILD_GATE" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
-  [ ! -f "$FLEET_ROOT/abort" ] || exit 1
+  n=0; while [ -d "$FLEET_ROOT" ] && [ ! -f "$BUILD_GATE" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+  [ -d "$FLEET_ROOT" ] && [ ! -f "$FLEET_ROOT/abort" ] || exit 1
   [ "${FAIL_BUILD:-0}" != 1 ] || exit 13
   generation=$(mktemp -d "$PWD/bin/rel.generation-XXXXXXXX")
   ln -s "${generation##*/}" bin/rel-built
@@ -776,25 +788,39 @@ bad() { echo "$*" >&2; }
 }
 
 // Regression: an aborted or failed deploy test must not leave its deployer
-// process group or remote lock-holding transaction tree running after cleanup.
+// process group or remote lock-holding transaction tree running after cleanup,
+// including when abandoned during activation where lifeline cancellation is deferred.
 func TestDeployCleanupReapsAbandonedProcessGroups(t *testing.T) {
 	t.Parallel()
-	var deployerPGID, holderPGID int
-	t.Run("abandoned", func(t *testing.T) {
-		f := newDeployFleet(t)
-		cmd, log := f.start(t, "abandoned")
-		deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
-		deployerPGID = cmd.Process.Pid
-		holderPGID = f.lockHolder(t)
-		// Return without releasing f.gate or calling deployWait, simulating an
-		// aborted test whose cleanup must tear down every spawned process group.
-	})
-	if deployerPGID <= 0 || holderPGID <= 0 {
-		t.Fatalf("missing captured pgids: deployer=%d holder=%d", deployerPGID, holderPGID)
-	}
-	for name, pgid := range map[string]int{"deployer": deployerPGID, "holder": holderPGID} {
-		deployAwait(t, name+" process group gone", func() bool {
-			return syscall.Kill(-pgid, 0) == syscall.ESRCH
+	for _, stage := range []string{"build", "activation"} {
+		t.Run(stage, func(t *testing.T) {
+			t.Parallel()
+			var deployerPGID, holderPGID int
+			t.Run("abandoned", func(t *testing.T) {
+				f := newDeployFleet(t)
+				var extra []string
+				if stage == "activation" {
+					fleetTouch(t, f.gate)
+					extra = append(extra, "ACTIVATION_GATE=1")
+				}
+				cmd, log := f.start(t, "abandoned-"+stage, extra...)
+				if stage == "build" {
+					deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+				} else {
+					deployAwait(t, "activation: "+log, func() bool { _, err := os.Stat(filepath.Join(f.root, "activation-entered")); return err == nil })
+				}
+				deployerPGID = cmd.Process.Pid
+				holderPGID = f.lockHolder(t)
+				// Return without releasing the active gate or calling deployWait.
+			})
+			if deployerPGID <= 0 || holderPGID <= 0 {
+				t.Fatalf("missing captured pgids: deployer=%d holder=%d", deployerPGID, holderPGID)
+			}
+			for name, pgid := range map[string]int{"deployer": deployerPGID, "holder": holderPGID} {
+				deployAwait(t, name+" process group gone", func() bool {
+					return syscall.Kill(-pgid, 0) == syscall.ESRCH
+				})
+			}
 		})
 	}
 }
