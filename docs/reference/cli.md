@@ -272,6 +272,8 @@ is then given back to the human rather than closed.
 | `shuttle ps` | Live terminal worker sessions |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon, carrying this host's copy (`--carry` insists on it over a copy the owner holds), and an owner without the fiber has it created from that copy first. `--message <text>` or `--message-file <path>` adds a launch directive |
+| `shuttle capture <prompt> --project-dir <dir>` | Launch an agent from a prompt; it files and claims its own fiber (`--host` launches on another host, where `--project-dir` then is; `--agent`, `--effort`, `--chrome`; `--json` prints the daemon's answer) |
+| `shuttle kill <fiber>` | Stop a fiber's live worker through its owner, writing no status or verdict: a fiber still active stays armed, so its daemon may launch a fresh worker, where `rest` and `close` settle it. A fiber with no worker is not an error (`--json` gives `{fiber_id, killed, session}`) |
 | `shuttle tapestry <fiber>` | Report a fiber's `tapestry.html`: whether it exists, its path here, the URL that serves it, and the thread page (`--path`, `--url`, `--open`, `--json`) |
 | `shuttle sent-files ls <fiber>` | List the files a fiber's workers sent, newest first, with caption and URL (`--json`) |
 | `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With `--since <time>` (what `shuttle find --since` takes: `30d`, `12h`, a date, or an RFC3339 time), list every Claude, Codex, Pi and Antigravity session on this host — or on `--host <host>`, through that host's daemon — with a transcript message since then, live or ended, newest first: last activity, `live`, harness, the `shuttle show` address on that host, and the fibers it worked on (`--harness`, `--json`). With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
@@ -304,7 +306,7 @@ is then given back to the human rather than closed.
 | `shuttle attach <fiber>` | Attach to tmux or ask the local daemon to open a Rex worker in the Rex app; recreate a missing terminal Codex viewer of the same owned thread without starting a turn. Remote Rex has no SSH TTY renderer |
 | `shuttle session-name <fiber>` | Print the canonical worker name for a fiber |
 
-`attach`, `session-name`, `tapestry`, `sent-files ls`, and fiber message
+`attach`, `session-name`, `kill`, `tapestry`, `sent-files ls`, and fiber message
 targets require one exact match across configured stores; they refuse guessed paths and duplicate matches.
 
 ### `shuttle change <fiber> [--pr N | --base B | --list]`
