@@ -37,6 +37,14 @@ Read https://cailmdaley.github.io/felt/shuttle/agent-setup/ and help me set up S
 The [setup guide](shuttle/setup.md) explains what to expect.
 To use felt for notes on its own, follow the commands below.
 
+To try things out first, give your agent this prompt instead:
+
+```{.text .agent-prompt}
+Read https://cailmdaley.github.io/felt/llms.txt and walk me through an interactive, hands-on tutorial of felt and Shuttle. Ask what I want to learn first, use a disposable scratch folder, and use the cheapest available model for any demo threads.
+```
+
+The [tutorial page](tutorial.md) lists its seven modules; your agent reads them from [`llms.txt`](llms.txt).
+
 ## Keep a decision beside your project
 
 Install felt on macOS or Linux:
@@ -108,6 +116,9 @@ Its browser **board** lets you read and edit tasks, follow running agents, and r
 Agents write results and continuation notes back into the fiber, so another session can continue unfinished work.
 You can run this on one machine or [connect several machines](shuttle/remotes.md).
 
+You can do all of it from a terminal: the `shuttle` command launches, steers and reviews work, and the board is [one interface over it](shuttle/ui-architecture.md).
+With [ambient mode](shuttle/setup.md#ambient-mode) on, an agent session you started yourself can join as a task once it turns into substantive work.
+
 <video controls preload="metadata" playsinline
   poster="assets/shuttle-board-tour-poster.jpg"
   aria-label="Narrated tour of the Shuttle board: creating a task, starting a new session or resuming one, opening a worker with Aloft, and reviewing a result">
@@ -126,6 +137,7 @@ Shuttle's service and board are optional; recording and searching notes with fel
 
 | Your next step | Guide |
 |---|---|
+| Learn felt and Shuttle hands-on with your agent | [Interactive tutorial](tutorial.md) |
 | Install felt and work through a first note | [Getting started](getting-started.md) |
 | Decide when to track a task, nest notes, or link them | [Organizing](concepts/organizing.md) |
 | Understand the file format | [Fibers](concepts/fibers.md) and [Frontmatter](concepts/frontmatter.md) |

@@ -50,6 +50,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Interactive Tutorial: tutorial.md
   - Getting Started: getting-started.md
   - shuttle orchestration:
       - Overview: shuttle/index.md
@@ -63,6 +64,7 @@ nav:
       - Constitutions: shuttle/constitutions.md
       - Lifecycle: shuttle/lifecycle.md
       - The board: shuttle/board.md
+      - "UI layers & SDK": shuttle/ui-architecture.md
       - Cycles and eras: shuttle/cycles.md
       - Telemetry and the ledgers: shuttle/telemetry.md
   - Concepts:
@@ -81,6 +83,8 @@ nav:
       - Dispatch internals: dev/dispatch.md
       - Harnesses: dev/harnesses.md
       - Operating the daemon: dev/operating.md
+      - The board's elements: dev/elements.md
+      - UI SDK in the board: dev/ui-sdk.md
       - Event stream and ledgers: dev/event-stream.md
       - The inbox: dev/inbox.md
       - Family board: dev/family-board.md

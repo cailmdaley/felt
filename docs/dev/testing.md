@@ -115,7 +115,7 @@ headless screenshot. Run a CLI verb from the built binary against a
 temporary store. Boot a daemon change as a private scratch daemon
 (`scripts/scratch-daemon.sh`) before it lands, then read the fresh daemon's
 answer in its deploy before reporting it landed. The recipes, timed, are the
-repo's `verify` skill ([`.agents/skills/verify/SKILL.md`](../../.agents/skills/verify/SKILL.md)),
+repo's `verify` skill ([`.agents/skills/verify/SKILL.md`](https://github.com/cailmdaley/felt/blob/main/.agents/skills/verify/SKILL.md)),
 which Claude Code, Codex and Pi workers all load.
 
 **A new behavioural test takes its answer from outside the code.** It is one

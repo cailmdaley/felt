@@ -261,6 +261,29 @@ live worker's thread page beside it:
 `http://127.0.0.1:4000`. The daemon reads the key fresh. See
 [Thread pages beside workers](installation.md#thread-pages-beside-workers).
 
+## Ambient mode
+
+`host.json`'s `ambient` boolean lets a session you start yourself join Shuttle:
+
+```json
+{"class": "single-user", "ambient": true}
+```
+
+```bash
+shuttle host ambient        # on or off, and its source
+shuttle host ambient on     # write "ambient": true
+shuttle host ambient off
+```
+
+It is off by default.
+`SHUTTLE_AMBIENT` overrides the file (`1`, `true`, `on` or `yes`; `0`, `false`, `off` or `no`), and `shuttle host --json` reports the resolved value.
+A value in the file that isn't a boolean is refused.
+
+With it on, the start-of-session hook of an unattached agent session adds a short note: load the felt skill, and when the request turns into substantive work, run `shuttle adopt` with the session's own id, directory, store and terminal filled in.
+A session Shuttle launched gets no note, and neither does one whose daemon doesn't answer.
+Nothing is adopted until the agent runs the command.
+[Set up Shuttle](setup.md#ambient-mode) describes what adoption does.
+
 ## Store auto fast-forward
 
 `host.json`'s `auto_ff_stores` boolean controls whether `Shuttle.StoreSync`
@@ -620,7 +643,21 @@ The board is one UI over the daemon; you can serve your own beside it.
 Put a UI in `~/.config/shuttle/ui/<name>/`, with an `index.html` at its root.
 The daemon serves it at `/ui/<name>/` and reads its files on each request, so
 edits need no restart. The UI shares the daemon's origin and can write through
-its API; a page served from anywhere else can only read. Build it on the
-[core routes](../reference/api.md#core), which are the stable ones.
-Its files are served to whoever can reach the daemon; see
+its API; a page served from anywhere else can only read.
+
+The quickest start is the SDK every daemon serves at `/sdk/shuttle-sdk.js`:
+
+```html
+<script type="module">
+  import { ShuttleClient, ShuttleFeed, createThreadRow } from '/sdk/shuttle-sdk.js'
+</script>
+```
+
+It is one ES module with no build step and no styling of its own, and
+[UI layers and SDK](ui-architecture.md) holds a complete page to copy. You can
+also call the [core routes](../reference/api.md#core) directly; they are the
+stable ones, and `GET /api/v1/contract` describes them.
+
+A personal UI's files are served to whoever can reach the daemon, and code
+running in one can do anything its user can do through the API; see
 [Host classes and trust boundaries](#host-classes-and-trust-boundaries).

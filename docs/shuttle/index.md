@@ -11,6 +11,7 @@ Shuttle adds execution settings to selected fibers; your other fibers remain not
 
 [Set up Shuttle](setup.md) takes you from installation to a small task on one machine.
 You don't need a multi-machine setup to start.
+To learn by doing, ask your agent for the [interactive tutorial](../tutorial.md); it works in a disposable folder.
 
 ## From a written task to a result
 
@@ -73,6 +74,12 @@ felt preserves the `shuttle:` settings without interpreting them.
 The `shuttle` command validates them and manages the task's lifecycle.
 The document stays readable even without Shuttle running.
 
+## Bring in a session you already have
+
+Work often begins as an ordinary conversation with an agent.
+With [ambient mode](setup.md#ambient-mode) on, a Claude Code, Codex or Antigravity session can adopt itself into a fiber once that conversation turns into substantive work.
+The running session becomes the fiber's worker, with the same status, messages and review as one Shuttle launched.
+
 ## Follow the work on the board
 
 The daemon serves a browser board at `http://127.0.0.1:4000/` on a single-user machine.
@@ -82,7 +89,28 @@ It has two views:
 - **Channels:** one channel per line of work a constitution declares (`shuttle.channel`), and `#misc` for the rest, a short stream of what its chair and workers say to you, with their files, and a thread per worker. Any document opens in the reader, whose console docked under the fiber page carries its controls and opens the conversation.
 
 [The board guide](board.md) covers editing, review, and the controls in each view.
-The command line also supports task lifecycle operations if you prefer working from a terminal.
+
+## Work from a terminal
+
+The board is optional; the command line covers the same work:
+
+```sh
+shuttle status                      # tasks, and whether they can launch
+shuttle threads <fiber>             # what is working, asking or to be reviewed
+shuttle message <fiber> "…"         # steer a worker
+shuttle board <fiber>               # posts, questions and results in its family
+shuttle sent-files ls <fiber>       # files its workers sent, with captions and links
+shuttle tapestry <fiber> --open     # its report page
+shuttle close <fiber> --tempered=true
+```
+
+A **tapestry** is a page a worker keeps beside its fiber to show where the work stands.
+The [CLI reference](../reference/cli.md) lists every command.
+
+You can also build your own interface.
+[UI layers and SDK](ui-architecture.md) describes the three layers: the CLI and HTTP API, a set of unstyled UI parts, and the board's own views.
+
+## More than one machine
 
 Each machine runs its own daemon and owns the workers it starts.
 Connecting machines lets one board show their combined tasks and activity; this group of connected machines is called a **fleet**.
@@ -90,10 +118,12 @@ Connecting machines lets one board show their combined tasks and activity; this 
 
 ## Continue
 
+- [Interactive tutorial](../tutorial.md): learn with your agent, in a scratch folder.
 - [Set up Shuttle](setup.md): install the service and run your first task.
 - [Constitutions](constitutions.md): write goals and constraints an agent can act on.
 - [Lifecycle](lifecycle.md): pause, resume, review, and continue work.
 - [Opening conversations](conversations.md): return to workers in a terminal or browser.
+- [UI layers and SDK](ui-architecture.md): the CLI, the UI parts, and your own UI.
 - [Installation reference](installation.md): installing, upgrading and supervising the daemon.
 - [Configuration reference](configuration.md): stores, agents, host trust and remotes.
 - [Sharp edges](troubleshooting.md): what tends to go wrong, and the fix.

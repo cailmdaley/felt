@@ -110,7 +110,7 @@ none of them; shuttle validates and resolves its own block.
 
 The board writes these itself, through the daemon, which shells the same `felt
 edit --set` you would type. See [Cycles and eras](../shuttle/cycles.md) and
-[The board](../shuttle/board.md#horizon).
+[The board](../shuttle/board.md#desk-six-sections).
 
 ## Ids
 

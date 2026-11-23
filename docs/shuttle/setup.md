@@ -7,6 +7,7 @@ You can use Claude Code, Codex, or pi on macOS or Linux.
 Shuttle gives your agents a shared task board.
 The setup agent installs the background service, creates a place for notes if you don't have one, and puts its own setup task on the board.
 You don't need to organize a collection of notes or learn the command-line tools first.
+When it's running, the [interactive tutorial](../tutorial.md) teaches both with real commands in a scratch folder.
 
 ## 1. Give your agent this prompt
 
@@ -51,7 +52,34 @@ Ask your agent to prepare a small task in the project you want to use—for exam
 The setup guide includes [a worker check](agent-setup.md#verify-a-worker) so you can see the task start, open its conversation, and review the result.
 The setup card records which of these checks actually passed.
 
+## Ambient mode
+
+Ambient mode lets a Claude Code, Codex or Antigravity session you start yourself become a Shuttle thread.
+Turn it on for this machine:
+
+```sh
+shuttle host ambient on
+shuttle host ambient        # on or off, and where the setting comes from
+```
+
+Each new session is then told how to adopt itself when the conversation becomes substantive work; a quick question stays an ordinary conversation.
+The session does this with one command:
+
+```sh
+shuttle adopt <parent>/<slug> "<title>"
+```
+
+It creates the fiber, installs it as a draft, claims the live session and activates it, in that order.
+If the claim fails, the fiber stays an open draft, so Shuttle can't launch a second agent for the same work.
+Claiming needs the session to run in tmux or Rex, and the daemon to be running.
+
+An adopted session ends when it runs `shuttle close`, `handoff` or `rest` on its own fiber.
+While its fiber is active, Shuttle launches a successor if the session exits; `shuttle pause <fiber> --no-kill` parks the fiber and leaves the session running.
+Turn it off with `shuttle host ambient off`; [Ambient mode](configuration.md#ambient-mode) in the configuration reference covers overrides.
+
 ## Reference
+
+- [Interactive tutorial](../tutorial.md): learn felt and Shuttle hands-on with your agent.
 
 - [Agent setup guide](agent-setup.md): the readable checklist and commands behind onboarding.
 - [Opening conversations](conversations.md): terminal and browser choices.
