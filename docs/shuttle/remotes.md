@@ -10,13 +10,17 @@ A sleeping hub's board is unavailable until it wakes, so use an always-on hub if
 
 ## Choose a connection
 
-| Connection | A good fit when | What you maintain |
-|---|---|---|
-| **Tailscale** | You control personal machines and can join them to the same private network. | Tailscale login and Serve on each host; Shuttle discovers eligible peers. |
-| **SSH** | You already have SSH access, cannot install Tailscale, or use a shared server. | An SSH destination, a configured remote, and a supervised tunnel on the hub. |
+**Tailscale** is Shuttle's primary fleet transport.
+Use it whenever your machines can join the same private tailnet: daemons discover each other automatically and carry the board API, messaging, and deploys over HTTPS without maintaining per-host port forwards.
+**SSH tunnels** are the fallback for hosts where Tailscale cannot be installed or institutional policy does not permit it.
+
+| Connection | Tier | A good fit when | What you maintain |
+|---|---|---|---|
+| **Tailscale** | Primary | You control your machines and policy permits a private tailnet. | Tailscale login and Serve on each host; Shuttle discovers eligible peers automatically. |
+| **SSH** | Fallback | You cannot install Tailscale, institutional policy forbids it, or you only have SSH access to a shared server. | An SSH destination, a configured remote, and a supervised or manual port forward on the hub. |
 
 Tailscale carries the board and daemon API without an SSH tunnel.
-Opening a remote **terminal** still needs SSH, even when the board reaches that host over Tailscale.
+Opening a remote **tmux** terminal still needs SSH, even when the board reaches that host over Tailscale; remote Rex workers open through a Rex app connected to that host.
 Claude Remote Control and Codex remote access are separate ways to open the agent conversation; see [Opening conversations](conversations.md).
 
 A reachable Shuttle endpoint grants control of agents and files as its owner.

@@ -336,6 +336,19 @@ Desktop voice starts with `--system-audio` when enabled and toggles live through
 
 ## Platform story
 
+### Support tiers
+
+| Layer | Option | Tier | Role |
+|---|---|---|---|
+| **Fleet transport** | Tailscale (`tailscale serve` + peer discovery) | Primary | Automatic same-user discovery, HTTPS API routing, private LocalAPI dial bridges on shared hosts, and daemon-routed deploys. |
+| **Fleet transport** | SSH port forwarding / `shuttle tunnels` | Fallback | Multi-host connectivity for networks or clusters where Tailscale cannot be installed or institutional policy forbids it. |
+| **Host access** | Plain SSH | Baseline | First-time bootstrap, daemon-down recovery (`shuttle-deploy --ssh`), and attaching to remote tmux workers. |
+| **Terminal backend** | Rex | Primary | Rich workspace backend with constitution-family sessions, tree-ordered tabs, inline pages (`/thread`, `/desk`, `/map`), and focus tracking. |
+| **Terminal backend** | tmux | Portable baseline | Zero-dependency terminal backend for onboarding, headless or container environments, CI smoke tests, and cluster daemon respawn loops. |
+| **Conversation opener** | Rex app | Primary | Click-to-open for local and remote Rex workers, plus viewer tabs for local or remote tmux workers. |
+| **Conversation opener** | `shuttle attach` | Portable baseline | Attaches to tmux workers from any terminal emulator with no opener configuration. |
+| **Conversation opener** | Kitty remote control | Optional | Click-to-open from the board on tmux-only desktops where Rex is not used. |
+
 **Linux and macOS are both supported for single-host use.** One host runs the
 shuttle CLI, daemon, board, and workers on either OS. The keep-alive differs —
 a launchd LaunchAgent on macOS, a systemd user unit on Linux (`shuttle daemon
@@ -357,8 +370,7 @@ The worker name is Shuttle's identity; Rex's daemon-written session/window/block
 A Rex session holds a constitution family, resolved from the topmost constitution ancestor at launch, and each worker or viewer has its own window.
 Session labels name the family; tab labels and order present its fiber tree; block labels retain worker names for recovery.
 Shuttle closes worker windows independently and destroys only empty daemon-created sessions.
-`Shuttle.Opener` selects Rex or Kitty for the local display: Rex selects a local worker's session and window, and provides viewer windows for local or remote tmux sessions.
-Remote Rex opening is not supported.
+`Shuttle.Opener` selects Rex or Kitty for the local display: Rex reveals local workers, asks remote Rex owners to select their worker in an attached Rex app client, and opens viewer windows for local or remote tmux sessions.
 Remote Control and Hark use the selected terminal. On Rex, `Shuttle.RetainedTerminal` records immutable launch addresses, configuration metadata, exit receipts and output under the Shuttle data directory. A changed Rex server instance makes an old launch dead, even if Rex restored its block. Remote Control retries through its reconciler; an interrupted Hark capture remains failed with its transcript intact. Cluster daemon supervision loops retain tmux.
 
 Windows is unsupported.

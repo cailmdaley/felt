@@ -6,11 +6,14 @@ A live worker's pill names its turn (**question**, **idle**, **blocked**, **work
 
 ## Supported routes
 
+**Rex** is the primary rich workspace backend: it groups workers into constitution-family sessions with tree-ordered tabs, inline pages, and click-to-open from the board.
+**tmux** is the portable baseline: `shuttle attach <fiber>` works in any terminal emulator with no extra setup, and **Kitty** is an optional click-to-open integration for tmux-only desktops.
+
 | Worker | Runs in | Open it with |
 |---|---|---|
-| Claude Code | Selected host's tmux or Rex backend | `shuttle attach` or the board's terminal opener; Claude browser/app when Remote Control has connected. |
-| Codex | Selected host's tmux or Rex backend | `shuttle attach` or the board's terminal opener. |
-| Pi | Selected host's tmux or Rex backend | `shuttle attach` or the board's terminal opener. |
+| Claude Code | Selected host's Rex (primary) or tmux (portable baseline) backend | Rex app, `shuttle attach` in any terminal, optional Kitty opener on tmux desktops, or Claude browser/app when Remote Control has connected. |
+| Codex | Selected host's Rex (primary) or tmux (portable baseline) backend | Rex app, `shuttle attach` in any terminal, or optional Kitty opener on tmux desktops. |
+| Pi | Selected host's Rex (primary) or tmux (portable baseline) backend | Rex app, `shuttle attach` in any terminal, or optional Kitty opener on tmux desktops. |
 
 ## Choose where conversations open
 
