@@ -972,6 +972,43 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                RemoteFiberRegistry.feeds(second)
     end
 
+    test "warm, then cold with older rows, then warm-empty: ours are kept stale, then replaced",
+         %{dir: dir} do
+      url = Remote.fibers_url(candide())
+      MockClient.set(url, {:ok, feed_body([sample_fiber("newer")])})
+
+      pid = boot(dir, [])
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => %{stale: false, last_polled_at: warm_at}} =
+               RemoteFiberRegistry.feeds(pid)
+
+      # The owner restarts and serves its disk copy, older than what we just saw.
+      # We keep our rows, and they stop reading fresh even inside the window.
+      MockClient.set(
+        url,
+        {:ok,
+         Jason.encode!(%{
+           "host" => "candide",
+           "fibers" => [sample_fiber("older")],
+           "cache" => %{"state" => "cold"}
+         })}
+      )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => cold} = RemoteFiberRegistry.feeds(pid)
+      assert [%{"fiber" => %{"id" => "newer"}}] = cold.fibers
+      assert cold.stale == true
+      assert cold.last_polled_at == warm_at
+
+      # The owner warms with no rows: that observation replaces ours, fresh.
+      MockClient.set(url, {:ok, feed_body([])})
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => %{stale: false, fibers: []}} = RemoteFiberRegistry.feeds(pid)
+    end
+
     test "a cold empty 200 is not written, so a restart keeps the last WARM rows", %{dir: dir} do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})

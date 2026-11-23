@@ -190,12 +190,16 @@ defmodule Shuttle.RegistryCommon do
   # `$SHUTTLE_DATA_DIR/<registry dir>/<name>.json`, one file per remote, written
   # atomically through a `.tmp` rename. The caller supplies the already-encoded
   # map, so each registry keeps its own on-disk shape; only the mechanics are
-  # shared. Persistence is best-effort: a write failure is logged and swallowed
-  # because a cold cache costs one poll, while a crash here would take the
-  # registry down.
+  # shared. Persistence is best-effort: a write failure is logged and returned,
+  # never raised, because a cold cache costs one poll, while a crash here would
+  # take the registry down. A caller that retries reads the result.
 
-  @doc "Atomically write a map or JSON iodata as `<dir>/<name>.json`. `nil` dir → no-op."
-  @spec persist(String.t() | nil, String.t(), map() | iodata(), String.t()) :: :ok
+  @doc """
+  Atomically write a map or JSON iodata as `<dir>/<name>.json`. `nil` dir → no-op.
+  Returns `{:error, reason}` when the write fails.
+  """
+  @spec persist(String.t() | nil, String.t(), map() | iodata(), String.t()) ::
+          :ok | {:error, term()}
   def persist(nil, _name, _encoded, _label), do: :ok
 
   def persist(dir, name, encoded, label) do
@@ -222,7 +226,7 @@ defmodule Shuttle.RegistryCommon do
   rescue
     error ->
       Logger.debug("#{label}: persist for #{name} failed — #{inspect(error)}")
-      :ok
+      {:error, error}
   end
 
   @doc """

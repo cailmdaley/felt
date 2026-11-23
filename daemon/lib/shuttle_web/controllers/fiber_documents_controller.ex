@@ -94,11 +94,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
   end
 
   # The owner-only kanban feed, served ALWAYS from the poller's in-memory
-  # document cache — never a live `felt ls` in the request path. A cold cache
-  # returns the last warm feed persisted before the restart (or none) with
-  # `cache.state == "cold"` (200, not an error); only an unavailable poller
-  # (down / call timeout — near-impossible now that the reply is a pure state
-  # read) is a 503.
+  # document cache — never a live `felt ls` in the request path. Until a
+  # listing succeeds it returns the feed remembered from before the restart
+  # with `cache.state == "cold"`, or a cold cache's empty feed (200, not an
+  # error); only an unavailable poller (down / call timeout — near-impossible
+  # now that the reply is a pure state read) is a 503.
   #
   # Conditional fetch: a WARM response carries a strong `etag` computed from the
   # final stamped entries (any visible change changes it). A matching
@@ -364,10 +364,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp cache_state(_), do: nil
 
   # The local owner feed: same rows as `GET /api/v1/fibers?shuttle=true`, served
-  # from the poller's document cache. A cold cache yields the last warm feed
-  # persisted before the restart, marked stale, so the local rows stay on the
-  # board while the cache warms; an unavailable poller is stale and empty. The
-  # cache's own `cache.state` metadata rides through as the staleness signal.
+  # from the poller's document cache. Until a listing succeeds it yields the
+  # feed remembered from before the restart, marked stale, so the local rows
+  # stay on the board while the cache warms; an unavailable poller is stale and
+  # empty. The cache's own `cache.state` metadata rides through as the
+  # staleness signal.
   defp local_feed do
     case cached_owner_feed() do
       {:ok, %{host: host, fibers: entries} = body} ->
@@ -393,8 +394,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # poller's in-memory document cache (microseconds), never a LIVE `felt ls` per
   # store (5-12s on an overloaded shared login node, which blows the viewer's 8s
   # timeout and paints a spurious staleness badge). There is no live fallback:
-  # the reply is a pure read of GenServer state, so a cold cache is the last
-  # warm feed (or none) marked `cache.state == "cold"`, not a filesystem walk.
+  # the reply is a pure read of GenServer state, so until a listing succeeds
+  # the feed is the remembered one (or none) marked `cache.state == "cold"`,
+  # not a filesystem walk.
   #
   # The cached rows are ALREADY owner-filtered and runtime-stamped, but the cache
   # does NOT carry the parked/held overlay, so we map `Snapshot.put_held/2` over

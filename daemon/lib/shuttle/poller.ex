@@ -248,10 +248,15 @@ defmodule Shuttle.Poller do
       # per-request over the memoized base so live worker status stays
       # request-fresh.
       owner_feed_cache: nil,
-      # The owner feed's base rows as `Shuttle.Poller.LocalFeed` holds them on
-      # disk: read at boot, served (marked cold) to the board while the cache
-      # warms, then rewritten whenever a warm base changes. Never dispatched from.
+      # The owner feed's base rows remembered from `Shuttle.Poller.LocalFeed`
+      # at boot, served to the board until the first successful listing
+      # (`document_cache_refreshed_at`) replaces them. Never dispatched from.
       local_feed: [],
+      # The single writer that keeps the disk copy current once listings have
+      # succeeded (`Shuttle.Poller.LocalFeed.writer/1`), and the ref of its
+      # write task, at most one in flight.
+      local_feed_writer: Shuttle.Poller.LocalFeed.writer([]),
+      local_feed_task: nil,
       # When the document cache was last rebuilt (nil until the first poll warms
       # it) and how long that rebuild took. Surfaced in the owner-feed envelope's
       # `cache` metadata (state/refreshed_at/entries/last_refresh_ms) so a viewer
@@ -417,8 +422,8 @@ defmodule Shuttle.Poller do
   `cache.state` "cold" until the first poll warms it. Options:
 
     * `:felt_stores` — the envelope's store list (defaults to the Poller's).
-    * `:last_known` — while cold, serve the rows of the last warm feed
-      (`Shuttle.Poller.LocalFeed`) instead of none. For display surfaces only.
+    * `:last_known` — until a listing has succeeded, serve the rows of the
+      last observed feed (`Shuttle.Poller.LocalFeed`). For display surfaces only.
   """
   @spec cached_fiber_documents(keyword() | GenServer.server()) :: {:ok, map()} | {:error, term()}
   def cached_fiber_documents(opts) when is_list(opts),
@@ -443,12 +448,15 @@ defmodule Shuttle.Poller do
         scheduled_messages: scheduled,
         pulses: pulses
       } = inputs ->
-        # `last_known: true` asks for the persisted feed while the cache is cold
-        # (`last_known` is empty once warm); `cache.state` still reads "cold".
-        base_entries =
+        # `last_known: true` asks for the remembered feed until a listing has
+        # succeeded (`last_known` is empty after). Remembered rows are not
+        # observed, so they are served as "cold" even when a failed listing
+        # left the cache "partial": an owner feed carrying them has no etag and
+        # a viewer holds them stale.
+        {base_entries, cache} =
           if Keyword.get(opts, :last_known, false) and last_known != [],
-            do: last_known,
-            else: base_entries
+            do: {last_known, %{cache | state: "cold"}},
+            else: {base_entries, cache}
         entries =
           base_entries
           |> Shuttle.Pulse.stamp(pulses)
@@ -1101,6 +1109,7 @@ defmodule Shuttle.Poller do
       Keyword.get_lazy(opts, :own_host_id, fn -> resolve_own_host_id(runner: runner) end)
 
     own_host_id = to_string(own_host_id)
+    remembered = Shuttle.Poller.LocalFeed.load(own_host_id)
 
     # Freeze this instance's own_host_id into a persistent_term keyed by
     # its self_ref, so `own_host_id/1`'s public accessor never re-resolves
@@ -1126,7 +1135,8 @@ defmodule Shuttle.Poller do
       auto_discover_felt_stores: auto_discover,
       runner: runner,
       pulses: Shuttle.Pulse.load(),
-      local_feed: Shuttle.Poller.LocalFeed.load(own_host_id),
+      local_feed: remembered,
+      local_feed_writer: Shuttle.Poller.LocalFeed.writer(remembered),
       full_scan_budget_ms:
         Keyword.get_lazy(opts, :full_scan_budget_ms, fn ->
           Shuttle.Env.app(:full_scan_budget_ms, @default_full_scan_budget_ms)
@@ -1537,7 +1547,7 @@ defmodule Shuttle.Poller do
     {base_entries, state} =
       if state.document_cache_ready, do: owner_feed_base(state), else: {[], state}
 
-    state = persist_local_feed(state, base_entries)
+    state = write_local_feed(state, base_entries)
     cache_meta = document_cache_meta(state)
 
     previous_ready = published_lookup(self(), :feed_ready, nil)
@@ -1551,7 +1561,7 @@ defmodule Shuttle.Poller do
 
     feed_inputs = %{
       entries: base_entries,
-      last_known: if(state.document_cache_ready, do: [], else: state.local_feed),
+      last_known: state.local_feed,
       cache: cache_meta,
       felt_stores: state.felt_stores,
       running: state.running,
@@ -1642,15 +1652,45 @@ defmodule Shuttle.Poller do
     state
   end
 
-  # A warm base that differs from what is on disk replaces it. A cold cache
-  # writes nothing, so the file always holds the last warm feed.
-  defp persist_local_feed(%State{document_cache_ready: true} = state, base)
-       when base != state.local_feed do
-    Shuttle.Poller.LocalFeed.persist(state.own_host_id, base)
-    %{state | local_feed: base}
+  # The local feed on disk follows the owner feed once a listing has succeeded
+  # (`document_cache_refreshed_at`, set only by a complete successful listing);
+  # until then the remembered rows stay served and the file keeps them, so a
+  # failed first listing cannot erase them. Writes run off the Poller in a
+  # task, one at a time, coalesced by `Shuttle.Poller.LocalFeed.offer/2`. The
+  # feed is offered on every reader publication and every poll, so a failed
+  # write is retried by the next poll even when nothing it shows has changed.
+  defp offer_local_feed(%State{document_cache_ready: true} = state) do
+    {base, state} = owner_feed_base(state)
+    write_local_feed(state, base)
   end
 
-  defp persist_local_feed(state, _base), do: state
+  defp offer_local_feed(state), do: state
+
+  defp write_local_feed(%State{document_cache_refreshed_at: nil} = state, _base), do: state
+
+  defp write_local_feed(%State{} = state, base) do
+    {writer, rows} = Shuttle.Poller.LocalFeed.offer(state.local_feed_writer, base)
+    start_local_feed_write(%{state | local_feed: [], local_feed_writer: writer}, rows)
+  end
+
+  defp start_local_feed_write(state, nil), do: state
+
+  defp start_local_feed_write(%State{own_host_id: host} = state, rows) do
+    task =
+      Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+        {:local_feed_written, Shuttle.Poller.LocalFeed.persist(host, rows)}
+      end)
+
+    %{state | local_feed_task: task.ref}
+  end
+
+  defp finish_local_feed_write(state, result) do
+    if result != :ok,
+      do: Logger.warning("local feed write failed; retrying later: #{inspect(result)}")
+
+    {writer, rows} = Shuttle.Poller.LocalFeed.finished(state.local_feed_writer, result)
+    start_local_feed_write(%{state | local_feed_writer: writer, local_feed_task: nil}, rows)
+  end
 
   defp published_fiber_stores(state) do
     for {_key, %{entry: %{fiber: %{"uid" => uid}, felt_store: store}}} <- state.document_cache,
@@ -2104,6 +2144,7 @@ defmodule Shuttle.Poller do
       |> Map.put(:poll_token, nil)
       |> Map.put(:poll_task_pid, nil)
       |> persist_session_bindings()
+      |> offer_local_feed()
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
@@ -2181,6 +2222,14 @@ defmodule Shuttle.Poller do
        when is_map_key(state.pulse_jobs, ref) do
     {:noreply, %{state | pulse_jobs: Map.delete(state.pulse_jobs, ref)}}
   end
+
+  defp transition_info({ref, {:local_feed_written, result}}, %{local_feed_task: ref} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, finish_local_feed_write(state, result)}
+  end
+
+  defp transition_info({:DOWN, ref, :process, _pid, reason}, %{local_feed_task: ref} = state),
+    do: {:noreply, finish_local_feed_write(state, {:error, reason})}
 
   defp transition_info(msg, state) do
     Logger.debug("Poller ignored message: #{inspect(msg)}")

@@ -57,12 +57,12 @@ defmodule Shuttle.RemoteFiberRegistry do
       at the current reader-driven cadence and claims the owner was just observed, so a quick
       daemon bounce would serve restored rows as *fresh*.
       An entry read from disk is last-known-good, not observed, so it carries
-      `restored?: true`, which forces `stale?/2` regardless of the clock, and
-      only a live success clears it. `last_polled_at` is restored unfaked, so
+      `remembered?: true`, which forces `stale?/2` regardless of the clock; a
+      cold 200 sets it too, and only a warm success clears it. `last_polled_at` is restored unfaked, so
       the board still reports "last seen at T" truthfully.
 
-    * **Only a warm success is written.** A cold 200 serves remembered rows
-      (the owner's own last warm feed, or none, keeping ours) and adopts the
+    * **Only a warm success is written.** A cold 200 holds remembered rows
+      (ours, or the owner's remembered feed when we hold none) and adopts the
       cold feed's etag; persisting that pair would let a restart restore rows
       behind a cold etag, whose first conditional fetch 304s and would then
       mark those rows fresh. Writing only on results
@@ -507,10 +507,10 @@ defmodule Shuttle.RemoteFiberRegistry do
       # the board renders "stale as of T" instead of "down".
       etag: nil,
       cache: nil,
-      # True while `fibers` came off disk rather than off the wire: the rows are
-      # last-known-good, so they are stale until a live poll succeeds no matter
-      # what the clock says.
-      restored?: false,
+      # True while `fibers` are remembered rather than observed — read off disk
+      # at boot, or held across the owner's cold restart — so they are stale
+      # until a warm poll succeeds no matter what the clock says.
+      remembered?: false,
       remote: remote
     }
   end
@@ -519,9 +519,9 @@ defmodule Shuttle.RemoteFiberRegistry do
   # refresh the cache metadata from the header (so `refreshed_at`/`state` track),
   # and advance the success timestamps so staleness clears.
   #
-  # A 304 also settles a restored entry: only a warm success is ever written to
-  # disk, so a matching etag means the owner's feed still equals the rows we
-  # restored — they are now observed, not merely remembered.
+  # A 304 also settles a remembered entry: only a warm success is ever written
+  # to disk and a cold feed carries no etag, so a matching etag means the
+  # owner's warm feed still equals the rows we hold — now observed.
   defp apply_result(entry, {:ok, {:not_modified, cache}}, now) do
     %{
       entry
@@ -529,19 +529,18 @@ defmodule Shuttle.RemoteFiberRegistry do
         last_polled_at: now,
         last_attempt_at: now,
         last_error: nil,
-        restored?: false
+        remembered?: false
     }
   end
 
   # A COLD 200 (owner just restarted; its first Lustre poll hasn't warmed the
-  # cache) carries the owner's last warm feed, persisted before its restart, or
-  # no rows at all. Those rows are the owner's own last-known truth and replace
-  # the viewer's; an empty cold feed must NOT erase the viewer's last-good
-  # rows, or every owner restart would blank them on the board. Either way the
-  # rows are remembered, not observed: refresh etag/cache, clear the error, but
-  # do NOT advance `last_polled_at`, so staleness stays honest
-  # (time-since-last-WARM-success) until a warm feed arrives and nothing is
-  # persisted. `restored?` is left alone for the same reason.
+  # cache) carries the owner's remembered feed from before its restart, or no
+  # rows at all. The viewer keeps the rows it already holds, which may be newer
+  # than the owner's disk copy, and only a viewer holding none takes the
+  # owner's, so every owner restart neither blanks nor rewinds the board. Either
+  # way the rows are remembered, not observed: they are stale until a warm feed
+  # arrives (`remembered?`), `last_polled_at` does not advance, and nothing is
+  # persisted. Refresh etag/cache and clear the error.
   # The store block rides every owner feed, cold or warm — the picker wants it
   # from the first successful poll, not the first warm one.
   defp apply_result(
@@ -549,8 +548,20 @@ defmodule Shuttle.RemoteFiberRegistry do
          {:ok, {fibers, etag, %{"state" => "cold"} = cache, stores, _unreadable}},
          now
        ) do
-    entry = if fibers == [], do: entry, else: %{entry | fibers: fibers, encoded_fibers: nil}
-    %{entry | etag: etag, cache: cache, stores: stores, last_attempt_at: now, last_error: nil}
+    entry =
+      if entry.fibers == [] and fibers != [],
+        do: %{entry | fibers: fibers, encoded_fibers: nil},
+        else: entry
+
+    %{
+      entry
+      | etag: etag,
+        cache: cache,
+        stores: stores,
+        last_attempt_at: now,
+        last_error: nil,
+        remembered?: true
+    }
   end
 
   # A warm 200 REPLACES the rows wholesale — restored or not — so nothing on
@@ -568,7 +579,7 @@ defmodule Shuttle.RemoteFiberRegistry do
         last_polled_at: now,
         last_attempt_at: now,
         last_error: nil,
-        restored?: false
+        remembered?: false
     }
   end
 
@@ -614,12 +625,12 @@ defmodule Shuttle.RemoteFiberRegistry do
   # false INSTANTLY (fast recovery), while a failure only slowly ages toward the
   # alarm.
   #
-  # One clause comes before the clock: rows read off disk at boot are
-  # last-known-good, never observed, so they are stale until a live poll lands
-  # however recently the file was written. That is what makes the board say
-  # "waiting on <host>" over a restored column instead of implying it just
-  # checked.
-  defp stale?(%{restored?: true}, _now), do: true
+  # One clause comes before the clock: remembered rows (read off disk at boot,
+  # or held across the owner's cold restart) were never observed, so they are
+  # stale until a warm poll lands however recently they were written or last
+  # seen. That is what makes the board say "waiting on <host>" over a
+  # remembered column instead of implying it just checked.
+  defp stale?(%{remembered?: true}, _now), do: true
 
   defp stale?(%{remote: %Remote{} = remote, last_polled_at: last}, now) do
     Remote.stale?(remote, last, now)
@@ -683,7 +694,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   # A restored entry carries its rows, its etag (so the first poll can 304
   # against the very feed it remembers), the owner's last cache block, and the
   # instant of the poll that produced them — unfaked, so the board reports "last
-  # seen at T". `restored?` keeps it stale until a live poll lands, and
+  # seen at T". `remembered?` keeps it stale until a live poll lands, and
   # `last_attempt_at` stays nil so that poll goes out on the first tick.
   defp restore(nil, remote), do: initial_entry(remote)
 
@@ -701,7 +712,7 @@ defmodule Shuttle.RemoteFiberRegistry do
             etag: string_or_nil(persisted["etag"]),
             cache: map_or_nil(persisted["cache"]),
             last_polled_at: RegistryCommon.decode_dt(persisted["last_polled_at"]),
-            restored?: true
+            remembered?: true
         }
     end
   end

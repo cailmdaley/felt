@@ -34,22 +34,31 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
   # DocumentRunner whose poll-cycle store listing (the widened `shuttle ls`
   # projection, run from the poll's Task rather than the Poller's own boot)
-  # waits for the file named by the scoped `FIBER_DOCUMENTS_LISTING_GATE`,
-  # holding a booted Poller's cache cold.
-  defmodule GatedListingRunner do
+  # obeys the file named by the scoped `FIBER_DOCUMENTS_LISTING_CONTROL`:
+  # `hold` waits until it says otherwise, holding a booted Poller's cache cold;
+  # `fail` refuses the listing; anything else, or no file, lists.
+  defmodule ControlledListingRunner do
     @behaviour Shuttle.Runner
 
     def cmd(command, args, opts) do
-      if "--json-field" in args and Process.get(:"$callers", []) != [],
-        do: await_gate(Shuttle.Env.get("FIBER_DOCUMENTS_LISTING_GATE"))
-
-      DocumentRunner.cmd(command, args, opts)
+      if "--json-field" in args and Process.get(:"$callers", []) != [] do
+        listing(Shuttle.Env.get("FIBER_DOCUMENTS_LISTING_CONTROL"), command, args, opts)
+      else
+        DocumentRunner.cmd(command, args, opts)
+      end
     end
 
-    defp await_gate(gate) do
-      unless File.exists?(gate) do
-        Process.sleep(10)
-        await_gate(gate)
+    defp listing(control, command, args, opts) do
+      case File.read(control) do
+        {:ok, "hold"} ->
+          Process.sleep(10)
+          listing(control, command, args, opts)
+
+        {:ok, "fail"} ->
+          {"listing refused", 1}
+
+        _ ->
+          DocumentRunner.cmd(command, args, opts)
       end
     end
   end
@@ -627,18 +636,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     # While it is down the fiber changes, and the restarted daemon's listing is
     # held, so its cache stays cold.
     write_fiber!(store, "tests/remembered", owned_fiber("After restart"))
-    gate = Path.join(Path.dirname(store), "listing-gate")
-    Shuttle.Test.Env.put_env("FIBER_DOCUMENTS_LISTING_GATE", gate)
-
-    {:ok, poller} =
-      Shuttle.Test.PollerHelpers.start_poller!(
-        runner: GatedListingRunner,
-        poll_interval_ms: 600_000,
-        max_concurrent_workers: 0,
-        felt_stores: [store]
-      )
-
-    on_exit(fn -> File.write(gate, "") end)
+    control = listing_control!(store, "hold")
+    poller = restart_poller!(store)
 
     # Cold: the board keeps the remembered row, its origin marked stale.
     cold = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
@@ -666,13 +665,78 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert {:ok, %{fibers: []}} = Shuttle.Poller.cached_fiber_documents([])
 
     # The cache warms and its fresh rows replace the remembered ones.
-    File.write!(gate, "")
+    File.write!(control, "list")
     wait_until(fn -> :sys.get_state(poller, :infinity).document_cache_ready end)
 
     warm = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
     assert names(warm) == ["After restart"]
     assert %{"stale" => false, "fiber_count" => 1} = warm["origins"]["test-host"]
     wait_until(fn -> File.read!(feed_file) =~ "After restart" end)
+  end
+
+  test "a failed first listing keeps the remembered rows, on the board and on disk, until one succeeds",
+       %{store: store} do
+    write_fiber!(store, "tests/remembered", owned_fiber("Before restart"))
+
+    poller = warm_poller!(store)
+    feed_file = Path.join([Shuttle.data_dir(), "local-fibers", "test-host.json"])
+    wait_until(fn -> File.exists?(feed_file) end)
+    GenServer.stop(poller)
+
+    write_fiber!(store, "tests/remembered", owned_fiber("After restart"))
+    control = listing_control!(store, "fail")
+    poller = restart_poller!(store)
+    Shuttle.Test.PollerHelpers.await_boot_cycle!(poller)
+
+    # The first poll ran, and its listing failed: nothing was observed.
+    state = :sys.get_state(poller, :infinity)
+    assert state.document_cache_refreshed_at == nil
+
+    body = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
+    assert names(body) == ["Before restart"]
+    assert %{"stale" => true, "fiber_count" => 1} = body["origins"]["test-host"]
+    assert File.read!(feed_file) =~ "Before restart"
+
+    # Remembered rows are not observed: the owner feed serves them cold, with
+    # no etag, though the failed listing left the cache "partial".
+    owner = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    assert get_resp_header(owner, "etag") == []
+    assert %{"cache" => %{"state" => "cold"}} = owner_body = Jason.decode!(owner.resp_body)
+    assert names(owner_body) == ["Before restart"]
+
+    # A listing succeeds: its rows replace the remembered ones, and the disk.
+    File.write!(control, "list")
+    send(poller, :run_poll_cycle)
+
+    wait_until(fn ->
+      :sys.get_state(poller, :infinity).document_cache_refreshed_at != nil
+    end)
+
+    body = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
+    assert names(body) == ["After restart"]
+    assert %{"stale" => false} = body["origins"]["test-host"]
+    wait_until(fn -> File.read!(feed_file) =~ "After restart" end)
+  end
+
+  test "a local feed write that fails is retried by a later publication", %{store: store} do
+    write_fiber!(store, "tests/remembered", owned_fiber("Written late"))
+
+    # The feed's directory cannot be created: a file stands where it belongs.
+    data = Path.join(Path.dirname(store), "data")
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", data)
+    blocker = Path.join(data, "local-fibers")
+    File.mkdir_p!(data)
+    File.write!(blocker, "not a directory")
+
+    poller = warm_poller!(store)
+    wait_until(fn -> :sys.get_state(poller, :infinity).local_feed_task == nil end)
+    assert File.regular?(blocker)
+
+    # The disk recovers; the next poll publishes again and the write lands.
+    File.rm!(blocker)
+    send(poller, :run_poll_cycle)
+    feed_file = Path.join(blocker, "test-host.json")
+    wait_until(fn -> File.exists?(feed_file) and File.read!(feed_file) =~ "Written late" end)
   end
 
   test "GET /api/v1/fibers?shuttle=true sets an etag and answers If-None-Match with 304",
@@ -2129,6 +2193,30 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         end
       end
     end)
+  end
+
+  # Write the scoped listing control file `ControlledListingRunner` obeys,
+  # released at exit so no held listing outlives the test.
+  defp listing_control!(store, mode) do
+    control = Path.join(Path.dirname(store), "listing-control")
+    File.write!(control, mode)
+    Shuttle.Test.Env.put_env("FIBER_DOCUMENTS_LISTING_CONTROL", control)
+    on_exit(fn -> File.write(control, "list") end)
+    control
+  end
+
+  # Boot a fresh Poller over `store` as this test's `Shuttle.Poller`, as a
+  # restarted daemon would, with its listing under `ControlledListingRunner`.
+  defp restart_poller!(store) do
+    {:ok, poller} =
+      Shuttle.Test.PollerHelpers.start_poller!(
+        runner: ControlledListingRunner,
+        poll_interval_ms: 600_000,
+        max_concurrent_workers: 0,
+        felt_stores: [store]
+      )
+
+    poller
   end
 
   defp owned_fiber(name) do
