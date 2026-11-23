@@ -36,6 +36,7 @@ import { markSeen, unseenSince } from './DocumentSeen.js'
 import { FiberSends } from '../fiberSends.js'
 import { type BoardOpen } from '../voice.js'
 import { parseRoute, viewOfHash, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
+import { viewOfTitle, viewTitle } from '../views/ViewRegistry.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { changeReviewTarget } from './changeReviewTarget.js'
 import { daemonFetch } from '../daemonApi.js'
@@ -96,8 +97,8 @@ interface ChannelState {
   error?: string
 }
 type WorkspaceView = WorkspaceOriginView
-const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', channels: 'Channels' }
-const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : 'channels'
+/** The view an origin's name (`viewTitle`) names; Channels for one no registered view answers to. */
+const viewForOrigin = (origin: string): WorkspaceOriginView => viewOfTitle(origin) ?? 'channels'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
@@ -727,7 +728,7 @@ export class Workspace {
       const view = viewOfHash(route.hash ?? window.location.hash) ?? this.history.originView
       if (view === 'desk' && this.origin === 'Desk' && this.current && this.isActive) this.opts.onReturnCard?.(this.current.card)
       this.reader.hide(true)
-      this.origin = VIEW_LABELS[view]
+      this.origin = viewTitle(view)
       this.opts.onView?.(view)
       this.depth.setActive(false)
       this.opts.onVisibility(false)
@@ -736,7 +737,7 @@ export class Workspace {
       return
     }
     const originView = this.history.originView
-    this.origin = VIEW_LABELS[originView]
+    this.origin = viewTitle(originView)
     this.opts.onView?.(originView)
     let state = this.channels.get(channelId(route.uid, route.owner))
     if (!state) {

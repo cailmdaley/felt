@@ -1,15 +1,18 @@
 /**
- * ViewRegistry — the contract between KanbanModal and registered views.
+ * ViewRegistry — the contract between KanbanModal and the views plugged into it.
  *
- * The board is two full-page views behind one hotkey row:
+ * The board is full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Now board + Resting). Owned by
- *                 KanbanModal itself, NOT a TemporalView.
- *   2  channels   registered view — mounts into a full-width host
- *                 where the Desk surfaces would otherwise be.
+ *                 KanbanModal itself, NOT a plugin.
+ *   2… plugins    every registered `BoardViewPlugin`, in registration order:
+ *                 each mounts into a full-width host where the Desk surfaces
+ *                 would otherwise be, with a tab (unless `optional`) and a
+ *                 hotkey of its own. Channels, one channel per office, is
+ *                 the board's own and registers first.
  *
- * Channels has one channel per office, listed while something in it waits on
- * the human or he keeps it pinned, each with its files.
+ * A plugin registers at any time, before the board mounts or after it, and
+ * may be unregistered; the board's tabs and hotkeys follow the registry.
  *
  * The bar's Find searches where the board stands: a view says where with
  * `findScope` (a list of what it searches and what a pick does, or a handler
@@ -39,10 +42,14 @@ import type { ConsoleOptions, Dock } from '../workspace/Dock.js'
 import type { FiberSends } from '../fiberSends.js'
 import type { SwipeSignal } from '../workspace/PhoneGestures.js'
 
-export interface TemporalView {
-  id: 'channels'
+export interface BoardViewPlugin {
+  /** Its id: the tab's value, its `?view=` and `#/<id>` address. Never `desk`. */
+  id: string
   title: string
-  hotkey: string
+  /** Its key on the hotkey row; without one it takes the first free digit from 2 to 9. */
+  hotkey?: string
+  /** Draws no tab: reached by its hotkey, its address, or code. */
+  optional?: boolean
   mount(host: HTMLElement, ctx: ViewContext): void
   refresh(ctx: ViewContext): void
   unmount(): void
@@ -57,6 +64,9 @@ export interface TemporalView {
   /** Find picked a place in this view (a channel, a line in it): show it, whether or not the view is mounted yet. */
   show?(target: { channel: string; item?: string }): void
 }
+
+/** A registered view: the name the board's own views were written against. */
+export type TemporalView = BoardViewPlugin
 
 /**
  * What a view is handed: the board's own response, cards, workspace handles and gestures.
@@ -123,30 +133,91 @@ export interface ViewContext {
   requestRefresh(): void
 }
 
-/** A view's id, or `desk` for the kanban page KanbanModal renders itself. */
-export type ViewId = TemporalView['id']
-export type BoardViewId = 'desk' | ViewId
+/** A registered view's id. */
+export type ViewId = string
+/** `desk`, the kanban page KanbanModal renders itself, or a registered view's id. */
+export type BoardViewId = string
+export const DESK_VIEW = 'desk'
+/** The Desk's key on the hotkey row. */
+export const DESK_HOTKEY = '1'
+/** The keys a view without its own takes, in registration order. */
+const FREE_HOTKEYS = ['2', '3', '4', '5', '6', '7', '8', '9']
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 //
-// Module-global and populated at import time (see ./index.ts). Registration
-// order is tab order, so the import order in index.ts is the strip's order.
+// Module-global. The board's own views register at import time (see
+// ./index.ts), so their import order is the start of the strip's order; a
+// plugin registered later joins its end.
 
-const registry = new Map<ViewId, TemporalView>()
+const registry = new Map<ViewId, BoardViewPlugin>()
+const listeners = new Set<() => void>()
+const changed = (): void => { for (const listener of [...listeners]) listener() }
 
 /** Register a view. Re-registering an id replaces it (hot-reload friendly)
  *  while keeping its original position in the strip. */
-export function registerView(view: TemporalView): void {
+export function registerView(view: BoardViewPlugin): void {
+  if (view.id === DESK_VIEW) throw new Error('`desk` is the board\'s own page, not a view to register')
   registry.set(view.id, view)
+  changed()
 }
 
-export function getView(id: ViewId): TemporalView | undefined {
+/** Take a view out of the board; true when it was registered. */
+export function unregisterView(id: ViewId): boolean {
+  const had = registry.delete(id)
+  if (had) changed()
+  return had
+}
+
+export function getView(id: ViewId): BoardViewPlugin | undefined {
   return registry.get(id)
 }
 
 /** Every registered view, in registration order. */
-export function listViews(): TemporalView[] {
+export function listViews(): BoardViewPlugin[] {
   return [...registry.values()]
+}
+
+/** Call `listener` whenever a view is registered or unregistered; returns its unsubscribe. */
+export function onViewsChange(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+/**
+ * Each view with the key that switches to it: its own `hotkey`, else the first
+ * digit from 2 to 9 no view has claimed, in registration order. A view whose
+ * key another took first, or that finds no digit free, has none.
+ */
+export function viewHotkeys(): Array<{ view: BoardViewPlugin; hotkey?: string }> {
+  const views = listViews()
+  const taken = new Set<string>([DESK_HOTKEY])
+  const own = new Map<BoardViewPlugin, string>()
+  for (const view of views) {
+    if (view.hotkey && !taken.has(view.hotkey)) { taken.add(view.hotkey); own.set(view, view.hotkey) }
+  }
+  return views.map(view => {
+    if (own.has(view)) return { view, hotkey: own.get(view) }
+    if (view.hotkey) return { view }
+    const free = FREE_HOTKEYS.find(key => !taken.has(key))
+    if (free) taken.add(free)
+    return { view, hotkey: free }
+  })
+}
+
+/** The view a bare key switches to, if any. */
+export function viewForHotkey(key: string): BoardViewPlugin | undefined {
+  return viewHotkeys().find(each => each.hotkey === key)?.view
+}
+
+/** What the board calls a view: `Desk`, a registered view's title, or else its id as a name. */
+export function viewTitle(id: BoardViewId): string {
+  if (id === DESK_VIEW) return 'Desk'
+  return getView(id)?.title ?? `${id.charAt(0).toUpperCase()}${id.slice(1)}`
+}
+
+/** The view a title names, the inverse of `viewTitle`. */
+export function viewOfTitle(title: string): BoardViewId | undefined {
+  return title === 'Desk' ? DESK_VIEW : listViews().find(view => view.title === title)?.id
 }
 
 // ── View fallback ────────────────────────────────────────────────────────────
@@ -177,7 +248,7 @@ export function viewFallbackKind(state: {
 
 // ── Hotkey guard ─────────────────────────────────────────────────────────────
 //
-// The chassis runs bare-key hotkeys — the 1-2 view switch and the bare `,` for
+// The chassis runs bare-key hotkeys — the 1-9 view switch and the bare `,` for
 // settings — and each must agree on when a keystroke is NOT theirs. These are
 // the shared predicates, so the next dialog added to the app is covered by
 // every bare key at once.

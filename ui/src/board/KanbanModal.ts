@@ -35,7 +35,7 @@ import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
 import { headerIcon } from './workspace/headerIcon.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
-import { isoDayLocal } from './civilDay.js'
+import { isoDayLocal } from '../sdk/civilDay.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
@@ -52,17 +52,23 @@ import { PhoneListening } from './phoneListening'
 import { Voice } from './voice.js'
 import type { WorkerOpener } from './conversationOpening.js'
 import {
+  DESK_HOTKEY,
+  DESK_VIEW,
   collectCards,
   getView,
   listViews,
   createViewFallbackPage,
   keystrokeIsSpokenFor,
+  onViewsChange,
   type BoardViewId,
+  type BoardViewPlugin,
   settingsHotkey,
   blockingDialogOpen,
-  type TemporalView,
   type ViewContext,
   viewFallbackKind,
+  viewForHotkey,
+  viewHotkeys,
+  viewTitle,
 } from './views/index.js'
 import { FiberSends } from './fiberSends.js'
 import { viewOfHash } from './workspace/route.js'
@@ -114,9 +120,8 @@ interface KanbanModalOptions {
   shuttleBase?: string
 }
 
-/** The Desk's own hotkey. The others come from the view registry, so a view
- *  names its own key and nothing here has to agree with it twice. */
-const DESK_HOTKEY = '1'
+/** The view Find's channel targets are shown in (`showChannel`). */
+const CHANNELS_VIEW = 'channels'
 const TABLIST_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End'])
 
 interface KanbanScrollSnapshot {
@@ -139,9 +144,13 @@ export class KanbanModal {
   private bannerEl: HTMLDivElement | null = null
   /** Unsubscribes the 700px-threshold watch installed in assembleChrome. */
   private stopMobileWatch: (() => void) | null = null
+  /** Unsubscribes the view registry's watch installed in assembleChrome. */
+  private stopViewsWatch: (() => void) | null = null
 
   /** The view tab strip — persistent chrome, built once in assembleChrome. */
   private tabsEl: HTMLElement | null = null
+  /** The strip's tablist, refilled whenever a view is registered or unregistered. */
+  private viewTabsEl: HTMLElement | null = null
   /** The bar's Find: one field on every view, searching where the board stands. */
   private findEl: HTMLInputElement | null = null
   /** The chip in Find naming where it searches. */
@@ -158,9 +167,9 @@ export class KanbanModal {
   private deskEl: HTMLDivElement | null = null
   /** Full-width slot the active temporal view mounts into. Hidden on Desk. */
   private viewHostEl: HTMLDivElement | null = null
-  private activeViewId: BoardViewId = 'desk'
+  private activeViewId: BoardViewId = DESK_VIEW
   /** The mounted view, or null on Desk / before the first response lands. */
-  private activeView: TemporalView | null = null
+  private activeView: BoardViewPlugin | null = null
   /** True when the most recent composite fetch failed. Drives the view
    *  host's error page — the Desk shows `renderError` for the same state,
    *  but a temporal view has no surfaces of its own to put it in. */
@@ -271,7 +280,7 @@ export class KanbanModal {
     const wanted = new URLSearchParams(window.location.search).get('view') ?? viewOfHash(window.location.hash)
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
     this.keymapHelp = new KeymapHelp(
-      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'view',
+      () => this.workspace?.isActive ? 'reader' : this.activeViewId === DESK_VIEW ? 'desk' : 'view',
     )
     this.workspace = new Workspace(this.container!, {
       sends: this.fiberSends,
@@ -280,7 +289,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : 'Channels',
+      origin: () => viewTitle(this.activeViewId),
       onVisibility: (active) => this.showWorkspace(active),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
@@ -343,6 +352,8 @@ export class KanbanModal {
     window.removeEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     this.stopMobileWatch?.()
     this.stopMobileWatch = null
+    this.stopViewsWatch?.()
+    this.stopViewsWatch = null
     if (this.resizeRaf !== null) {
       window.cancelAnimationFrame(this.resizeRaf)
       this.resizeRaf = null
@@ -411,14 +422,15 @@ export class KanbanModal {
     // Crossing 700px changes what the Desk IS, not just how it is painted: the
     // columns become a pager under a folio strip, wired at build time, so the
     // Desk is rebuilt when the threshold is crossed.
+    this.stopViewsWatch = onViewsChange(() => this.viewsChanged())
     this.stopMobileWatch = onMobileChange(() => {
-      if (this.activeViewId === 'desk' && this.lastResponse) this.render(this.lastResponse)
+      if (this.activeViewId === DESK_VIEW && this.lastResponse) this.render(this.lastResponse)
     })
   }
 
   /** Desk cards enter the owner-addressed document channel. */
   private openDocumentChannel(card: KanbanCard, doc?: DocKey): void {
-    if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
+    if (this.activeViewId === DESK_VIEW) this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
       : null
@@ -429,9 +441,9 @@ export class KanbanModal {
 
   /** Find picked a channel, or a line in one: Channels comes up on it, from the reader too. */
   private showChannel(target: { channel: string; item?: string }): void {
-    getView('channels')?.show?.(target)
-    if (this.activeViewId === 'channels' && this.workspace?.isActive) this.workspace.returnToOrigin()
-    else this.setView('channels')
+    getView(CHANNELS_VIEW)?.show?.(target)
+    if (this.activeViewId === CHANNELS_VIEW && this.workspace?.isActive) this.workspace.returnToOrigin()
+    else this.setView(CHANNELS_VIEW)
   }
 
   /** Focus the bar's Find, where the bar carries one (the phone's bottom bar does not). */
@@ -473,14 +485,14 @@ export class KanbanModal {
       else this.body.removeAttribute('aria-hidden')
     }
     if (active) return
-    if (this.pendingDeskData && this.activeViewId === 'desk') {
+    if (this.pendingDeskData && this.activeViewId === DESK_VIEW) {
       const data = this.pendingDeskData
       this.pendingDeskData = null
       this.render(data)
     }
-    if (this.activeViewId !== 'desk') this.mountOrRefreshActiveView()
+    if (this.activeViewId !== DESK_VIEW) this.mountOrRefreshActiveView()
     else this.deskKeyboard?.refresh(true)
-    if (this.activeViewId !== 'desk' || !this.workspaceReturnCard) return
+    if (this.activeViewId !== DESK_VIEW || !this.workspaceReturnCard) return
     if (this.deskKeyboard?.focusSelection()) return
     const address = this.workspaceReturnCard
     const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
@@ -505,10 +517,11 @@ export class KanbanModal {
   // ── View switching ──────────────────────────────────────────────────────────
 
   /**
-   * The tab strip: `desk` plus one tab per registered view, left-aligned on
-   * its own hairline row at the top of the page. Built once — the registry is
-   * populated at import time, so the strip never needs to re-render; only the
-   * selected tab's classes change.
+   * The tab strip: `desk` plus one tab per registered view that is not
+   * `optional`, left-aligned on its own hairline row at the top of the page.
+   * The bar is built once; its tablist is refilled from the registry whenever
+   * a view is registered or unregistered (`fillViewTabs`), and otherwise only
+   * the selected tab's classes change.
    */
   private buildViewTabs(): HTMLElement {
     const strip = document.createElement('ui-tabs')
@@ -524,41 +537,8 @@ export class KanbanModal {
     views.className = 'kbn-viewtabs-views'
     views.setAttribute('aria-label', 'Board views')
     strip.append(views)
-
-    const specs: Array<{ id: BoardViewId; label: string; hotkey: string }> = [
-      { id: 'desk', label: 'desk', hotkey: DESK_HOTKEY },
-      ...listViews().filter((view) => view.hotkey).map((view) => ({
-        id: view.id as BoardViewId,
-        label: view.title.toLowerCase(),
-        hotkey: view.hotkey,
-      })),
-    ]
-
-    for (const spec of specs) {
-      const tab = document.createElement('button')
-      tab.type = 'button'
-      tab.className = 'kbn-viewtab'
-      tab.dataset.view = spec.id
-      tab.title = `${spec.label} (${spec.hotkey})`
-
-      const labelEl = document.createElement('span')
-      labelEl.className = 'kbn-viewtab-label'
-      labelEl.textContent = spec.label
-      const hotkeyEl = document.createElement('span')
-      hotkeyEl.className = 'kbn-viewtab-hotkey'
-      hotkeyEl.textContent = spec.hotkey
-      hotkeyEl.setAttribute('aria-hidden', 'true')
-      tab.append(hotkeyEl, labelEl)
-      tab.addEventListener('click', event => {
-        // The tab of the view under the reader closes it, and that view puts the focus back where the reader was opened from; the tablist's own press would take it.
-        if (this.workspace?.isActive && spec.id === this.activeViewId) event.stopImmediatePropagation()
-        this.setView(spec.id)
-      })
-      const part = document.createElement('ui-tabs-tab')
-      part.setAttribute('value', spec.id)
-      part.append(tab)
-      views.append(part)
-    }
+    this.viewTabsEl = views
+    this.fillViewTabs()
 
     // Find follows the tabs: one field every view shares, searching where the board stands, the chip in it saying where.
     const find = document.createElement('label')
@@ -616,12 +596,59 @@ export class KanbanModal {
     return strip
   }
 
+  /** One tab for the Desk and each registered view that is not `optional`, each with its hotkey. */
+  private fillViewTabs(): void {
+    const views = this.viewTabsEl
+    if (!views) return
+    const specs: Array<{ id: BoardViewId; label: string; hotkey?: string }> = [
+      { id: DESK_VIEW, label: 'desk', hotkey: DESK_HOTKEY },
+      ...viewHotkeys().filter(({ view }) => !view.optional).map(({ view, hotkey }) => ({ id: view.id, label: view.title.toLowerCase(), hotkey })),
+    ]
+    views.replaceChildren()
+    for (const spec of specs) {
+      const tab = document.createElement('button')
+      tab.type = 'button'
+      tab.className = 'kbn-viewtab'
+      tab.dataset.view = spec.id
+      tab.title = spec.hotkey ? `${spec.label} (${spec.hotkey})` : spec.label
+
+      const labelEl = document.createElement('span')
+      labelEl.className = 'kbn-viewtab-label'
+      labelEl.textContent = spec.label
+      if (spec.hotkey) {
+        const hotkeyEl = document.createElement('span')
+        hotkeyEl.className = 'kbn-viewtab-hotkey'
+        hotkeyEl.textContent = spec.hotkey
+        hotkeyEl.setAttribute('aria-hidden', 'true')
+        tab.append(hotkeyEl)
+      }
+      tab.append(labelEl)
+      tab.addEventListener('click', event => {
+        // The tab of the view under the reader closes it, and that view puts the focus back where the reader was opened from; the tablist's own press would take it.
+        if (this.workspace?.isActive && spec.id === this.activeViewId) event.stopImmediatePropagation()
+        this.setView(spec.id)
+      })
+      const part = document.createElement('ui-tabs-tab')
+      part.setAttribute('value', spec.id)
+      part.append(tab)
+      views.append(part)
+    }
+  }
+
+  /** A view was registered or unregistered: the strip follows, and a page whose view left goes home to the Desk. */
+  private viewsChanged(): void {
+    this.fillViewTabs()
+    if (this.activeViewId !== DESK_VIEW && !getView(this.activeViewId)) this.setView(DESK_VIEW, false)
+    else if (this.activeViewId !== DESK_VIEW) this.mountOrRefreshActiveView()
+    this.syncViewChrome()
+  }
+
   /**
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
    * a stray click or repeated hotkey never tears a view down and back up.
    */
   private setView(id: BoardViewId, navigate = true, forceHome = false): void {
-    if (forceHome && id === 'desk' && this.workspace?.isActive) {
+    if (forceHome && id === DESK_VIEW && this.workspace?.isActive) {
       this.workspace.escapeHome()
       return
     }
@@ -645,7 +672,7 @@ export class KanbanModal {
     // it NOW, after syncViewChrome has given the Desk a layout box again, so
     // the post-render measurement passes have something real to measure. This
     // is the second half of the deferral in `render` — see `pendingDeskData`.
-    if (id === 'desk' && this.pendingDeskData) {
+    if (id === DESK_VIEW && this.pendingDeskData) {
       const pending = this.pendingDeskData
       this.pendingDeskData = null
       this.render(pending)
@@ -656,7 +683,7 @@ export class KanbanModal {
 
   /** Paint the selected tab and show exactly one of Desk / view host. */
   private syncViewChrome(): void {
-    const onDesk = this.activeViewId === 'desk'
+    const onDesk = this.activeViewId === DESK_VIEW
     if (this.deskEl) {
       this.deskEl.style.display = onDesk ? '' : 'none'
     }
@@ -678,9 +705,15 @@ export class KanbanModal {
    * content also moves with the clock.
    */
   private mountOrRefreshActiveView(): void {
-    if (this.activeViewId === 'desk' || !this.viewHostEl) return
+    if (this.activeViewId === DESK_VIEW || !this.viewHostEl) return
     const view = getView(this.activeViewId)
     if (!view) return
+    // A view re-registered under the same id replaces the one mounted.
+    if (this.activeView && this.activeView !== view) {
+      this.activeView.unmount()
+      this.activeView = null
+      this.viewHostEl.innerHTML = ''
+    }
     const ctx = this.viewContext()
     if (!ctx) {
       // No response to mount with. Say so on the page rather than leaving it
@@ -785,20 +818,22 @@ export class KanbanModal {
   }
 
   /**
-   * `1`–`2` switch views. Deliberately narrow: a bare digit only, so
+   * `1` goes home to the Desk; each registered view's hotkey (`2`–`9` unless
+   * it names its own) switches to it. Deliberately narrow: a bare key only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
-   * is not going somewhere it matters — a focused text field, or a
-   * dialog layered over the board. Returns true when the
-   * key was consumed.
+   * is not going somewhere it matters — a focused text field, or a dialog
+   * layered over the board. Returns true when the key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : 'desk'
-    const intent = keyIntent(e, surface)
-    if (intent !== 'desk' && intent !== 'channels') return false
+    const home = keyIntent(e, surface) === 'desk'
+    const bare = !e.defaultPrevented && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey
+    const view = !home && bare ? viewForHotkey(e.key) : undefined
+    if (!home && !view) return false
     if (keystrokeIsSpokenFor()) return false
     e.preventDefault()
     e.stopPropagation()
-    this.setView(intent, true, intent === 'desk')
+    this.setView(view ? view.id : DESK_VIEW, true, home)
     return true
   }
 
@@ -813,8 +848,9 @@ export class KanbanModal {
     this.findChip = null
     this.deskEl = null
     this.viewHostEl = null
+    this.viewTabsEl = null
     this.activeView = null
-    this.activeViewId = 'desk'
+    this.activeViewId = DESK_VIEW
     this.viewFallbackSig = null
     this.lastFetchFailed = false
     if (this.bannerTimer !== null) {
@@ -1118,7 +1154,7 @@ export class KanbanModal {
   /** The Desk shows a failure in its own surfaces; a temporal view has none,
    *  so it gets the fallback page rather than a blank host. */
   private renderActiveViewFallback(): void {
-    if (this.activeViewId === 'desk') return
+    if (this.activeViewId === DESK_VIEW) return
     const view = getView(this.activeViewId)
     if (view) this.renderViewFallback(view.title)
   }
@@ -1144,7 +1180,7 @@ export class KanbanModal {
     // passes at the end of this method MEASURE, and a `display:none` subtree
     // has no layout box. The payload is held, and the Desk that comes back is
     // the one the user left, repainted from fresh data.
-    if (this.activeViewId !== 'desk') {
+    if (this.activeViewId !== DESK_VIEW) {
       this.lastResponse = data
       this.mountOrRefreshActiveView()
       this.pendingDeskData = data
@@ -1365,12 +1401,12 @@ export class KanbanModal {
     // A tablist's arrows, Home and End are its own (the view strip, the phone folio), not the active view's.
     if (TABLIST_KEYS.has(e.key) && (e.target as HTMLElement | null)?.closest?.('[role="tablist"]')) return
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
-    // On Channels, `/` reaches the bar's Find.
-    if (this.activeViewId === 'channels' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
+    // On a view, `/` reaches the bar's Find.
+    if (this.activeViewId !== DESK_VIEW && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()
       return
     }
-    if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
+    if (this.activeViewId === DESK_VIEW && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
       if (intent === 'find') {
         // The bar's Find serves every view; the phone, which has none in its bar, finds a constitution.

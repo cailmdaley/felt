@@ -1,5 +1,11 @@
 # UI SDK in the board
 
+The UI stands in three layers:
+
+1. **The daemon's core API**, described by `contract/shuttle-api.json`.
+2. **The Shuttle primitives** (`ui/src/sdk/`), built into `dist/sdk/shuttle-sdk.js` by `vite.sdk.config.ts` and served by every daemon at `/sdk/shuttle-sdk.js`: `ShuttleClient` over the core routes (the board's `daemonApi.ts` re-exports its `daemonFetch` and error readings), `ShuttleFeed` over the composite feed, the headless readings in `model.ts`, the zone module `civilDay.ts`, and unstyled elements in `primitives/` built on the components below. Nothing there imports the board, the pages, the forms or the map, loads a stylesheet, or sets a class or a style (`ui/test/sdkBoundary.test.ts`); every part is named by `data-slot` and its state by `data-*`. A personal UI imports it with no build step ([Build on the primitives](../shuttle/configuration.md#build-on-the-primitives)).
+3. **The board** (`ui/src/board/`, `ui/src/pages/`): its views and the vellum look. A view is a `BoardViewPlugin` in `board/views/ViewRegistry.ts`: `registerView` adds it at any time, with a tab (unless `optional`) and its own `hotkey` or the next free digit from 2 to 9, and `unregisterView` takes it out; the tab strip, the hotkeys, Find's scope and the reader's way back follow the registry.
+
 The board uses UI SDK 0.1.0-beta.1 (`@ui-sdk/core`, `@ui-sdk/web`, `@ui-sdk/react`, pinned exactly) for the behaviour of its overlays and composite controls: positioning, keys, typeahead, dismissal, focus containment and return, inert backgrounds and ARIA.
 The board owns actions, presentation, the gestures that ask for a popup, and its own key grammar.
 
@@ -19,6 +25,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 | Screen-reader announcements | `announce` callers across the board | core `announce` |
 | The console above a phone's on-screen keyboard | `board/workspace/Dock.ts` | core `bindAvoidKeyboard` |
 | Form dialog, parent picker, tag chips | `forms/AppDialog.tsx`, `forms/StashForm.tsx` | `@ui-sdk/react` dialog, autocomplete, combobox |
+| The primitives' action menu, lifecycle verbs and composer modes | `sdk/primitives/actionMenu.ts`, `lifecycleBar.ts`, `composer.ts` | `@ui-sdk/web/menu`, `toolbar`, `segmented-control` |
 
 These stay the board's own, each for a reason that still holds:
 

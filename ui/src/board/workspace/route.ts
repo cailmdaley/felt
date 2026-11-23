@@ -1,5 +1,6 @@
 import type { DocKey } from './documents.js'
 import { parseRoute, type WorkspaceRoute } from './boardRoute.js'
+import { DESK_VIEW, getView, viewTitle } from '../views/ViewRegistry.js'
 
 export { parseRoute, type WorkspaceRoute }
 
@@ -10,8 +11,8 @@ const STATE_KEY = 'shuttleWorkspace'
 export const FRAME_STEPS = 8
 /** A back whose landing the board has not heard of in this long is taken as landed. */
 export const LANDING_MS = 500
-export type WorkspaceOriginView = 'desk' | 'channels'
-const VIEW_NAMES: Record<WorkspaceOriginView, string> = { desk: 'Desk', channels: 'Channels' }
+/** The view a reader entry was opened from: `desk`, or a registered view's id. */
+export type WorkspaceOriginView = string
 /** What a reader entry says about itself: whether the view it was opened from is the entry below it, and which view that is. */
 interface RouteState { layer: boolean; originView: WorkspaceOriginView }
 type StateObject = Record<string, unknown>
@@ -21,13 +22,14 @@ function encode(value: string): string {
 }
 
 function isOriginView(value: unknown): value is WorkspaceOriginView {
-  return value === 'desk' || value === 'channels'
+  return value === DESK_VIEW || value === 'channels' || (typeof value === 'string' && !!getView(value))
 }
-/** The board view a location hash addresses, or null for any other hash. */
+/** The board view a location hash addresses (`#/<id>` for a registered view), or null for any other hash. */
 export function viewOfHash(hash: string): WorkspaceOriginView | null {
-  if (hash === '#/desk' || hash === '#/chronicle' || hash === '#/globe') return 'desk'
+  if (hash === '#/desk' || hash === '#/chronicle' || hash === '#/globe') return DESK_VIEW
   if (hash === '#/channels' || hash === BOARD_HASH || hash.startsWith(`${BOARD_HASH}/`)) return 'channels'
-  return null
+  const id = /^#\/([^/?#]+)$/.exec(hash)?.[1]
+  return id && getView(id) ? id : null
 }
 /** The address a view is shown at: `#/board` redirects to `#/channels`; retired view hashes redirect to `#/desk`. */
 function canonical(hash: string): string {
@@ -101,7 +103,7 @@ export class WorkspaceHistory {
 
   get originView(): WorkspaceOriginView { return this.origin }
   /** The name of the one place back goes. */
-  get backLabel(): string { return VIEW_NAMES[this.origin] }
+  get backLabel(): string { return viewTitle(this.origin) }
 
   start(): void {
     if (this.started) return
