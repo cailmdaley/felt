@@ -11,7 +11,7 @@ import (
 
 func (a *app) askCmd() *cobra.Command {
 	var askClear, noBoard bool
-	var answeredBy string
+	var answeredBy, replyTo string
 	askCmd := &cobra.Command{
 		Use:   "ask <fiber> [question]",
 		Short: "Set or clear a worker's outstanding one-line question",
@@ -25,6 +25,9 @@ since it was dispatched.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if answeredBy != "" && !askClear {
 				return fmt.Errorf("--answered-by requires --clear")
+			}
+			if replyTo != "" && !askClear {
+				return fmt.Errorf("--reply-to requires --clear")
 			}
 			if askClear {
 				return cobra.ExactArgs(1)(cmd, args)
@@ -40,7 +43,7 @@ since it was dispatched.`,
 			if err := a.ensureOwnedHere(f, args[0]); err != nil {
 				return err
 			}
-			if askClear && answeredBy != "" && block.Ask != nil && !a.answersAsk(st, f, answeredBy) {
+			if askClear && answeredBy != "" && block.Ask != nil && !a.answersAsk(st, f, answeredBy, replyTo) {
 				fmt.Fprintf(a.env.Stdout, "question for %s stands: %s is not who it asks\n", args[0], answeredBy)
 				return nil
 			}
@@ -77,7 +80,7 @@ since it was dispatched.`,
 			} else if oldAsk != nil && !noBoard {
 				kind, by := "cleared", a.boardWorkerParty()
 				if answeredBy != "" {
-					kind, by = "answered", a.boardMessageActor(answeredBy)
+					kind, by = "answered", a.resolveBoardActor(answeredBy, replyTo)
 				}
 				a.recordBoard(boardRecord{Kind: kind, Fiber: f.UID, By: by, Text: oldAsk.Text})
 			}
@@ -86,21 +89,36 @@ since it was dispatched.`,
 		},
 	}
 	askCmd.Flags().BoolVar(&askClear, "clear", false, "Remove the outstanding question")
-	askCmd.Flags().StringVar(&answeredBy, "answered-by", "", "Record the label of the person who answered")
+	askCmd.Flags().StringVar(&answeredBy, "answered-by", "", "Record who answered and clear only if they are who the question asks")
 	_ = askCmd.Flags().MarkHidden("answered-by")
+	askCmd.Flags().StringVar(&replyTo, "reply-to", "", "Fiber id or UID of a remote agent answering the question")
+	_ = askCmd.Flags().MarkHidden("reply-to")
 	// A human line that answers the question has already written its row.
 	askCmd.Flags().BoolVar(&noBoard, "no-board", false, "Clear without a family-board row")
 	_ = askCmd.Flags().MarkHidden("no-board")
 	return askCmd
 }
 
+func (a *app) resolveBoardActor(sender, replyTo string) *boardParty {
+	by := a.boardMessageActor(sender)
+	if by.Session != "" && by.Fiber == "" && replyTo != "" {
+		if isSessionULID(replyTo) {
+			by.Fiber = replyTo
+		} else if lookup, err := a.lookupShuttleAddressFibers(replyTo); err == nil && !lookup.refused() && len(lookup.Fibers) == 1 {
+			by.Fiber = lookup.Fibers[0].UID
+		}
+	}
+	return by
+}
+
 // answersAsk reports whether a message from sender answers f's question. A
 // person (the human, or any sender named by a label) answers it; an agent,
-// named by its session address, answers only the question addressed to it,
-// which is its own thread's: another worker writing to the fiber leaves the
-// question for whoever it asks.
-func (a *app) answersAsk(st *felt.Storage, f *felt.Felt, sender string) bool {
-	by := a.boardMessageActor(sender)
+// named by its session address (and optional replyTo fiber for cross-host
+// senders), answers only the question addressed to it, which is its own
+// thread's: another worker writing to the fiber leaves the question for
+// whoever it asks.
+func (a *app) answersAsk(st *felt.Storage, f *felt.Felt, sender, replyTo string) bool {
+	by := a.resolveBoardActor(sender, replyTo)
 	if by.Session == "" {
 		return true
 	}

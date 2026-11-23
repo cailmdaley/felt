@@ -511,7 +511,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     refute "--fiber" in args
     # The agent answers only a question addressed to it: the CLI decides.
     assert [clear] = Enum.drop(clears.(), before)
-    assert ["--answered-by", sender] -- clear == []
+    assert ["--answered-by", sender, "--reply-to", "felt/mill"] -- clear == []
 
     before = length(clears.())
 
@@ -523,6 +523,41 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert "--fiber" in args
     # The human's typed line answers through the worker's prompt hook.
     assert Enum.drop(clears.(), before) == []
+  end
+
+  test "an agent's launch directive carries From header and scoped reply-to clear" do
+    clears = fn ->
+      for {"shuttle", args} <- MockRunner.commands(), "--clear" in args, do: args
+    end
+
+    fiber = "tests/agent-launch-directive"
+    MockRunner.set_fiber(fiber, make_fiber(fiber))
+
+    MockRunner.set_shuttle(
+      fiber,
+      oneshot_shuttle() <> "ask:\n  text: Which?\n  at: \"2026-11-15T10:00:00Z\"\n"
+    )
+
+    sender = "shuttle://elsewhere/claude/mill"
+    before = length(clears.())
+
+    api_conn()
+    |> post(
+      "/api/v1/dispatch",
+      Jason.encode!(%{
+        "fiber_id" => fiber,
+        "force" => true,
+        "user_message" => "start fresh",
+        "message_id" => "agent-launch-directive",
+        "from" => sender,
+        "reply_to" => "felt/mill"
+      })
+    )
+    |> json_response(200)
+
+    assert run_script() =~ "From felt/mill"
+    assert [clear] = Enum.drop(clears.(), before)
+    assert ["--answered-by", sender, "--reply-to", "felt/mill"] -- clear == []
   end
 
   test "a human line over the inbox limit is pasted" do

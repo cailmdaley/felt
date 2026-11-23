@@ -73,12 +73,13 @@ from this host's copy, which stays here, and then dispatches it.`,
 			}
 			if messageSet {
 				fields["user_message"] = message
-				// A session's directive is that agent's line, not the human's.
-				if caller := a.messageCaller(); caller != "" {
-					fields["from"] = caller
-					if replyTo := a.messageReplyTarget(caller); replyTo != "" {
-						fields["reply_to"] = replyTo
-					}
+			}
+			// A session's dispatch (with or without a message) is that agent's
+			// action, not the human's.
+			if caller := a.messageCaller(); caller != "" {
+				fields["from"] = caller
+				if replyTo := a.messageReplyTarget(caller); replyTo != "" {
+					fields["reply_to"] = replyTo
 				}
 			}
 			address := args[0]

@@ -4272,7 +4272,7 @@ defmodule Shuttle.Poller do
                   state
 
                 from ->
-                  elem(write_lifecycle(state, :clear_ask, fiber_id, ["--answered-by", from]), 1)
+                  elem(write_lifecycle(state, :clear_ask, fiber_id, clear_ask_args(from, opts)), 1)
               end
 
             {:reply, result, state}
@@ -4287,10 +4287,12 @@ defmodule Shuttle.Poller do
                   {:ok, state}
 
                 Keyword.get(opts, :answered_by) ->
-                  write_lifecycle(state, :clear_ask, fiber_id, [
-                    "--answered-by",
-                    Keyword.get(opts, :answered_by)
-                  ])
+                  write_lifecycle(
+                    state,
+                    :clear_ask,
+                    fiber_id,
+                    clear_ask_args(Keyword.get(opts, :answered_by), opts)
+                  )
 
                 Keyword.get(opts, :line_recorded, false) ->
                   write_lifecycle(state, :clear_ask, fiber_id, ["--no-board"])
@@ -4307,6 +4309,16 @@ defmodule Shuttle.Poller do
 
       {:error, reason, state} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp clear_ask_args(from, opts) do
+    case Keyword.get(opts, :answered_reply_to) do
+      reply_to when is_binary(reply_to) and reply_to != "" ->
+        ["--answered-by", from, "--reply-to", reply_to]
+
+      _ ->
+        ["--answered-by", from]
     end
   end
 

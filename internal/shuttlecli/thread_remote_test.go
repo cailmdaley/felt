@@ -95,13 +95,13 @@ func TestThreadRemoteDirectoryValidation(t *testing.T) {
 	}
 }
 
-// An untracked draft moves to its owner; a committed one stays on disk, since
-// deleting it would leave a tracked deletion that conflicts when the owner's
-// report syncs back to the same path.
+// An untracked or staged-only draft moves to its owner; a committed one stays
+// on disk, since deleting it would leave a tracked deletion that conflicts
+// when the owner's report syncs back to the same path.
 func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 	t.Parallel()
-	for _, committed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "untracked", true: "committed"}[committed], func(t *testing.T) {
+	for _, state := range []string{"untracked", "staged", "committed"} {
+		t.Run(state, func(t *testing.T) {
 			t.Parallel()
 			env := remoteLifecycleEnv(t)
 			dir, st := newStore(t)
@@ -134,9 +134,25 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 			if draft.Status != felt.StatusOpen {
 				t.Fatalf("draft status = %s", draft.Status)
 			}
-			if committed {
-				for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-q", "-m", "draft"}} {
-					if err := runGit(dir, args...); err != nil {
+			if state == "staged" || state == "committed" {
+				if err := runGit(dir, "init", "-q"); err != nil {
+					t.Fatal(err)
+				}
+				if state == "committed" {
+					if err := runGit(dir, "add", "-A"); err != nil {
+						t.Fatal(err)
+					}
+					if err := runGit(dir, "commit", "-q", "-m", "draft"); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if err := runGit(dir, "add", ".felt/parent/parent.md"); err != nil {
+						t.Fatal(err)
+					}
+					if err := runGit(dir, "commit", "-q", "-m", "parent"); err != nil {
+						t.Fatal(err)
+					}
+					if err := runGit(dir, "add", draft.Path); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -148,9 +164,9 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 				t.Fatalf("owner create payload = %#v", got)
 			}
 			_, err := os.Stat(draft.Path)
-			if !committed {
+			if state != "committed" {
 				if err == nil {
-					t.Fatal("untracked local draft remains after transfer")
+					t.Fatalf("%s local draft remains after transfer", state)
 				}
 				return
 			}

@@ -44,7 +44,11 @@ defmodule Shuttle.Delivery do
     sender =
       if from == "human",
         do: [],
-        else: [user_message_from: opts[:reply_to] || from, answered_by: from]
+        else: [
+          user_message_from: opts[:reply_to] || from,
+          answered_by: from,
+          answered_reply_to: opts[:reply_to]
+        ]
 
     dispatch = fn mode ->
       Poller.dispatch_fiber(
@@ -267,10 +271,17 @@ defmodule Shuttle.Delivery do
             Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
               Process.put(:"$callers", [caller])
 
+              clear_args =
+                ["--answered-by", from] ++
+                  if(is_binary(opts[:reply_to]) and opts[:reply_to] != "",
+                    do: ["--reply-to", opts[:reply_to]],
+                    else: []
+                  )
+
               Shuttle.LifecycleService.transition(
                 :clear_ask,
                 entry.fiber["uid"] || entry.fiber["id"],
-                ["--answered-by", from]
+                clear_args
               )
             end)
           end

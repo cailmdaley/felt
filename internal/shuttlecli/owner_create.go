@@ -96,7 +96,7 @@ func (a *app) moveRemoteDraft(owner string, f *felt.Felt, block *shuttle.Block) 
 	if err != nil && !os.IsNotExist(err) {
 		return movedDraftError{fmt.Sprintf("created %s on %s, but cannot inspect owner path: %v", f.ID, owner, err)}
 	}
-	if _, tracked := a.gitOutput(filepath.Dir(f.Path), "ls-files", "--error-unmatch", "--", filepath.Base(f.Path)); tracked {
+	if _, committed := a.gitOutput(filepath.Dir(f.Path), "cat-file", "-e", "HEAD:./"+filepath.Base(f.Path)); committed {
 		fmt.Fprintf(a.env.Stdout, "created %s on %s and armed it; its committed local draft stays in place for the owner's copy to sync over\n", f.ID, owner)
 		return nil
 	}

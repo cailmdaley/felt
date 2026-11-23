@@ -373,16 +373,18 @@ func TestClosePostRefusals(t *testing.T) {
 func TestAskClearAnsweredOnlyByTheAddressee(t *testing.T) {
 	ask := map[string]any{"text": "which layout?", "at": "2026-11-20T00:40:00Z"}
 	for _, tc := range []struct {
-		name, fiber, sender string
-		clears              bool
+		name, fiber, sender, replyTo string
+		clears                       bool
 	}{
-		{"human answers a top-level question", "top", "human", true},
-		{"a person named by label answers", "top", "Alice", true},
-		{"another worker leaves the human's question", "top", "shuttle://host/claude/sibling", false},
-		{"an unpaired session leaves it", "top", "shuttle://host/claude/stranger", false},
-		{"the orchestrator answers its thread's question", "hub/child", "shuttle://host/claude/orchestrator", true},
-		{"a sibling leaves the orchestrator's question", "hub/child", "shuttle://host/claude/sibling", false},
-		{"the human answers any question", "hub/child", "human", true},
+		{"human answers a top-level question", "top", "human", "", true},
+		{"a person named by label answers", "top", "Alice", "", true},
+		{"another worker leaves the human's question", "top", "shuttle://host/claude/sibling", "", false},
+		{"an unpaired session leaves it", "top", "shuttle://host/claude/stranger", "", false},
+		{"the orchestrator answers its thread's question", "hub/child", "shuttle://host/claude/orchestrator", "", true},
+		{"a remote orchestrator answers via reply-to", "hub/child", "shuttle://laptop/claude/orchestrator", "hub", true},
+		{"a remote sibling leaves the orchestrator's question", "hub/child", "shuttle://laptop/claude/sibling", "sibling", false},
+		{"a sibling leaves the orchestrator's question", "hub/child", "shuttle://host/claude/sibling", "", false},
+		{"the human answers any question", "hub/child", "human", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testEnv(t)
@@ -407,7 +409,11 @@ func TestAskClearAnsweredOnlyByTheAddressee(t *testing.T) {
 				{Fiber: mustRead(t, st, "hub").UID, Session: "orchestrator", Harness: "claude", Host: "host", Kind: "dispatch", At: 1},
 				{Fiber: mustRead(t, st, "sibling").UID, Session: "sibling", Harness: "claude", Host: "host", Kind: "dispatch", At: 1},
 			})
-			if _, stderr, err := executeIn(t, env, dir, "ask", tc.fiber, "--clear", "--answered-by", tc.sender); err != nil {
+			args := []string{"ask", tc.fiber, "--clear", "--answered-by", tc.sender}
+			if tc.replyTo != "" {
+				args = append(args, "--reply-to", tc.replyTo)
+			}
+			if _, stderr, err := executeIn(t, env, dir, args...); err != nil {
 				t.Fatalf("ask --clear: %v %s", err, stderr)
 			}
 			b, _, err := shuttle.BlockOf(mustRead(t, st, tc.fiber))
