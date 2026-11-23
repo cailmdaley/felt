@@ -5,33 +5,112 @@
 .pg-thread > .ws-family-page[hidden] { display: none; }
 /* What the page cannot show: a quiet line in its place. */
 .pg-status { margin: 10px 24px 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
-.pg-status[hidden], .pg-said[hidden], .pg-modes[hidden], .pg-mode-pill[hidden], .pg-posts[hidden], .pg-changes[hidden], .pg-changes-bar[hidden], .pg-console[hidden] { display: none; }
+.pg-status[hidden], .pg-said[hidden], .pg-nav[hidden], .pg-modes[hidden], .pg-mode-tabs[hidden], .pg-mode-pill[hidden], .pg-posts[hidden], .pg-changes[hidden], .pg-changes-bar[hidden], .pg-console[hidden] { display: none; }
 .pg-thread .ov-tools { gap: 2px; }
-.pg-console { box-sizing: border-box; text-decoration: none; }
-.pg-console[data-pending] { opacity: 0.45; pointer-events: none; }
-/* Mode pills (Posts / Tapestry & Files) on family roots and subtrees. */
-.pg-modes {
+/* Standalone browser / PWA navigation bar on /thread (omitted when in=rex). */
+.pg-nav {
   flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-  padding: 8px 16px 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--ws-hairline);
   background: var(--ws-paper);
 }
+.pg-back {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  border-radius: var(--ws-control-radius);
+  background: transparent;
+  color: var(--ws-ink-muted);
+  min-height: 36px;
+  padding: 0 10px 0 6px;
+  font: var(--type-row)/var(--leading-ui) var(--font-serif);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pg-back:hover, .pg-back:focus-visible {
+  color: var(--ws-ink);
+  background: var(--ws-hover);
+  outline: none;
+}
+.pg-bar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font: 600 var(--type-label)/var(--leading-tight) var(--font-mono);
+  color: var(--ws-ink);
+}
+.pg-console {
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ws-control-radius);
+  color: var(--ws-ink-soft);
+  text-decoration: none;
+  cursor: pointer;
+}
+.pg-console > svg { width: 17px; height: 17px; }
+.pg-console:hover, .pg-console:focus-visible {
+  color: var(--ws-ink);
+  background: var(--ws-hover);
+  outline: none;
+}
+.pg-console[data-pending] { opacity: 0.45; pointer-events: none; }
+.pg-modes > .pg-console { margin-left: auto; }
+/* Mode pills (Posts / Tapestry & Files / Changes) on family roots and subtrees. */
+.pg-modes {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--ws-hairline);
+  background: var(--ws-paper);
+}
+.pg-mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pg-mode-tabs::-webkit-scrollbar { display: none; }
 .pg-mode-pill {
   appearance: none;
+  flex: 0 0 auto;
   border: 1px solid var(--ws-hairline);
   border-radius: var(--ws-control-radius);
   background: transparent;
   color: var(--ws-ink-muted);
   padding: 3px 10px;
   font: var(--type-note)/var(--leading-ui) var(--font-serif);
+  white-space: nowrap;
   cursor: pointer;
 }
 .pg-mode-pill[data-active] {
   color: var(--ws-ink);
   border-color: var(--ws-ink-muted);
   background: var(--ws-hover);
+}
+@media (max-width: 700px), (pointer: coarse) {
+  .pg-back { min-height: var(--ws-phone-target); }
+  .pg-console { width: var(--ws-phone-target); height: var(--ws-phone-target); }
+  .pg-console > svg { width: 20px; height: 20px; }
+  .pg-modes { padding: 6px 12px; }
+  .pg-mode-pill { min-height: 36px; padding: 6px 12px; }
 }
 /* Family Posts stream. */
 .pg-posts {
@@ -132,7 +211,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px 14px 14px;
+  padding: calc(12px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
   font-family: var(--font-serif);
   background: var(--kbn-parchment);
   color: var(--kbn-ink);
@@ -285,7 +364,7 @@
 .pg-desk .kbn-folio { display: none; }
 
 @media (max-width: 520px), (max-width: 700px) and (pointer: coarse), (max-height: 500px) and (pointer: coarse) {
-  .pg-desk { padding: 8px; }
+  .pg-desk { padding: calc(8px + env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
   .pg-desk .kbn-section-now { flex: 0 0 auto; min-height: 0; }
   .pg-desk .kbn-folio { display: block; }
   .pg-desk .kbn-folio-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }

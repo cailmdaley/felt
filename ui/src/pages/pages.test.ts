@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addThreadFixtures } from '../../harness/thread-fixtures.js'
 import { WORKSPACE_HOST, WORKSPACE_UID, workspaceExample } from '../../harness/workspace-fixtures.js'
+import { saveConversationOpening } from '../board/conversationOpening.js'
 import { servedFeed, settle } from '../board/testFixtures.js'
 import { DeskPage } from './DeskPage.js'
 import { PageFeed, POLL_MS, SENDS_POLL_MS } from './feed.js'
 import { mountPage } from './mount.js'
-import { parsePageRoute, threadHref } from './route.js'
+import { deskHref, parsePageRoute, threadHref } from './route.js'
 import { AUTO_ADVANCE_IDLE_MS, ThreadPage } from './ThreadPage.js'
 
 describe('a page\'s address', () => {
@@ -27,10 +28,12 @@ describe('a page\'s address', () => {
     for (const f of ['01KV', '@umber', '01KV@', '']) expect(parsePageRoute({ protocol: 'http:', pathname: '/thread', search: `?f=${f}` }).fiber).toBeUndefined()
   })
 
-  it('opens another fiber\'s thread page keeping the rest of the address', () => {
+  it('opens another fiber\'s thread page keeping the rest of the address, and returns to Desk dropping f', () => {
     expect(threadHref('http://127.0.0.1:4000/thread?f=a@h&in=rex', { uid: 'b', host: 'g' })).toBe('http://127.0.0.1:4000/thread?f=b%40g&in=rex')
     expect(threadHref('http://127.0.0.1:4000/desk', { uid: 'b', host: 'g' })).toBe('http://127.0.0.1:4000/thread?f=b%40g')
     expect(threadHref('file:///d/index.html?example=threads&page=thread&f=a@h', { uid: 'b', host: 'g' })).toBe('file:///d/index.html?example=threads&page=thread&f=b%40g')
+    expect(deskHref('http://127.0.0.1:4000/thread?f=a@h')).toBe('http://127.0.0.1:4000/desk')
+    expect(deskHref('file:///d/index.html?example=threads&page=thread&f=a@h')).toBe('file:///d/index.html?example=threads&page=desk')
   })
 })
 
@@ -635,18 +638,21 @@ describe('the thread page', () => {
     expect(duePost).toMatchObject({ origin: WORKSPACE_HOST, due: '2026-12-01' })
   })
 
-  it('draws a console button beside Constitution/Tapestry/Sent Files that reopens a closed session or attaches a live worker', async () => {
+  it('draws a single header console button visible across Posts, Tapestry/Files, and Changes that attaches a live worker, reopens a closed session, or opens Rex/Claude on phone', async () => {
     type RawRow = { fiber: { uid?: string; shuttle?: Record<string, unknown> }; runtime?: Record<string, unknown> | null }
     const rows = example.feed.fibers as unknown as RawRow[]
+    const rootRow = rows.find(r => r.fiber.uid === WORKSPACE_UID)
+    if (rootRow) rootRow.runtime = { ...(rootRow.runtime ?? {}), state: 'running', tmux_session: 'shuttle-root', terminal: 'rex', rex_session: 'calibration-report', session_link: 'https://claude.ai/code/session_01Root' }
     const analysisRow = rows.find(r => r.fiber.uid === 'thread-analysis')
     if (analysisRow?.runtime) analysisRow.runtime.tmux_session = 'shuttle-analysis'
     const reviewRow = rows.find(r => r.fiber.uid === 'thread-review')
     if (reviewRow) reviewRow.fiber.shuttle = { ...reviewRow.fiber.shuttle, runtime: { session_uuid: '11111111-1111-4111-8111-111111111111' } }
 
-    // 1. Live worker (thread-analysis): console button attaches via /api/v1/attach with tmux_session + session.
+    // 1. Live worker (thread-analysis): console button sits in header bar (never duplicated in .ov-tools) and attaches via /api/v1/attach.
     const { page: livePage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}&in=rex`)
-    const liveConsole = livePage.el.querySelector<HTMLAnchorElement>('.ov-tools [data-part="console"]')!
-    expect(liveConsole).not.toBeNull()
+    expect(livePage.el.querySelectorAll('[data-part="console"]')).toHaveLength(1)
+    expect(livePage.el.querySelector('.ov-tools [data-part="console"]')).toBeNull()
+    const liveConsole = livePage.el.querySelector<HTMLAnchorElement>('[data-part="console"]')!
     expect(liveConsole.hidden).toBe(false)
     liveConsole.click()
     await settle()
@@ -657,8 +663,7 @@ describe('the thread page', () => {
     // 2. Done session with no live worker (thread-review has sessionUuid but no live worker): reopens via /api/v1/attach with { session, shuttle_host }.
     requests.length = 0
     const { page: donePage } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)
-    const doneConsole = donePage.el.querySelector<HTMLAnchorElement>('.ov-tools [data-part="console"]')!
-    expect(doneConsole).not.toBeNull()
+    const doneConsole = donePage.el.querySelector<HTMLAnchorElement>('[data-part="console"]')!
     expect(doneConsole.hidden).toBe(false)
     expect(doneConsole.getAttribute('aria-label')).toContain('Reopen')
     doneConsole.click()
@@ -667,11 +672,37 @@ describe('the thread page', () => {
     expect(reopenAttach).toHaveLength(1)
     expect(JSON.parse(reopenAttach[0].body!)).toEqual({ session: '11111111-1111-4111-8111-111111111111', shuttle_host: WORKSPACE_HOST })
 
-    // 3. Draft with no session (thread-draft): console button stays hidden.
+    // 3. Draft with no session (thread-draft): console button stays hidden and mode bar stays hidden when in=rex.
     const { page: draftPage } = await open(`?f=thread-draft@${WORKSPACE_HOST}&in=rex`)
-    const draftConsole = draftPage.el.querySelector<HTMLAnchorElement>('.ov-tools [data-part="console"]')!
-    expect(draftConsole).not.toBeNull()
+    const draftConsole = draftPage.el.querySelector<HTMLAnchorElement>('[data-part="console"]')!
     expect(draftConsole.hidden).toBe(true)
+    expect(draftPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
+
+    // 4. Standalone phone (!inRex): ← Desk button is visible and navigates to /desk; Console stays visible across Posts, Files, and Changes and updates immediately when destination changes.
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const { page: phonePage, navigate } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const nav = phonePage.el.querySelector<HTMLElement>('.pg-nav')!
+    const back = phonePage.el.querySelector<HTMLButtonElement>('.pg-back')!
+    const phoneConsole = nav.querySelector<HTMLAnchorElement>('[data-part="console"]')!
+    expect(nav.hidden).toBe(false)
+    expect(back.textContent).toBe('← Desk')
+    expect(nav.querySelector('.pg-bar-title')!.textContent).toBe('calibration-report')
+    // Visible on Posts (default for family root), Tapestry/Files, AND Changes!
+    expect(phonePage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(false)
+    expect(phoneConsole.hidden).toBe(false)
+    expect(phoneConsole.getAttribute('href')).toBe('https://claude.ai/code/session_01Root')
+    phonePage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="files"]')!.click()
+    expect(phoneConsole.hidden).toBe(false)
+    phonePage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="changes"]')!.click()
+    expect(phoneConsole.hidden).toBe(false)
+    // Switching destination preference to Rex updates href immediately.
+    saveConversationOpening('rex')
+    expect(phoneConsole.getAttribute('href')).toBe('shortcuts://run-shortcut?name=Rex&input=text&text=calibration-report')
+    // Tapping ← Desk navigates to /desk.
+    back.click()
+    expect(navigate).toHaveBeenCalledWith(`${window.location.origin}/desk`)
+    // When in=rex, .pg-nav (← Desk) is hidden.
+    expect(livePage.el.querySelector<HTMLElement>('.pg-nav')!.hidden).toBe(true)
   })
 
   it('mounts the baked Changes view lazily on non-root threads with projectDir, sends reviews to the live worker, and disposes cleanly', async () => {

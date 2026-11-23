@@ -28,3 +28,12 @@ export function threadHref(href: string, fiber: { uid: string; host: string }): 
   url.searchParams.set('f', `${fiber.uid}@${fiber.host}`)
   return url.href
 }
+
+/** The address of the Desk page, from any page at `href`, dropping any fiber target. */
+export function deskHref(href: string): string {
+  const url = new URL(href)
+  url.searchParams.delete('f')
+  if (url.protocol === 'file:') url.searchParams.set('page', 'desk')
+  else url.pathname = url.pathname.replace(/[^/]*$/, 'desk')
+  return url.href
+}

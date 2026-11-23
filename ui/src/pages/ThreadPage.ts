@@ -2,7 +2,7 @@ import { bindAvoidKeyboard } from '@ui-sdk/core'
 import { clearLineKey, clearedLines, composeStream, fiberOf, lineIds, runningIn, type Channel, type Item } from '../board/channels.js'
 import { clockTime } from '../board/civilDay.js'
 import { attachConversationPicker } from '../board/conversationMenu.js'
-import { conversationDestinations, conversationDevice, conversationOpening, linkDestination, openDestination, resolveDestination, type ConversationDestination, type WorkerOpener } from '../board/conversationOpening.js'
+import { conversationDestinations, conversationDevice, conversationOpening, CONVERSATION_OPENING_CHANGED, linkDestination, openDestination, resolveDestination, type ConversationDestination, type WorkerOpener } from '../board/conversationOpening.js'
 import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'
 import type { MapFile } from '../board/family/model.js'
 import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../board/FileViewerPanel.js'
@@ -31,7 +31,7 @@ import { WorkerActions, type StartWorker } from '../board/workspace/workerAction
 import '../board/workspace/dock.css'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
-import { threadHref, type PageRoute } from './route.js'
+import { deskHref, threadHref, type PageRoute } from './route.js'
 import { ThreadSettings } from './ThreadSettings.js'
 
 export interface ThreadPageOptions {
@@ -89,8 +89,12 @@ const openFloating = (url: string): void => {
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
+  private readonly nav = document.createElement('nav')
+  private readonly backBtn = document.createElement('button')
+  private readonly navTitle = document.createElement('span')
   private readonly status = document.createElement('p')
   private readonly modes = document.createElement('div')
+  private readonly modeTabs = document.createElement('div')
   private readonly postsBtn = document.createElement('button')
   private readonly filesBtn = document.createElement('button')
   private readonly changesBtn = document.createElement('button')
@@ -108,6 +112,7 @@ export class ThreadPage {
   private readonly contextFact = document.createElement('span')
   private readonly cacheFact = document.createElement('span')
   private readonly said = document.createElement('p')
+  private readonly consoleAct: FiberActs
   private readonly family: FamilyPage
   private readonly feed: PageFeed
   private readonly opts: ThreadPageOptions
@@ -140,6 +145,7 @@ export class ThreadPage {
   private lastInteraction = -Infinity
   private knownShowAt: number | null = null
   private readonly onInteract = (): void => { this.lastInteraction = Date.now() }
+  private readonly onOpeningChanged = (): void => { this.consoleAct.paint() }
 
   constructor(feed: PageFeed, opts: ThreadPageOptions) {
     this.feed = feed
@@ -158,10 +164,26 @@ export class ThreadPage {
     this.el.className = 'pg-thread'
     this.status.className = 'pg-status'
 
+    this.consoleAct = this.buildConsole(() => this.feed.card())
+
+    this.nav.className = 'pg-nav'
+    this.nav.setAttribute('aria-label', 'Thread navigation')
+    this.backBtn.type = 'button'
+    this.backBtn.className = 'pg-back'
+    this.backBtn.textContent = '← Desk'
+    this.backBtn.setAttribute('aria-label', 'Back to Desk')
+    this.backBtn.addEventListener('click', () => this.opts.navigate(deskHref(window.location.href)))
+    this.navTitle.className = 'pg-bar-title'
+    this.nav.hidden = opts.route.inRex
+    if (!opts.route.inRex) {
+      this.nav.append(this.backBtn, this.navTitle, this.consoleAct.el)
+    }
+
     this.modes.className = 'pg-modes'
-    this.modes.setAttribute('role', 'tablist')
-    this.modes.setAttribute('aria-label', 'Thread view')
     this.modes.hidden = true
+    this.modeTabs.className = 'pg-mode-tabs'
+    this.modeTabs.setAttribute('role', 'tablist')
+    this.modeTabs.setAttribute('aria-label', 'Thread view')
     this.postsBtn.type = 'button'
     this.postsBtn.className = 'pg-mode-pill'
     this.postsBtn.dataset.mode = 'posts'
@@ -180,7 +202,11 @@ export class ThreadPage {
     this.changesBtn.setAttribute('role', 'tab')
     this.changesBtn.textContent = 'Changes'
     this.changesBtn.addEventListener('click', () => this.openChangesTab())
-    this.modes.append(this.postsBtn, this.filesBtn, this.changesBtn)
+    this.modeTabs.append(this.postsBtn, this.filesBtn, this.changesBtn)
+    this.modes.append(this.modeTabs)
+    if (opts.route.inRex) {
+      this.modes.append(this.consoleAct.el)
+    }
 
     this.postsPane.className = 'pg-posts'
     this.postsPane.hidden = true
@@ -242,12 +268,13 @@ export class ThreadPage {
     this.said.className = 'pg-said'
     this.said.setAttribute('role', 'status')
     this.said.hidden = true
-    this.family = new FamilyPage(this.feeds(), () => {}, target => this.buildConsole(target))
+    this.family = new FamilyPage(this.feeds(), () => {})
     this.family.pulls = false
     this.family.unfoldLead = true
     this.family.pinLead = true
-    this.el.append(this.status, this.modes, this.postsPane, this.family.el, this.changesPane, this.dockBand, this.said)
+    this.el.append(this.nav, this.status, this.modes, this.postsPane, this.family.el, this.changesPane, this.dockBand, this.said)
     for (const event of INTERACTION_EVENTS) document.addEventListener(event, this.onInteract, { capture: true, passive: true })
+    window.addEventListener(CONVERSATION_OPENING_CHANGED, this.onOpeningChanged)
     this.unsubscribe = feed.subscribe(() => this.render())
     this.render()
   }
@@ -271,9 +298,17 @@ export class ThreadPage {
       if (this.mode === 'posts' && !hasPostsMode) this.mode = 'files'
       if (this.mode === 'changes' && !hasChangesMode) this.mode = hasPostsMode ? 'posts' : 'files'
 
+      this.navTitle.textContent = slug(card)
+      this.navTitle.title = card.name
+      this.consoleAct.paint()
+      const hasConsole = !this.consoleAct.el.hidden
+      const hasTabs = hasPostsMode || hasChangesMode
+
       this.postsBtn.hidden = !hasPostsMode
+      this.filesBtn.hidden = !hasTabs
       this.changesBtn.hidden = !hasChangesMode
-      this.modes.hidden = !hasPostsMode && !hasChangesMode
+      this.modeTabs.hidden = !hasTabs
+      this.modes.hidden = this.opts.route.inRex ? (!hasTabs && !hasConsole) : !hasTabs
       this.postsBtn.setAttribute('aria-selected', String(this.mode === 'posts'))
       this.filesBtn.setAttribute('aria-selected', String(this.mode === 'files'))
       this.changesBtn.setAttribute('aria-selected', String(this.mode === 'changes'))
@@ -307,6 +342,9 @@ export class ThreadPage {
         this.paintDock(card)
       }
     } else {
+      this.navTitle.textContent = ''
+      this.navTitle.title = ''
+      this.consoleAct.paint()
       this.modes.hidden = true
       this.postsPane.hidden = true
       this.family.el.hidden = true
@@ -323,7 +361,9 @@ export class ThreadPage {
     clearTimeout(this.saidTimer)
     clearInterval(this.usageTimer)
     for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
+    window.removeEventListener(CONVERSATION_OPENING_CHANGED, this.onOpeningChanged)
     this.unsubscribe()
+    this.consoleAct.dispose()
     this.disposeChanges()
     this.stream.dispose()
     this.listen?.dispose()
@@ -691,8 +731,8 @@ export class ThreadPage {
     return destination ? { reopen: false, destination } : null
   }
 
-  /** Console button in the thread view's head, beside Constitution, Tapestry, and Sent Files. */
-  private buildConsole(target: () => KanbanCard): FiberActs {
+  /** Console button in the thread header bar, visible across Posts, Tapestry/Files, and Changes. */
+  private buildConsole(target: () => KanbanCard | undefined): FiberActs {
     const el = document.createElement('a')
     el.className = 'ws-doc-button pg-console'
     el.dataset.part = 'console'
@@ -701,7 +741,9 @@ export class ThreadPage {
     let pending = false
     const open = (): void => {
       if (pending) return
-      const card = target(), route = this.conversationRoute(card)
+      const card = target()
+      if (!card) return
+      const route = this.conversationRoute(card)
       if (!route) return
       if (route.reopen) {
         pending = true
@@ -723,15 +765,19 @@ export class ThreadPage {
       event.preventDefault()
       el.click()
     })
-    const dispose = attachConversationPicker(el, () => conversationDestinations(target(), conversationDevice(), this.openWorker))
+    const dispose = attachConversationPicker(el, () => {
+      const card = target()
+      return card ? conversationDestinations(card, conversationDevice(), this.openWorker) : []
+    })
     const paint = (): void => {
-      const card = target(), route = this.conversationRoute(card)
+      const card = target()
+      const route = card ? this.conversationRoute(card) : null
       el.hidden = !route
       const href = route && !route.reopen ? route.destination.href : undefined
       el.removeAttribute('href'); el.removeAttribute('target'); el.removeAttribute('rel')
       if (href) { linkDestination(el, href); el.removeAttribute('role') }
       else el.setAttribute('role', 'button')
-      if (!route) return
+      if (!card || !route) return
       const who = slug(card)
       const label = route.reopen
         ? `Reopen ${who}'s last session${card.shuttleHost ? ` on ${card.shuttleHost}` : ''}`

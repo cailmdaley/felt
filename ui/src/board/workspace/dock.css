@@ -349,9 +349,12 @@
 .ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,
 .ws-dock .kbn-ctl-history-toggle { font: var(--type-label)/var(--leading-ui) var(--font-serif) !important; }
 
-/* The console's acts as buttons where its head has room; the menu (⋯) holds them where it is short. */
+/* The console's acts as buttons where its head has room; the menu (⋯) holds settings and constitution where it is short, keeping the direct Console link one tap away. */
 @container dock (min-width: 621px) { .ws-dock .ws-band-acts > .ws-band-menu { display: none; } }
-@container dock (max-width: 620px) { .ws-dock .ws-band-acts > .ws-band-buttons { display: none; } }
+@container dock (max-width: 620px) {
+  .ws-dock .ws-band-acts > .ws-band-buttons :is(.ws-acts-settings, .ws-band-page) { display: none; }
+  .ws-dock .ws-band-acts > .ws-band-buttons:not(:has(.ws-acts-console:not([hidden]))) { display: none; }
+}
 .ws-dock[data-echoed] .ws-band-acts > :is(.ws-band-buttons, .ws-band-menu) { display: none; }
 /* Under a constitution's view, whose strips and head already name it, the console draws no name of its own. */
 .ws-dock[data-echoed] .ws-band-title { display: none; }
