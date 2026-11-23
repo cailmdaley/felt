@@ -4,9 +4,9 @@
  * Pocket TTS server (`pocket-tts serve --port 8321`).
  *
  * The tour teaches the board's actions. Controls the screenshots show (the
- * Drafts plus, the In flight star, Aloft, Temper and Discard) are zoomed and
+ * `+` and `✶` buttons, Working rows, and Awaiting review rows) are zoomed and
  * ringed on docs/assets/shuttle-board-example.png. Controls no screenshot
- * shows (the Stash and New idea dialogs and a card's drawer)
+ * shows (the Stash and New idea dialogs and a card's reader console)
  * appear as control guides: diagrams drawn here with ffmpeg, whose labels come
  * from ui/src/forms/StashForm.tsx, CaptureForm.tsx and
  * ui/src/board/workspace/Dock.ts, and which say on screen that they are not
@@ -105,15 +105,15 @@ const ring = (x, y, w, h, during) => ({ x, y, w, h, during })
  * the ring stays on.
  */
 const scenes = [
-  { card: true, title: 'The Shuttle board', lines: ['What each button does', 'Screenshots of the real board over a fictional workshop, and control guides'],
+  { card: true, title: 'The Shuttle board', lines: ['What each control does', 'Screenshots of the real board over a fictional workshop, and control guides'],
     say: ['Here is the Shuttle board, and how to use its main controls.'] },
   { image: 'shuttle-board-example.png', from: FULL, to: at(10, 12, 1420), move: 6,
-    say: ['These Desk lanes show drafts not yet started, work in flight, and results awaiting your review.'] },
+    say: ['The Desk shows what is waiting on you, what is working, and results awaiting review, with drafts and resting cards on the shelf below.'] },
   { image: 'shuttle-board-example.png', from: at(10, 12, 1420), to: at(0, 0, 640),
-    rings: [ring(...Object.values(shot(431, 61, 36, 36)))],
-    say: ['To write a task yourself, click the plus on Drafts.'] },
+    rings: [ring(...Object.values(shot(436, 53, 28, 28)))],
+    say: ['To write a task yourself, click the plus button to open the Stash form.'] },
   { guide: [
-      ...guideHead('Drafts + opens “Stash a constitution”'),
+      ...guideHead('Plus (+) opens “Stash a constitution”'),
       panel(200, 140, 880, 530),
       text(240, 160, 'shuttle · stash', { font: MONO, size: 14, color: MUTED }),
       text(240, 182, 'Stash a constitution', { font: SERIF, size: 30 }),
@@ -135,10 +135,10 @@ const scenes = [
       'With One-shot selected, Stash saves a draft card.',
     ] },
   { image: 'shuttle-board-example.png', from: at(0, 0, 640), to: at(470, 0, 660),
-    rings: [ring(...Object.values(shot(907, 61, 36, 36)))],
-    say: ['Or click the star on In flight, and describe an idea in your own words.'] },
+    rings: [ring(...Object.values(shot(912, 53, 28, 28)))],
+    say: ['Or click the star on Working, and describe an idea in your own words.'] },
   { guide: [
-      ...guideHead('The In flight star opens “New idea”'),
+      ...guideHead('The Working star (✶) opens “New idea”'),
       panel(200, 140, 880, 530),
       text(240, 160, 'shuttle · capture', { font: MONO, size: 14, color: MUTED }),
       text(240, 182, 'New idea', { font: SERIF, size: 30 }),
@@ -154,14 +154,14 @@ const scenes = [
       'An agent turns your words into a task, and its card appears a moment later.',
     ] },
   { guide: [
-      ...guideHead('Click a card to open its actions'),
+      ...guideHead('Click any row to open its reader and console'),
       panel(200, 140, 880, 530),
       text(240, 160, 'workshop/participant-guide', { font: MONO, size: 14, color: MUTED }),
       text(240, 182, 'Prepare the workshop guide', { font: SERIF, size: 30 }),
       rect(240, 234, 800, 40, '0xF3EBDA', RULE),
-      text(254, 243, '▾', { font: MONO, size: 17, color: MUTED }),
-      text(282, 243, 'claude-opus', { font: MONO, size: 16, color: COBALT }), text(408, 243, 'medium', { font: MONO, size: 16, color: MUTED }),
-      text(510, 243, 'my-laptop:~/projects/workshop', { font: MONO, size: 16, color: MUTED }),
+      text(254, 243, '›_', { font: MONO, size: 17, color: COBALT }),
+      text(290, 243, 'claude-opus', { font: MONO, size: 16, color: COBALT }), text(416, 243, 'medium', { font: MONO, size: 16, color: MUTED }),
+      text(518, 243, 'my-laptop:~/projects/workshop', { font: MONO, size: 16, color: MUTED }),
       rect(240, 290, 800, 128, FIELD, RULE),
       text(256, 304, 'What should the worker do next?', { font: SERIF, size: 20, color: `${INK}@0.45` }),
       ...button(574, 364, 124, 40, 'Meeting'), ...button(708, 364, 158, 40, 'New session', 'send'), ...button(876, 364, 150, 40, 'Resume', 'send'),
@@ -180,25 +180,25 @@ const scenes = [
       ring(700, 356, 174, 56, [3, 4]), ring(868, 356, 166, 56, [5, 6]),
     ],
     say: [
-      'Click any card to open it.',
-      'The strip under its title, showing who works it and where, unfolds its actions.',
+      'Click any card to open its reader.',
+      'The console under its title shows who works it, opens its conversation, and holds its controls.',
       'Write a message for the worker if you like, then choose how to send it.',
       'New session starts a fresh conversation, which reads the task and its notes from the top.',
       'If a worker is still running, the board asks before cutting it off.',
       'Resume requests the task’s previous conversation.',
       'Use it when finished work needs one more change.',
     ] },
-  { image: 'shuttle-board-example.png', from: at(10, 12, 1420), to: at(470, 60, 500),
-    rings: [ring(...Object.values(shot(881, 195, 54, 26)))],
-    say: ['On a running card, Aloft opens the worker’s conversation, in a terminal, a browser, or a desktop app.'] },
-  { image: 'shuttle-board-example.png', from: at(470, 60, 500), to: at(935, 60, 500),
-    rings: [ring(...Object.values(shot(980, 155, 420, 33)), [0]), ring(...Object.values(shot(1175, 194, 116, 28)), [1])],
+  { image: 'shuttle-board-example.png', from: at(10, 12, 1420), to: at(470, 20, 520),
+    rings: [ring(...Object.values(shot(494, 92, 451, 27)))],
+    say: ['In Working, click a live row to read its progress or open its terminal conversation in Rex, tmux, or a browser.'] },
+  { image: 'shuttle-board-example.png', from: at(470, 20, 520), to: at(935, 20, 505),
+    rings: [ring(...Object.values(shot(970, 92, 451, 27)))],
     say: [
-      'When a worker finishes, its outcome waits here for you.',
-      'Read it, then press Temper to accept the result, or Discard to set it aside.',
+      'When a worker finishes, its card moves to Awaiting review.',
+      'Read its outcome, then press Temper to accept the result, or Discard to set it aside.',
     ] },
-  { card: true, title: 'Set up Shuttle', lines: ['Start with one machine and one small task', 'cailmdaley.github.io/felt/shuttle/setup/'],
-    say: ['To try it, set up Shuttle on one machine, and start with one small task.'] },
+  { card: true, title: 'Set up felt & Shuttle', lines: ['Start with your agent or the interactive tutorial', 'cailmdaley.github.io/felt/getting-started/'],
+    say: ['To try it, open the setup and tutorial page, and let your agent guide you through one small task.'] },
 ]
 
 const run = (cmd, args) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'inherit'] }).toString()
