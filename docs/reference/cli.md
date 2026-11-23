@@ -400,6 +400,7 @@ Shuttle fiber path, slug, or UID.
 Fiber targets require one exact match across configured stores; they refuse guesses and duplicate matches, and a slug naming several fibers is refused with their full paths.
 Fiber sends use the owner's durable inbox whether a worker is live or dormant; attachments become retained owner-local file references.
 The receipt says what became of this message: woken, followed up in a turn, delivered (as context, or before a retry), held as context for cost, starting or queued.
+A fiber message held for cost and still unread an hour later gets a fresh session on the fiber, under the same launch gate as `--fresh`; when that launch is refused, the existing worker is woken.
 `--notify-when-idle` subscribes when a hook or wake delivers the entry; with no text, the owner subscribes the fiber's live worker at once, and a fiber with no live worker refuses it.
 A fiber absent from local stores can resolve by exact path or UID through the owner's live feed, without waiting for Git sync.
 A session ID resolves through live discovery and the session ledger; a managed Codex ledger row keeps its transcript id in `session` and its address id in `thread_id`.

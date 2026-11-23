@@ -203,7 +203,7 @@ func (a *app) printFiberReceipt(receipt *fiberReceipt, wake bool) error {
 	case receipt.Status == "followed_up":
 		_, err = fmt.Fprintf(a.env.Stdout, "followed up in a turn on %s (%s)\n", receipt.Fiber, receipt.MessageID)
 	case receipt.Status == "held":
-		_, err = fmt.Fprintf(a.env.Stdout, "held as context for cost on %s (%s)\n", receipt.Fiber, receipt.MessageID)
+		_, err = fmt.Fprintf(a.env.Stdout, "held as context for cost on %s; still unread in an hour, it gets a fresh session (%s)\n", receipt.Fiber, receipt.MessageID)
 	case receipt.Status == statusStarting:
 		_, err = fmt.Fprintf(a.env.Stdout, "starting a session on %s for it (%s)\n", receipt.Fiber, receipt.MessageID)
 	case wake:

@@ -302,8 +302,13 @@ A tracked worker whose conversation is not yet known is consumed as `-` with its
 | Any `force` | Wake regardless of cost or turn state, skipping the hook |
 | `ask`/`idle`, idle, not costly | Wake |
 | `ask`/`idle`, idle, costly, any `if_costly: fresh`, no force | Reserve a fresh launch and return `fresh` |
+| `ask`, idle, costly, `hold`, due for an hour or more | Reserve a fresh launch and return `fresh` |
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
 | `ask`/`idle`/`force`, no worker | Reserve a launch and return `launch`, when the fiber passes the gate below |
+
+A cost hold does not strand an `ask`: once it has been due for the escalation window (an hour; `SHUTTLE_COST_HOLD_ESCALATE_SEC` in the consumer's environment), it counts as `if_costly: fresh`.
+Its age runs from the later of `queued_at` and `not_before`, so a daemon restart does not reset it, and the poll's consume of every live worker is what notices it.
+A `none` entry is never escalated, and an entry the worker's hook took in time is no longer pending.
 
 A launch reservation is kept apart from the batches, in the inbox's `launch.json`: the reserving receiver (`-` and epoch 0 for a fiber with no worker), the asking entries it was requested for, and when, leased for two minutes.
 Reserving a launch never rewrites a batch's manifest.

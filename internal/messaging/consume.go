@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -239,7 +240,7 @@ func consumePass(ctx context.Context, env *sysenv.Env, fiber, host string, w Wor
 		if dormant {
 			return decideLaunch(due, held, inFlight), false
 		}
-		action, turn := decideConsumption(due, w, direct, reservation, now)
+		action, turn := decideConsumption(due, w, direct, reservation, now, costHoldEscalation(env))
 		if action == "wait" && w.Busy {
 			for _, it := range due {
 				if it.entry.Wishes.Turn != "ask" || reservation.holds(it.entry.Request.MessageID, now) {
@@ -379,11 +380,23 @@ func decideLaunch(due []mailboxPendingItem, held []string, inFlight bool) string
 	return "wait"
 }
 
+// costHoldEscalation is how long an ask entry is held as context for cost
+// before it asks for a fresh session instead: an hour, or
+// SHUTTLE_COST_HOLD_ESCALATE_SEC seconds.
+func costHoldEscalation(env *sysenv.Env) time.Duration {
+	if s, err := strconv.ParseFloat(env.Getenv("SHUTTLE_COST_HOLD_ESCALATE_SEC"), 64); err == nil {
+		return time.Duration(s * float64(time.Second))
+	}
+	return time.Hour
+}
+
 // decideConsumption answers wait, fresh or wake for a live worker over the due
 // entries no open batch holds, or context when it would wait and a direct
 // receiver has quiet entries. turn reports that the worker's idle and cost
-// facts would decide the entries asking for a turn.
-func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservation launchReservation, now time.Time) (action string, turn bool) {
+// facts would decide the entries asking for a turn. An ask entry due for
+// escalate or longer asks for a fresh session whatever its if_costly says,
+// so a cost hold never strands it.
+func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservation launchReservation, now time.Time, escalate time.Duration) (action string, turn bool) {
 	force, asking, wants, fresh, launching, quiet := false, false, false, false, false, false
 	for _, it := range due {
 		e := it.entry
@@ -410,7 +423,8 @@ func decideConsumption(due []mailboxPendingItem, w Worker, direct bool, reservat
 			quiet = true
 		}
 		wants = wants || wanted
-		fresh = fresh || (wanted && e.Wishes.IfCostly == "fresh")
+		stale := e.Wishes.Turn == "ask" && now.Sub(e.availableAt()) >= escalate
+		fresh = fresh || (wanted && (e.Wishes.IfCostly == "fresh" || stale))
 	}
 	action = "wait"
 	switch {

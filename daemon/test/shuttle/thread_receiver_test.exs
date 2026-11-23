@@ -636,6 +636,54 @@ defmodule Shuttle.ThreadReceiverTest do
     assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
   end
 
+  test "a cost hold asks for a fresh session once it stays unread past the window", context do
+    {poller, parent} = costly_consumer!(context, "ask", "hold")
+    assert {:ok, %{"action" => "wait", "held" => "cost"}} = Delivery.flush_context(parent)
+
+    Env.put_env("SHUTTLE_COST_HOLD_ESCALATE_SEC", "0")
+    Env.put_app_env(:dispatch_call_timeout_ms, 10)
+    :sys.replace_state(poller, &%{&1 | reconciliation_hold: "test refusal after resume"})
+    :sys.suspend(poller)
+
+    try do
+      assert {:ok, %{"action" => "fresh"}} = Delivery.flush_context(parent)
+      {:messages, messages} = Process.info(poller, :messages)
+
+      assert [{:"$gen_call", _, {:dispatch, _, opts}}] =
+               Enum.filter(messages, &match?({:"$gen_call", _, {:dispatch, _, _}}, &1))
+
+      assert opts[:resume_mode] == "fresh" and opts[:inbox_replace]
+    after
+      :sys.resume(poller)
+    end
+  end
+
+  test "an escalated cost hold whose fresh session is refused wakes the worker", context do
+    {poller, parent} = costly_consumer!(context, "ask", "hold")
+    Env.put_env("SHUTTLE_COST_HOLD_ESCALATE_SEC", "0")
+    :sys.replace_state(poller, &%{&1 | reconciliation_hold: "test refusal"})
+    Env.put_app_env(:receiver_spy, self())
+    Env.put_app_env(:receiver_wake_stub, true)
+    assert {:ok, %{"action" => "wake"}} = Delivery.flush_context(parent)
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle", "--costly"]}
+    assert_receive {:inbox_command, ["inbox", "consume", _, _, _, "--idle"]}
+  end
+
+  test "a context-only entry is never escalated", context do
+    {poller, parent} = costly_consumer!(context, "none", "hold")
+    Env.put_env("SHUTTLE_COST_HOLD_ESCALATE_SEC", "0")
+    Env.put_app_env(:receiver_spy, self())
+    :sys.suspend(poller)
+
+    try do
+      assert {:ok, %{"action" => "wait"} = answer} = Delivery.flush_context(parent)
+      refute Map.has_key?(answer, "turn")
+      refute_receive {:inbox_command, [_, _, _, _, _, "--idle" | _]}, 100
+    after
+      :sys.resume(poller)
+    end
+  end
+
   test "a poll with nothing asking for a turn is one consume and no turn read", context do
     {_poller, parent} = costly_consumer!(context, "none")
     Env.put_app_env(:receiver_spy, self())
@@ -714,7 +762,7 @@ defmodule Shuttle.ThreadReceiverTest do
              output |> Jason.decode!() |> Map.new(&{&1["id"], &1["turn"]})
   end
 
-  defp costly_consumer!(%{store: store, key: key}, turn \\ "ask") do
+  defp costly_consumer!(%{store: store, key: key}, turn \\ "ask", if_costly \\ "fresh") do
     native = "00000000-0000-4000-8000-000000000001"
     start_tmux!("consumer")
     poller = start_poller_for!(store)
@@ -763,7 +811,7 @@ defmodule Shuttle.ThreadReceiverTest do
                "--turn",
                turn,
                "--if-costly",
-               "fresh"
+               if_costly
              ])
 
     assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
