@@ -137,33 +137,36 @@ defmodule Shuttle.Pulse do
     end
   end
 
+  @doc """
+  Ends a reservation once its worker is seen idle after the tick was sent, or
+  once a full interval has passed without that sign: an idle worker whose
+  tick was lost emits no further hook event, and a missed tick is cheaper
+  than a pulse that never fires again. A send still running in this daemon
+  keeps its reservation until its outcome arrives.
+  """
   def observe(pulses, fibers, activity, sending_keys, now) do
+    now_ms = DateTime.to_unix(now, :millisecond)
+
     Enum.reduce(fibers, pulses, fn fiber, acc ->
       pulse_key = key(fiber)
 
-      case acc[pulse_key] do
-        %{"pending" => %{"activity_session" => session, "at" => sent}} ->
-          case activity[session] do
-            %{phase: "waiting", last_event_at: at} when at > sent ->
-              if pulse_key in sending_keys do
-                acc
-              else
-                released = release(acc, pulse_key)
+      with %{"pending" => %{"activity_session" => session, "at" => sent}} <- acc[pulse_key],
+           false <- pulse_key in sending_keys,
+           true <-
+             idle_since?(activity[session], sent) or now_ms - sent >= config(fiber).interval do
+        released = release(acc, pulse_key)
 
-                if window_reset_due?(fiber, released[pulse_key], now),
-                  do: released,
-                  else: advance(released, fiber, now)
-              end
-
-            _ ->
-              acc
-          end
-
-        _ ->
-          acc
+        if window_reset_due?(fiber, released[pulse_key], now),
+          do: released,
+          else: advance(released, fiber, now)
+      else
+        _ -> acc
       end
     end)
   end
+
+  defp idle_since?(%{phase: "waiting", last_event_at: at}, sent), do: at > sent
+  defp idle_since?(_, _), do: false
 
   def next_tick(%{window: nil}, at), do: DateTime.to_iso8601(at)
 

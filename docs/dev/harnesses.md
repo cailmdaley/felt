@@ -52,7 +52,7 @@ Some behaviour belongs to one harness and stays outside the adapters, as that ha
 - Claude's Remote Control (`Shuttle.RemoteControl`).
 - Codex's hook trust (`internal/feltcli/codex_hook_trust.go`).
 - In `Shuttle.Dispatcher`: Codex refuses a headless agent (`preflight_terminal/3`); a Codex worker's developer instructions merge the record's with the dispatch's; a quiet Claude resume runs interactive; and a Claude resume presses Enter to dismiss the resume warning.
-- In `Shuttle.Poller`: a pulse to Claude holds a durable reservation until a later idle event, since Claude's native inbox can race a new turn.
+- In `Shuttle.Poller`: a pulse to Claude holds a durable reservation until a later idle event, since Claude's native inbox can race a new turn; a reservation that sees no idle event lapses after one pulse interval, so a lost tick costs one tick rather than every later one.
 
 ### Hooks
 

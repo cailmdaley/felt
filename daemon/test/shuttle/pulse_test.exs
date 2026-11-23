@@ -157,19 +157,38 @@ defmodule Shuttle.PulseTest do
       }
     }
 
-    assert Pulse.observe(pulses, [fiber()], stale, [], later) == pulses
-    fresh = put_in(stale, ["conversation", :last_event_at], DateTime.to_unix(later, :millisecond))
-    assert Pulse.observe(pulses, [fiber()], fresh, ["watch-uid"], later) == pulses
-    released = Pulse.observe(pulses, [fiber()], fresh, [], later)
+    soon = DateTime.add(@now, 600)
+    assert Pulse.observe(pulses, [fiber()], stale, [], soon) == pulses
+    fresh = put_in(stale, ["conversation", :last_event_at], DateTime.to_unix(soon, :millisecond))
+    assert Pulse.observe(pulses, [fiber()], fresh, ["watch-uid"], soon) == pulses
+    released = Pulse.observe(pulses, [fiber()], fresh, [], soon)
     assert released["watch-uid"]["pending"] == nil
     assert released["watch-uid"]["state"] == "scheduled"
-    refute Pulse.due?(released["watch-uid"], later)
+    refute Pulse.due?(released["watch-uid"], soon)
 
     handed = put_in(fiber(), ["shuttle", "runtime", "handed_off_at"], "2026-11-02T08:00:00Z")
     assert Pulse.reconcile(pulses, [handed], "test-host", later)["watch-uid"]["pending"] == nil
 
     assert Pulse.reconcile(pulses, [fiber("open")], "test-host", later)["watch-uid"]["pending"] ==
              nil
+  end
+
+  test "a reservation with no idle event after it expires one interval after its send" do
+    pulses =
+      Pulse.reconcile(%{}, [fiber()], "test-host", @now)
+      |> Pulse.reserve("watch-uid", "conversation", "conversation", @now)
+
+    # 59m pulse: just short of the interval the reservation holds; a send still
+    # running in this daemon holds it past the interval.
+    almost = DateTime.add(@now, 3539)
+    expiry = DateTime.add(@now, 3540)
+    assert Pulse.observe(pulses, [fiber()], %{}, [], almost) == pulses
+    assert Pulse.observe(pulses, [fiber()], %{}, ["watch-uid"], expiry) == pulses
+
+    expired = Pulse.observe(pulses, [fiber()], %{}, [], expiry)
+    assert %{"pending" => nil, "state" => "scheduled"} = expired["watch-uid"]
+    refute Pulse.due?(expired["watch-uid"], expiry)
+    assert Pulse.due?(expired["watch-uid"], DateTime.add(expiry, 3540))
   end
 
   test "the feed carries timing outside frontmatter and holds hide its deadline" do
