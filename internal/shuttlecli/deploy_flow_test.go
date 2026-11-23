@@ -235,14 +235,22 @@ func TestDeployHostLockQueue(t *testing.T) {
 	if observer <= 0 || remote <= 0 {
 		t.Fatalf("missing observer %d or remote %d identity", observer, remote)
 	}
-	defer syscall.Kill(observer, syscall.SIGKILL)
+	stoppedDone := false
+	defer func() {
+		if !stoppedDone {
+			_ = syscall.Kill(-observer, syscall.SIGCONT)
+			_ = syscall.Kill(-observer, syscall.SIGKILL)
+		}
+	}()
 	if err := syscall.Kill(observer, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
 	deployAwait(t, "killed waiter cancelled: "+killedLog, func() bool { return strings.Contains(fleetRead(killedLog), "observer EOF") })
 	deployAwait(t, "stopped observer's waiter to expire its heartbeat lease", func() bool { return syscall.Kill(remote, 0) != nil })
 	syscall.Kill(observer, syscall.SIGCONT)
-	if err := f.deployWait(t, stopped); err == nil {
+	err = f.deployWait(t, stopped)
+	stoppedDone = true
+	if err == nil {
 		t.Fatalf("stopped observer reported success: %s", fleetRead(stoppedLog))
 	}
 

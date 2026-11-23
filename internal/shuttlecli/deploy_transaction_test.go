@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ import (
 type deployFleet struct {
 	root, repo, remote, origin, home, bin, events, state, gate, sha string
 	env                                                             []string
+	mu                                                              sync.Mutex
+	reaped                                                          map[*exec.Cmd]bool
 }
 
 // Fleet fixtures launch whole shell trees. Bound their process fanout
@@ -34,7 +37,18 @@ func newDeployFleet(t *testing.T) *deployFleet {
 	t.Helper()
 	deployFleetSlots <- struct{}{}
 	t.Cleanup(func() { <-deployFleetSlots })
-	f := &deployFleet{root: filepath.Join(t.TempDir(), "fleet's space")}
+	f := &deployFleet{
+		root:   filepath.Join(t.TempDir(), "fleet's space"),
+		reaped: make(map[*exec.Cmd]bool),
+	}
+	t.Cleanup(func() {
+		// Unblock any gated fixture shells and tear down any transaction group
+		// that still holds this fleet's host lock after a failed or aborted test.
+		for _, gate := range []string{f.gate, filepath.Join(f.root, "ssh-go"), filepath.Join(f.root, "activation-go"), filepath.Join(f.root, "ci-go")} {
+			_ = os.WriteFile(gate, nil, 0600)
+		}
+		f.killHeldLockGroup()
+	})
 	f.repo = filepath.Join(f.root, "repo")
 	f.remote = filepath.Join(f.root, "remote")
 	f.origin = filepath.Join(f.root, "origin")
@@ -296,13 +310,53 @@ func deployAwait(t *testing.T, description string, condition func() bool) {
 	}
 }
 
+func (f *deployFleet) markReaped(cmd *exec.Cmd) {
+	f.mu.Lock()
+	f.reaped[cmd] = true
+	f.mu.Unlock()
+}
+
+func (f *deployFleet) isReaped(cmd *exec.Cmd) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reaped[cmd]
+}
+
+// killHeldLockGroup terminates the transaction process group if this fleet's
+// deploy.lock is still actively held. Because the flock is live, the recorded
+// pgid still belongs to the holder and cannot have been recycled.
+func (f *deployFleet) killHeldLockGroup() {
+	lockPath := filepath.Join(f.home, ".shuttle/deploy.lock")
+	file, err := os.OpenFile(lockPath, os.O_RDWR, 0600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	if syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		return
+	}
+	info := fleetRead(lockPath)
+	var pid, pgid int
+	if i := strings.Index(info, "; pid="); i >= 0 {
+		if _, err := fmt.Sscanf(info[i:], "; pid=%d; pgid=%d;", &pid, &pgid); err == nil && pgid > 0 {
+			_ = syscall.Kill(-pgid, syscall.SIGCONT)
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		}
+	}
+}
+
 // deployWait waits for a deployer started by startArgs. A deployer still
 // running after two minutes fails the test with the process table and the
 // fleet's logs instead of holding the package to its timeout.
 func (f *deployFleet) deployWait(t *testing.T, cmd *exec.Cmd) error {
 	t.Helper()
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		f.markReaped(cmd)
+		done <- err
+	}()
 	select {
 	case err := <-done:
 		return err
@@ -345,10 +399,14 @@ func (f *deployFleet) startArgs(t *testing.T, name, host string, args []string, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		// The deployer's lifeline cancels its owned helpers; a reaped process
-		// group number must not be used as a later cleanup handle.
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
+		// While cmd is unreaped its process group cannot be recycled, so
+		// signalling -pid tears down the entire deployer tree before reaping.
+		if !f.isReaped(cmd) {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGCONT)
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+			f.markReaped(cmd)
+		}
 		log.Close()
 	})
 	return cmd, logPath
@@ -726,6 +784,30 @@ bad() { echo "$*" >&2; }
 			if string(out) != want {
 				t.Fatalf("owner %s cycle=%q, want %q", owner, out, want)
 			}
+		})
+	}
+}
+
+// Regression: an aborted or failed deploy test must not leave its deployer
+// process group or remote lock-holding transaction tree running after cleanup.
+func TestDeployCleanupReapsAbandonedProcessGroups(t *testing.T) {
+	t.Parallel()
+	var deployerPGID, holderPGID int
+	t.Run("abandoned", func(t *testing.T) {
+		f := newDeployFleet(t)
+		cmd, log := f.start(t, "abandoned")
+		deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+		deployerPGID = cmd.Process.Pid
+		holderPGID = f.lockHolder(t)
+		// Return without releasing f.gate or calling deployWait, simulating an
+		// aborted test whose cleanup must tear down every spawned process group.
+	})
+	if deployerPGID <= 0 || holderPGID <= 0 {
+		t.Fatalf("missing captured pgids: deployer=%d holder=%d", deployerPGID, holderPGID)
+	}
+	for name, pgid := range map[string]int{"deployer": deployerPGID, "holder": holderPGID} {
+		deployAwait(t, name+" process group gone", func() bool {
+			return syscall.Kill(-pgid, 0) == syscall.ESRCH
 		})
 	}
 }
