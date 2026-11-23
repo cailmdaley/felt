@@ -17,9 +17,13 @@ defmodule Shuttle.Palette do
 
   @doc """
   Gather live composite fibers, host pages config, and Rex bindings, then
-  build the palette payload `%{focused: map() | nil, items: [map()]}`.
+  build the palette payload `%{focused: map() | nil, default_project_dir: String.t() | nil, items: [map()]}`.
   """
-  @spec fetch(map()) :: %{focused: map() | nil, items: [map()]}
+  @spec fetch(map()) :: %{
+          focused: map() | nil,
+          default_project_dir: String.t() | nil,
+          items: [map()]
+        }
   def fetch(params \\ %{}) when is_map(params) do
     fibers = composite_entries()
     desk? = match?({:ok, %{desk: true}}, Host.pages())
@@ -28,6 +32,7 @@ defmodule Shuttle.Palette do
     build(fibers,
       desk?: desk?,
       bindings: bindings_doc,
+      default_project_dir: default_project_dir(),
       fiber_id: non_empty(params["fiber_id"]),
       session_id: non_empty(params["session_id"]),
       window_id: non_empty(params["window_id"]),
@@ -37,9 +42,13 @@ defmodule Shuttle.Palette do
 
   @doc """
   Pure builder: given composite fiber entries and options, returns
-  `%{focused: map() | nil, items: [map()]}`.
+  `%{focused: map() | nil, default_project_dir: String.t() | nil, items: [map()]}`.
   """
-  @spec build([map()], keyword()) :: %{focused: map() | nil, items: [map()]}
+  @spec build([map()], keyword()) :: %{
+          focused: map() | nil,
+          default_project_dir: String.t() | nil,
+          items: [map()]
+        }
   def build(entries, opts \\ []) when is_list(entries) do
     desk? = Keyword.get(opts, :desk?, false)
     bindings_doc = Keyword.get(opts, :bindings, %{})
@@ -65,10 +74,11 @@ defmodule Shuttle.Palette do
       |> Enum.sort_by(&sort_key(&1, chosen_roots))
       |> Enum.map(&entry_item(&1, chosen_roots))
 
-    items = Enum.take(desk_items ++ action_items ++ thread_items, @max_items)
+    items = Enum.take(desk_items ++ [new_thread_item()] ++ action_items ++ thread_items, @max_items)
 
     %{
       focused: focused_summary(focused_entry),
+      default_project_dir: non_empty(Keyword.get(opts, :default_project_dir)),
       items: items
     }
   end
@@ -105,6 +115,13 @@ defmodule Shuttle.Palette do
     case RexBindings.read() do
       {:ok, doc} -> doc
       _ -> %{}
+    end
+  end
+
+  defp default_project_dir do
+    case FeltStores.configured_stores() do
+      [first | _] -> non_empty(first) || System.user_home()
+      _ -> System.user_home()
     end
   end
 
@@ -255,6 +272,19 @@ defmodule Shuttle.Palette do
     }
   end
 
+  defp new_thread_item do
+    %{
+      id: "new_thread",
+      kind: "new_thread",
+      title: "New thread…",
+      subtitle: "Start a capture session from a prompt",
+      detail: "capture",
+      icon: "plus",
+      fiber_id: nil,
+      origin: nil
+    }
+  end
+
   defp focused_summary(nil), do: nil
 
   defp focused_summary(entry) do
@@ -264,7 +294,8 @@ defmodule Shuttle.Palette do
       title: entry.title,
       origin: entry.origin,
       column: entry.column,
-      standing: get_in(entry.fiber, ["shuttle", "kind"]) == "standing"
+      standing: get_in(entry.fiber, ["shuttle", "kind"]) == "standing",
+      project_dir: non_empty(get_in(entry.fiber, ["shuttle", "project_dir"]))
     }
   end
 

@@ -343,7 +343,43 @@ function M.setup(opts)
     return data
   end
 
-  local function dispatch_item(item, extra)
+  local function start_capture(data, prompt_text)
+    local text = non_empty_string(prompt_text) and trim(prompt_text) or ""
+    if text == "" then
+      local entered, err = rex.ui.input({
+        title = "New thread",
+        placeholder = "What do you want to work on?",
+        confirm = "Start",
+      })
+      if entered == nil then
+        if err ~= nil and err ~= "cancelled" then error("shuttle: " .. tostring(err), 0) end
+        return
+      end
+      text = trim(entered)
+    end
+    if text == "" then return end
+
+    local project_dir = nil
+    if type(data) == "table" then
+      if type(data.focused) == "table" then
+        project_dir = non_empty_string(data.focused.project_dir)
+      end
+      if project_dir == nil then
+        project_dir = non_empty_string(data.default_project_dir)
+      end
+    end
+
+    local payload = {
+      prompt = text,
+      focus = true,
+    }
+    if project_dir ~= nil then
+      payload.project_dir = project_dir
+    end
+    http_post_json("/api/v1/capture", payload)
+  end
+
+  local function dispatch_item(item, extra, data)
     if item.kind == "desk" then
       http_post_json("/api/v1/go", { target = "desk" })
       return
@@ -351,6 +387,11 @@ function M.setup(opts)
 
     if item.kind == "map" then
       http_post_json("/api/v1/go", { target = "map" })
+      return
+    end
+
+    if item.kind == "new_thread" then
+      start_capture(data, nil)
       return
     end
 
@@ -449,22 +490,41 @@ function M.setup(opts)
         end
       end
 
-      if #pick_items == 0 then return end
-
       local choice, err = rex.ui.pick({
         title = "Shuttle",
-        placeholder = "Jump to a thread, channel, or action…",
+        placeholder = "Jump to a thread, channel, action, or type a new prompt…",
         items = pick_items,
+        allow_other = true,
       })
       if choice == nil then
         if err ~= nil and err ~= "cancelled" then error("shuttle: " .. tostring(err), 0) end
         return
       end
 
+      if type(choice) == "table" then
+        local prompt_text = trim(choice.text or "")
+        if prompt_text ~= "" then
+          start_capture(data, prompt_text)
+        end
+        return
+      end
+
       local selected = by_id[choice]
       if selected ~= nil then
-        dispatch_item(selected)
+        dispatch_item(selected, nil, data)
       end
+    end,
+  })
+
+  rex.action({
+    name = "shuttle_new_thread",
+    title = "Shuttle: New Thread…",
+    description = "Start a new Shuttle capture session from a prompt.",
+    category = "Shuttle",
+    keywords = "shuttle new thread capture prompt",
+    run = function(ctx)
+      local data = fetch_palette(ctx)
+      start_capture(data, nil)
     end,
   })
 

@@ -26,14 +26,18 @@ defmodule ShuttleWeb.CaptureController do
 
   defp create_local(conn, params) do
     prompt = params["prompt"]
-    project_dir = params["project_dir"]
+    raw_dir = params["project_dir"]
+
+    project_dir =
+      if present?(raw_dir) and String.trim(raw_dir) != "" do
+        raw_dir
+      else
+        default_project_dir()
+      end
 
     cond do
       not present?(prompt) or String.trim(prompt) == "" ->
         conn |> put_status(400) |> json(%{error: "prompt is required"})
-
-      not present?(project_dir) ->
-        conn |> put_status(400) |> json(%{error: "project_dir is required"})
 
       not Shuttle.FS.dir?(project_dir) ->
         conn
@@ -48,6 +52,8 @@ defmodule ShuttleWeb.CaptureController do
                chrome: params["chrome"] == true
              ) do
           {:ok, %{session: session, agent_id: agent_id} = launched} ->
+            maybe_focus_rex(session, params["focus"] == true)
+
             json(
               conn,
               %{spawned: true, agent: agent_id}
@@ -79,6 +85,37 @@ defmodule ShuttleWeb.CaptureController do
         end
     end
   end
+
+  defp default_project_dir do
+    case Shuttle.FeltStores.configured_stores() do
+      [first | _] when is_binary(first) and first != "" -> first
+      _ -> System.user_home!()
+    end
+  end
+
+  defp maybe_focus_rex(session, true) do
+    if Shuttle.Terminal.primary() == Shuttle.Terminal.Rex do
+      runner = Shuttle.Env.app(:rex_runner, Shuttle.Runner.Default)
+
+      case Shuttle.Terminal.locate_target(runner, session) do
+        {Shuttle.Terminal.Rex, binding} ->
+          with {:ok, true} <- Shuttle.Terminal.Rex.select_binding(runner, binding, mac_only: true) do
+            Shuttle.Terminal.Rex.activate_app(runner)
+          end
+
+        _ ->
+          :ok
+      end
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp maybe_focus_rex(_session, _focus), do: :ok
 
   defp put_session_uuid(payload, uuid) when is_binary(uuid),
     do: Map.put_new(payload, :session_uuid, uuid)

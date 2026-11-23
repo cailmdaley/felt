@@ -30,6 +30,7 @@ defmodule ShuttleWeb.PaletteControllerTest do
       |> maybe_put("channel", Keyword.get(opts, :channel))
       |> maybe_put("seat", Keyword.get(opts, :seat))
       |> maybe_put("ask", Keyword.get(opts, :ask))
+      |> maybe_put("project_dir", Keyword.get(opts, :project_dir))
 
     fiber =
       %{
@@ -57,10 +58,12 @@ defmodule ShuttleWeb.PaletteControllerTest do
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   describe "Palette.build/2" do
-    test "includes Desk and Fleet Map only when pages.desk is enabled" do
-      entries = [make_entry("alpha", runtime: %{phase: "working"})]
+    test "includes Desk, Fleet Map (when pages.desk is enabled), and New thread… before focused actions" do
+      entries = [make_entry("alpha", runtime: %{phase: "working"}, project_dir: "/work/alpha")]
 
-      with_desk = Palette.build(entries, desk?: true)
+      with_desk = Palette.build(entries, desk?: true, default_project_dir: "/stores/loom")
+
+      assert with_desk.default_project_dir == "/stores/loom"
 
       assert [
                %{id: "desk", kind: "desk", fiber_id: nil, origin: nil},
@@ -72,12 +75,24 @@ defmodule ShuttleWeb.PaletteControllerTest do
                  icon: "map",
                  fiber_id: nil,
                  origin: nil
+               },
+               %{
+                 id: "new_thread",
+                 kind: "new_thread",
+                 title: "New thread…",
+                 subtitle: "Start a capture session from a prompt",
+                 detail: "capture",
+                 icon: "plus",
+                 fiber_id: nil,
+                 origin: nil
                }
                | _
              ] = with_desk.items
 
-      without_desk = Palette.build(entries, desk?: false)
+      without_desk = Palette.build(entries, desk?: false, fiber_id: FiberUid.for("alpha"))
       refute Enum.any?(without_desk.items, &(&1.kind in ["desk", "map"]))
+      assert [%{id: "new_thread", kind: "new_thread"}, %{kind: "action"} | _] = without_desk.items
+      assert without_desk.focused.project_dir == "/work/alpha"
     end
 
     test "orders threads by attention with tempered then discarded at the bottom" do
@@ -444,9 +459,10 @@ defmodule ShuttleWeb.PaletteControllerTest do
       body = Jason.decode!(conn.resp_body)
 
       assert body["focused"]["fiber_id"] == uid_live
+      assert is_binary(body["default_project_dir"]) and body["default_project_dir"] != ""
       items = body["items"]
 
-      assert Enum.take(items, 2) |> Enum.map(& &1["kind"]) == ["desk", "map"]
+      assert Enum.take(items, 3) |> Enum.map(& &1["kind"]) == ["desk", "map", "new_thread"]
 
       actions = Enum.filter(items, &(&1["kind"] == "action"))
       assert Enum.map(actions, & &1["action"]) == ["temper", "review", "rest", "discard", "new_session"]

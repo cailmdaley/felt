@@ -673,6 +673,8 @@ describe('the desk page', () => {
   const now = Date.now()
   let requests: Array<{ url: string; method: string; body?: string; headers: Headers }>
   let goAnswer: { went: boolean; place: string }
+  let paletteItems: Array<{ id: string; kind: string; title: string; subtitle?: string | null; detail?: string | null; fiber_id?: string | null; origin?: string | null }>
+  let captureStatus: number
   let feeds: PageFeed[]
   let pages: DeskPage[]
 
@@ -686,6 +688,14 @@ describe('the desk page', () => {
     feeds = []
     pages = []
     goAnswer = { went: true, place: 'live' }
+    captureStatus = 200
+    paletteItems = [
+      { id: 'desk', kind: 'desk', title: 'Desk', subtitle: 'All threads across the fleet', detail: 'desk', fiber_id: null, origin: null },
+      { id: 'new_thread', kind: 'new_thread', title: 'New thread…', subtitle: 'Start a capture session from a prompt', detail: 'capture', fiber_id: null, origin: null },
+      { id: `channel:${WORKSPACE_HOST}:${WORKSPACE_UID}`, kind: 'channel', title: 'Calibration Report', subtitle: `calibration-report · ${WORKSPACE_HOST}`, detail: 'channel', fiber_id: WORKSPACE_UID, origin: WORKSPACE_HOST },
+      { id: `thread:${WORKSPACE_HOST}:thread-analysis`, kind: 'thread', title: 'Analysis Run', subtitle: `analysis · ${WORKSPACE_HOST}`, detail: 'live', fiber_id: 'thread-analysis', origin: WORKSPACE_HOST },
+      { id: `thread:${WORKSPACE_HOST}:thread-archive`, kind: 'thread', title: 'Old Archive', subtitle: `archive · ${WORKSPACE_HOST}`, detail: 'tempered', fiber_id: 'thread-archive', origin: WORKSPACE_HOST },
+    ]
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET', headers = new Headers(init.headers)
       requests.push({ url, method, body: init.body as string | undefined, headers })
@@ -693,6 +703,13 @@ describe('the desk page', () => {
         new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...extra } })
       if (url.startsWith('/api/v1/fibers/composite')) return json(composite, { ETag: '"d1"' })
       if (url.startsWith('/api/v1/board/family')) return json({ records: [], waiting: {}, reach_ms: 14 * 86_400_000 })
+      if (url === '/api/v1/palette' && method === 'GET') return json({ focused: null, default_project_dir: '/stores/loom', items: paletteItems })
+      if (url === '/api/v1/capture' && method === 'POST') {
+        return new Response(JSON.stringify(captureStatus === 200 ? { spawned: true } : { error: 'capture failed' }), {
+          status: captureStatus,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
       if (url === '/api/v1/go' && method === 'POST') return json(goAnswer)
       return new Response('{}', { status: 404 })
     }))
@@ -767,6 +784,77 @@ describe('the desk page', () => {
     await settle()
     expect(posts().map(each => each.url)).toStrictEqual(['/api/v1/go'])
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('omits the search bar when in=rex, and renders a palette-backed search bar outside Rex', async () => {
+    const { page: rexPage } = await openDesk('?in=rex')
+    expect(rexPage.el.querySelector('.pg-desk-search')).toBeNull()
+    expect(requests.filter(each => each.url === '/api/v1/palette')).toHaveLength(0)
+
+    const { page, navigate } = await openDesk()
+    const input = page.el.querySelector<HTMLInputElement>('.pg-desk-search-input')!
+    const results = page.el.querySelector<HTMLElement>('.pg-desk-search-results')!
+    expect(input).not.toBeNull()
+    expect(results.hidden).toBe(true)
+    // Lazy fetch: nothing fetched until focus/input.
+    expect(requests.filter(each => each.url === '/api/v1/palette')).toHaveLength(0)
+
+    input.focus()
+    input.dispatchEvent(new Event('focus'))
+    await settle(); await settle()
+    expect(requests.filter(each => each.url === '/api/v1/palette')).toHaveLength(1)
+
+    // Multi-token case-insensitive match finds tempered threads and excludes non-thread/channel items.
+    input.value = 'archive tempered'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    expect(results.hidden).toBe(false)
+    const items = [...results.querySelectorAll<HTMLButtonElement>('.pg-desk-search-item')]
+    expect(items).toHaveLength(2) // 1 match + 1 capture row
+    expect(items[0]!.querySelector('.pg-desk-search-title')!.textContent).toBe('Old Archive')
+    expect(items[0]!.querySelector('.pg-desk-search-badge')!.textContent).toBe('tempered')
+    expect(items[1]!.textContent).toContain('Start new thread: “archive tempered”')
+
+    // Typing while focused in search input does not steal keys for DeskKeyboard.
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(navigate).not.toHaveBeenCalled()
+
+    // Clicking a match navigates to its /thread page and clears/closes the search.
+    items[0]!.click()
+    expect(navigate).toHaveBeenCalledWith(`${window.location.origin}/thread?f=thread-archive%40${WORKSPACE_HOST}`)
+    expect(input.value).toBe('')
+    expect(results.hidden).toBe(true)
+
+    // Clicking the capture row posts /api/v1/capture and announces via .pg-said.
+    input.value = 'investigate weak lensing residuals'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    const captureBtn = results.querySelector<HTMLButtonElement>('.pg-desk-search-capture')!
+    captureBtn.click()
+    await settle(); await settle()
+    const capturePosts = posts().filter(each => each.url === '/api/v1/capture')
+    expect(capturePosts).toHaveLength(1)
+    expect(JSON.parse(capturePosts[0]!.body!)).toStrictEqual({ prompt: 'investigate weak lensing residuals' })
+    const said = page.el.querySelector<HTMLElement>('.pg-said')!
+    expect(said.hidden).toBe(false)
+    expect(said.textContent).toBe('Started capture session…')
+
+    // Escape clears the query and closes the dropdown.
+    input.value = 'calibration'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    expect(results.hidden).toBe(false)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(input.value).toBe('')
+    expect(results.hidden).toBe(true)
+
+    // Palette cache refreshes after >15s.
+    expect(requests.filter(each => each.url === '/api/v1/palette')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(16_000)
+    input.dispatchEvent(new Event('focus'))
+    await settle(); await settle()
+    expect(requests.filter(each => each.url === '/api/v1/palette')).toHaveLength(2)
   })
 
   it('mountPage mounts DeskPage for /desk', async () => {
