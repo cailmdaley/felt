@@ -18,8 +18,7 @@ import (
 
 const handoffTailBytes = 256 * 1024
 
-// handoffUsage is the latest Codex request's context, and the claim file's
-// contents.
+// handoffUsage is the latest request's context, and the claim file's contents.
 type handoffUsage struct {
 	Tokens        float64 `json:"tokens"`
 	ContextWindow float64 `json:"contextWindow"`
@@ -35,9 +34,11 @@ func (a *app) hookHandoffCmd() *cobra.Command {
 	}}
 }
 
-// runHandoffHook nudges a Codex session once per level as its context crosses
-// the thresholds claude-plugin/hooks/lib/handoff.mjs also gives Pi. Claude
-// sessions decide their own handoff, so their transcripts are never read.
+// runHandoffHook nudges a session once per level as its context crosses two
+// thresholds. Codex shares Pi's defaults and wording from
+// claude-plugin/hooks/lib/handoff.mjs. Claude Code is nudged only as a Shuttle
+// worker (SHUTTLE_FIBER_PATH set), at 350k and 400k tokens, toward `shuttle
+// handoff`; any other Claude session returns before its transcript is read.
 func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	var input struct {
 		Event      string `json:"hook_event_name"`
@@ -50,14 +51,19 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	if (input.Event != "PostToolUse" && input.Event != "UserPromptSubmit") || input.Session == "" || input.Transcript == "" {
 		return nil
 	}
+	values := []float64{75, 500000, 88, 750000}
+	read := readCodexUsage
 	if harness.ForTranscript(a.env, input.Transcript) == "claude" {
-		return nil
+		if a.env.Getenv("SHUTTLE_FIBER_PATH") == "" {
+			return nil
+		}
+		values = []float64{75, 350000, 88, 400000}
+		read = readClaudeUsage
 	}
-	usage, err := readCodexUsage(input.Transcript)
+	usage, err := read(input.Transcript)
 	if err != nil || usage == nil {
 		return err
 	}
-	values := []float64{75, 500000, 88, 750000}
 	for i, key := range []string{"SHUTTLE_HANDOFF_PCT", "SHUTTLE_HANDOFF_TOKENS", "SHUTTLE_HANDOFF_HARD_PCT", "SHUTTLE_HANDOFF_HARD_TOKENS"} {
 		if raw, ok := a.env.LookupEnv(key); ok {
 			v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
@@ -105,7 +111,11 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 		if closeErr != nil {
 			return closeErr
 		}
-		line, err := encodeJSONLine(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.Event, AdditionalContext: handoffNotice(*usage, level)}})
+		notice := handoffNotice(*usage, level)
+		if usage.Harness == "claude" {
+			notice = claudeHandoffNotice(usage.Tokens, threshold, level)
+		}
+		line, err := encodeJSONLine(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.Event, AdditionalContext: notice}})
 		if err != nil {
 			return err
 		}
@@ -115,11 +125,9 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	return nil
 }
 
-// readCodexUsage is the newest `token_count` event in the last 256 KiB of a
-// Codex rollout: the latest request's own tokens, not the cumulative total. A
-// tail without one (another harness's transcript, or a long run of other
-// records) is nil, never a whole-history scan.
-func readCodexUsage(file string) (*handoffUsage, error) {
+// transcriptTail is the complete lines in the last 256 KiB of file, newest
+// last; a cut first line is dropped.
+func transcriptTail(file string) ([][]byte, error) {
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
@@ -141,7 +149,17 @@ func readCodexUsage(file string) (*handoffUsage, error) {
 			tail = tail[i+1:]
 		}
 	}
-	lines := bytes.Split(tail, []byte{'\n'})
+	return bytes.Split(tail, []byte{'\n'}), nil
+}
+
+// readCodexUsage is the newest `token_count` event in a Codex rollout's tail:
+// the latest request's own tokens, not the cumulative total. A tail without
+// one is nil, never a whole-history scan.
+func readCodexUsage(file string) (*handoffUsage, error) {
+	lines, err := transcriptTail(file)
+	if err != nil {
+		return nil, err
+	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		var row struct {
 			Type    string `json:"type"`
@@ -161,6 +179,54 @@ func readCodexUsage(file string) (*handoffUsage, error) {
 		}
 	}
 	return nil, nil
+}
+
+// readClaudeUsage is the prompt size of the newest main-thread assistant turn
+// in a Claude Code transcript's tail: input plus cache reads plus cache writes.
+// Sidechain and `<synthetic>` records carry no prompt of the main thread; a
+// compaction newer than any turn leaves the size unknown until the next turn.
+// Claude transcripts record no window, so only the token thresholds apply.
+func readClaudeUsage(file string) (*handoffUsage, error) {
+	lines, err := transcriptTail(file)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		var row struct {
+			Type      string `json:"type"`
+			Subtype   string `json:"subtype"`
+			Sidechain bool   `json:"isSidechain"`
+			Message   struct {
+				Model string `json:"model"`
+				Usage *struct {
+					Input      float64 `json:"input_tokens"`
+					CacheRead  float64 `json:"cache_read_input_tokens"`
+					CacheWrite float64 `json:"cache_creation_input_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(lines[i], &row) != nil || row.Sidechain {
+			continue
+		}
+		if row.Type == "system" && row.Subtype == "compact_boundary" {
+			return nil, nil
+		}
+		if row.Type == "assistant" && row.Message.Model != "<synthetic>" && row.Message.Usage != nil {
+			u := row.Message.Usage
+			return &handoffUsage{u.Input + u.CacheRead + u.CacheWrite, 0, "claude"}, nil
+		}
+	}
+	return nil, nil
+}
+
+// claudeHandoffNotice states a Claude worker's context and threshold, then the
+// next step.
+func claudeHandoffNotice(tokens, threshold float64, level string) string {
+	limit := strconv.FormatFloat(math.Round(threshold/100)/10, 'f', -1, 64) + "k"
+	if level == "hard" {
+		return fmt.Sprintf("Context is ~%.0fk tokens (hard threshold %s). Finish your current step, update `## Status`, commit, and run `shuttle handoff`.", tokens/1000, limit)
+	}
+	return fmt.Sprintf("Context is ~%.0fk tokens (soft threshold %s). Look for a natural point to update `## Status` and run `shuttle handoff`.", tokens/1000, limit)
 }
 
 func handoffNotice(usage handoffUsage, level string) string {

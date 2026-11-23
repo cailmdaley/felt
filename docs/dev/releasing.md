@@ -38,8 +38,10 @@ and `hooks.json`, the `agy.sh` shim and `shuttle-bin.sh`, and the skills.
 
 ## Context handoff nudges
 
-Claude Code sessions are never nudged; they decide their own handoff.
 Pi and Codex get a first nudge at `min(window × 75%, 500000)` context tokens and a firmer one at `min(window × 88%, 750000)`.
+A Claude Code session running as a Shuttle worker (`SHUTTLE_FIBER_PATH` set) gets a first nudge at 350000 tokens and a firmer one at 400000; Claude transcripts record no window, so only the token limits apply.
+Its notices state the context and threshold, then the next step: at the first, update `## Status` and run `shuttle handoff` at a natural point; at the second, finish the current step, update `## Status`, commit, and run `shuttle handoff`.
+Other Claude Code sessions are never nudged.
 Each level fires once per session, even after resuming or compacting.
 If a turn crosses both thresholds, Pi sends the first nudge and escalates on the next turn if work continues.
 The integration advises a durable handoff; it neither terminates the session nor changes interactive Pi's compaction settings.
@@ -50,9 +52,9 @@ The thresholds can be overridden in the environment:
 | Environment variable | Default |
 |---|---:|
 | `SHUTTLE_HANDOFF_PCT` | 75 |
-| `SHUTTLE_HANDOFF_TOKENS` | 500000 |
+| `SHUTTLE_HANDOFF_TOKENS` | 500000 (Claude worker: 350000) |
 | `SHUTTLE_HANDOFF_HARD_PCT` | 88 |
-| `SHUTTLE_HANDOFF_HARD_TOKENS` | 750000 |
+| `SHUTTLE_HANDOFF_HARD_TOKENS` | 750000 (Claude worker: 400000) |
 
 Percentages must be positive and at most 100; token limits must be positive.
 Hard settings must be at least their corresponding first-nudge settings.
@@ -60,8 +62,9 @@ Invalid configuration disables nudges without failing tools.
 Pi uses `getContextUsage()` and records `shuttle-handoff` entries in the session; it also honors existing `confer-handoff` entries.
 
 The Claude/Codex shim calls `shuttle hook handoff`; a missing or old binary fails open.
-It does not start Node, and it never reads a transcript in Claude Code's tree.
-For Codex it reads at most the last 256 KiB of the rollout and skips malformed, partial, or oversized records.
+It does not start Node, and it reads a transcript in Claude Code's tree only for a Shuttle worker.
+It reads at most the last 256 KiB of the transcript and skips malformed, partial, or oversized records.
+For Claude the context is the newest main-thread assistant turn's `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`; a compaction newer than any turn leaves it unknown until the next turn.
 If that suffix contains no usage record, it emits nothing and tries again at the next hook.
 The hook stores private atomic per-level claims under `~/.shuttle/handoff/`, keyed by a hash of harness and session ID; `SHUTTLE_HANDOFF_STATE_DIR` overrides this location.
 Resumes retain these files; delete a session's claims only to deliberately re-enable its warnings.

@@ -25,14 +25,24 @@ function fixture() {
 
 const codexRow = (tokens, window = 200_000) => JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: tokens }, model_context_window: window } } }) + "\n";
 
-test("Claude sessions are never nudged, at any size or override", () => {
+test("a Claude worker is nudged once per level at 350k and 400k; other Claude sessions never", () => {
   const f = fixture();
   try {
-    for (const tokens of [250_000, 400_000, 2_000_000]) {
-      f.write(tokens);
-      assert.equal(f.run(), "");
-      assert.equal(f.run(f.input, { SHUTTLE_HANDOFF_TOKENS: "1000" }), "");
-    }
+    const transcript = path.join(f.root, ".claude", "projects", "repo", "session.jsonl");
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    const input = { ...f.input, transcript_path: transcript };
+    const worker = { SHUTTLE_FIBER_PATH: path.join(f.root, "fiber.md") };
+    const say = (tokens, env = worker) => {
+      fs.writeFileSync(transcript, JSON.stringify({ type: "assistant", message: { role: "assistant", model: "claude", usage: { input_tokens: tokens - 20, cache_read_input_tokens: 10, cache_creation_input_tokens: 10 } } }) + "\n");
+      const out = f.run(input, env);
+      return out && JSON.parse(out).hookSpecificOutput.additionalContext;
+    };
+    assert.equal(say(2_000_000, {}), "", "outside a worker");
+    assert.equal(say(349_999), "");
+    assert.match(say(362_000), /^Context is ~362k tokens \(soft threshold 350k\)\. .*`shuttle handoff`\.$/);
+    assert.equal(say(360_000), "");
+    assert.match(say(412_000), /^Context is ~412k tokens \(hard threshold 400k\)\. Finish your current step/);
+    assert.equal(say(410_000), "");
   } finally { f.cleanup(); }
 });
 

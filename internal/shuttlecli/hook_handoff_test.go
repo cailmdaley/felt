@@ -145,36 +145,107 @@ func jsonString(v any) string {
 	return string(b)
 }
 
-// Claude sessions decide their own handoff: their transcripts are not read,
-// and a Claude transcript elsewhere holds no Codex usage to nudge on.
-func TestClaudeSessionsAreNeverNudged(t *testing.T) {
-	env, _ := envWithHome(t)
-	clearHandoffEnv(env)
-	env.Set("SHUTTLE_HANDOFF_STATE_DIR", t.TempDir())
-	env.Set("SHUTTLE_HANDOFF_TOKENS", "1000")
-	row, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "usage": map[string]any{"input_tokens": 2_000_000}}})
+func claudeUsageRow(tokens int) string {
+	row, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "model": "claude-opus", "usage": map[string]any{
+		"input_tokens": tokens - 30, "cache_read_input_tokens": 20, "cache_creation_input_tokens": 10, "output_tokens": 5000,
+	}}})
+	return string(row) + "\n"
+}
+
+// claudeTranscript is a session file under Claude Code's transcript tree.
+func claudeTranscript(t *testing.T, env *sysenv.Env) string {
+	t.Helper()
 	root, err := harness.TranscriptRoot(env, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	projects := filepath.Join(root, "repo")
-	if err := os.MkdirAll(projects, 0700); err != nil {
+	dir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, transcript := range []string{filepath.Join(projects, "s.jsonl"), filepath.Join(t.TempDir(), "s.jsonl")} {
-		if err := os.WriteFile(transcript, append(row, '\n'), 0600); err != nil {
+	return filepath.Join(dir, "s.jsonl")
+}
+
+// A Claude Code worker is told once per level, at 350k and 400k tokens, what
+// its context is and what to do next; the turns after a level stay quiet.
+func TestClaudeWorkerHandoffNudges(t *testing.T) {
+	soft := "Context is ~362k tokens (soft threshold 350k). Look for a natural point to update `## Status` and run `shuttle handoff`."
+	hard := "Context is ~412k tokens (hard threshold 400k). Finish your current step, update `## Status`, commit, and run `shuttle handoff`."
+	cases := []struct {
+		name  string
+		env   map[string]string
+		steps []int
+		want  []string
+	}{
+		{"defaults", nil, []int{100_000, 349_999, 362_000, 360_000, 380_000, 412_000, 410_000, 900_000}, []string{"", "", soft, "", "", hard, "", ""}},
+		{"both crossed in one turn", nil, []int{412_000, 412_000, 412_000}, []string{
+			"Context is ~412k tokens (soft threshold 350k). Look for a natural point to update `## Status` and run `shuttle handoff`.", hard, ""}},
+		{"token overrides", map[string]string{"SHUTTLE_HANDOFF_TOKENS": "1500", "SHUTTLE_HANDOFF_HARD_TOKENS": "200000"}, []int{1_000, 2_000, 150_000, 210_000, 362_000}, []string{"",
+			"Context is ~2k tokens (soft threshold 1.5k). Look for a natural point to update `## Status` and run `shuttle handoff`.", "",
+			"Context is ~210k tokens (hard threshold 200k). Finish your current step, update `## Status`, commit, and run `shuttle handoff`.", ""}},
+		{"hard below soft disables", map[string]string{"SHUTTLE_HANDOFF_TOKENS": "500000"}, []int{362_000, 600_000}, []string{"", ""}},
+		{"invalid override disables", map[string]string{"SHUTTLE_HANDOFF_HARD_TOKENS": "lots"}, []int{412_000}, []string{""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _ := envWithHome(t)
+			clearHandoffEnv(env)
+			env.Set("SHUTTLE_HANDOFF_STATE_DIR", t.TempDir())
+			env.Set("SHUTTLE_FIBER_PATH", "/fibers/project/fiber.md")
+			for key, value := range tc.env {
+				env.Set(key, value)
+			}
+			transcript := claudeTranscript(t, env)
+			for i, tokens := range tc.steps {
+				if err := os.WriteFile(transcript, []byte(claudeUsageRow(tokens)), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if got := runHandoff(t, env, transcript); got != tc.want[i] {
+					t.Fatalf("at %d tokens:\ngot  %q\nwant %q", tokens, got, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// A Claude session outside a Shuttle worker is never nudged, at any size.
+func TestClaudeSessionsOutsideWorkersAreNotNudged(t *testing.T) {
+	env, _ := envWithHome(t)
+	clearHandoffEnv(env)
+	env.Unset("SHUTTLE_FIBER_PATH")
+	env.Set("SHUTTLE_HANDOFF_STATE_DIR", t.TempDir())
+	transcript := claudeTranscript(t, env)
+	if err := os.WriteFile(transcript, []byte(claudeUsageRow(2_000_000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := runHandoff(t, env, transcript); got != "" {
+		t.Fatalf("interactive Claude session nudged: %s", got)
+	}
+}
+
+// The latest main-thread turn's prompt counts; subagent and synthetic records
+// do not, and a compaction since that turn leaves the size unknown.
+func TestReadClaudeUsage(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "s.jsonl")
+	sidechain := `{"type":"assistant","isSidechain":true,"message":{"usage":{"input_tokens":900000}}}` + "\n"
+	synthetic := `{"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0}}}` + "\n"
+	compact := `{"type":"system","subtype":"compact_boundary"}` + "\n"
+	for _, tc := range []struct {
+		body string
+		want float64
+	}{
+		{claudeUsageRow(100_000) + claudeUsageRow(362_000) + sidechain + synthetic + `{"type":"user"}` + "\nbad json\n" + `{"partial":`, 362_000},
+		{claudeUsageRow(362_000) + compact, -1},
+		{claudeUsageRow(362_000) + compact + claudeUsageRow(40_000), 40_000},
+		{claudeUsageRow(362_000) + strings.Repeat("x", handoffTailBytes) + "\n", -1},
+	} {
+		if err := os.WriteFile(file, []byte(tc.body), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if got := runHandoff(t, env, transcript); got != "" {
-			t.Fatalf("%s: Claude session nudged: %s", transcript, got)
+		usage, err := readClaudeUsage(file)
+		if err != nil || (tc.want < 0) != (usage == nil) || (usage != nil && (usage.Tokens != tc.want || usage.Harness != "claude")) {
+			t.Fatalf("want %v, got %+v %v", tc.want, usage, err)
 		}
-	}
-	// Even a token_count row inside Claude's tree is never read.
-	if err := os.WriteFile(filepath.Join(projects, "s.jsonl"), []byte(codexTokenRow(2_000_000, 0)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if got := runHandoff(t, env, filepath.Join(projects, "s.jsonl")); got != "" {
-		t.Fatalf("a transcript under Claude's tree was read: %s", got)
 	}
 }
 

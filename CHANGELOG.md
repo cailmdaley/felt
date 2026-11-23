@@ -8,6 +8,10 @@ maintainer declares ([Versioning](docs/dev/releasing.md#versioning)).
 
 ## Unreleased
 
+### Added
+
+- Claude Code workers get the context handoff nudge: once at 350,000 tokens and once more at 400,000, each stating the context size and threshold and asking for `## Status` and `shuttle handoff`. `SHUTTLE_HANDOFF_TOKENS` and `SHUTTLE_HANDOFF_HARD_TOKENS` override both limits. Claude sessions outside Shuttle workers are still not nudged.
+
 ## [2.1.2] — 2026-11-18
 
 Fixes alone. Upgrade from 2.1.1 with `felt update`; a host that runs a fetched Shuttle daemon follows it with `shuttle daemon upgrade`.
