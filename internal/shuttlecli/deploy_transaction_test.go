@@ -23,7 +23,7 @@ type deployFleet struct {
 	root, repo, remote, origin, home, bin, events, state, gate, sha string
 	env                                                             []string
 	mu                                                              sync.Mutex
-	reaped                                                          map[*exec.Cmd]bool
+	waitStarted                                                     map[*exec.Cmd]bool
 }
 
 // Fleet fixtures launch whole shell trees. Bound their process fanout
@@ -38,16 +38,13 @@ func newDeployFleet(t *testing.T) *deployFleet {
 	deployFleetSlots <- struct{}{}
 	t.Cleanup(func() { <-deployFleetSlots })
 	f := &deployFleet{
-		root:   filepath.Join(t.TempDir(), "fleet's space"),
-		reaped: make(map[*exec.Cmd]bool),
+		root:        filepath.Join(t.TempDir(), "fleet's space"),
+		waitStarted: make(map[*exec.Cmd]bool),
 	}
 	t.Cleanup(func() {
-		// Unblock any gated fixture shells and tear down any transaction group
-		// that still holds this fleet's host lock after a failed or aborted test.
-		for _, gate := range []string{f.gate, filepath.Join(f.root, "ssh-go"), filepath.Join(f.root, "activation-go"), filepath.Join(f.root, "ci-go")} {
-			_ = os.WriteFile(gate, nil, 0600)
-		}
-		f.killHeldLockGroup()
+		// Signal every gated fixture wait loop to exit promptly if a test
+		// aborted or timed out before opening its gates.
+		_ = os.WriteFile(filepath.Join(f.root, "abort"), nil, 0600)
 	})
 	f.repo = filepath.Join(f.root, "repo")
 	f.remote = filepath.Join(f.root, "remote")
@@ -88,7 +85,8 @@ func newDeployFleet(t *testing.T) *deployFleet {
 	write(filepath.Join(f.repo, "scripts/ci-status-hook.sh"), `#!/bin/sh
 if [ "${CI_GATE:-}" = 1 ]; then
  touch "$FLEET_ROOT/ci-entered"
- while [ ! -f "$FLEET_ROOT/ci-go" ]; do sleep .02; done
+ n=0; while [ ! -f "$FLEET_ROOT/ci-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+ [ ! -f "$FLEET_ROOT/abort" ] || exit 1
 fi
 `)
 	write(filepath.Join(f.repo, "tracked"), "target\n")
@@ -98,7 +96,11 @@ fi
 	write(filepath.Join(f.repo, "bin/shuttle-launch"), `#!/bin/sh
 if (: >&3) 2>/dev/null || (: >&4) 2>/dev/null; then echo launcher-inherited-deploy-lock >&2; exit 92; fi
 bash -c 'trap -p TERM' > "$FLEET_ROOT/launcher-term-trap"
-if [ "${ACTIVATION_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/activation-entered"; while [ ! -f "$FLEET_ROOT/activation-go" ]; do sleep .02; done; fi
+if [ "${ACTIVATION_GATE:-0}" = 1 ]; then
+ touch "$FLEET_ROOT/activation-entered"
+ n=0; while [ ! -f "$FLEET_ROOT/activation-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+ [ ! -f "$FLEET_ROOT/abort" ] || exit 1
+fi
 sha=$(git -C "${TEST_RELEASE%/bin/*}" rev-parse HEAD)
 printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","incarnation":"fixture-incarnation","contract":{"ok":true},"reconciliation_hold":null,"ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
 echo cycle >> "$EVENTS"
@@ -161,7 +163,11 @@ for option in ConnectTimeout=15 ServerAliveInterval=15 ServerAliveCountMax=3; do
  case "$*" in *"$option"*) ;; *) echo "missing SSH bound: $option" >&2; exit 94;; esac
 done
 case "$*" in *SHUTTLE_DEPLOY_DONE_*) case "$*" in *BatchMode=yes*) ;; *) echo transaction-ssh-may-prompt >&2; exit 93;; esac;; esac
-if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
+if [ "${SSH_GATE:-0}" = 1 ]; then
+ touch "$FLEET_ROOT/ssh-entered"
+ n=0; while [ ! -f "$FLEET_ROOT/ssh-go" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+ [ ! -f "$FLEET_ROOT/abort" ] || exit 1
+fi
 while :; do case "${1:-}" in -o) shift 2;; -n) shift;; *) break;; esac; done
 shift
 if [ "${FAIL_SSH_PREFLIGHT:-0}" = 1 ] && [ "$*" = true ]; then echo preflight-ssh-stderr-token >&2; exit 255; fi
@@ -178,7 +184,8 @@ case "$1" in
   echo "umask $(umask)" >> "$EVENTS"
   echo "build $(git rev-parse HEAD) $*" >> "$EVENTS"
   touch "$FLEET_ROOT/build-entered"
-  while [ ! -f "$BUILD_GATE" ]; do sleep .02; done
+  n=0; while [ ! -f "$BUILD_GATE" ] && [ ! -f "$FLEET_ROOT/abort" ] && [ "$n" -lt 6000 ]; do sleep .02; n=$((n+1)); done
+  [ ! -f "$FLEET_ROOT/abort" ] || exit 1
   [ "${FAIL_BUILD:-0}" != 1 ] || exit 13
   generation=$(mktemp -d "$PWD/bin/rel.generation-XXXXXXXX")
   ln -s "${generation##*/}" bin/rel-built
@@ -310,40 +317,17 @@ func deployAwait(t *testing.T, description string, condition func() bool) {
 	}
 }
 
-func (f *deployFleet) markReaped(cmd *exec.Cmd) {
-	f.mu.Lock()
-	f.reaped[cmd] = true
-	f.mu.Unlock()
-}
-
-func (f *deployFleet) isReaped(cmd *exec.Cmd) bool {
+// claimWait gives the caller sole ownership of cmd.Wait(). While unclaimed,
+// cmd cannot be reaped, so cleanup may safely signal its process group -pid
+// before reaping it. Once claimed, only that owner waits on cmd.
+func (f *deployFleet) claimWait(cmd *exec.Cmd) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.reaped[cmd]
-}
-
-// killHeldLockGroup terminates the transaction process group if this fleet's
-// deploy.lock is still actively held. Because the flock is live, the recorded
-// pgid still belongs to the holder and cannot have been recycled.
-func (f *deployFleet) killHeldLockGroup() {
-	lockPath := filepath.Join(f.home, ".shuttle/deploy.lock")
-	file, err := os.OpenFile(lockPath, os.O_RDWR, 0600)
-	if err != nil {
-		return
+	if f.waitStarted[cmd] {
+		return false
 	}
-	defer file.Close()
-	if syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		return
-	}
-	info := fleetRead(lockPath)
-	var pid, pgid int
-	if i := strings.Index(info, "; pid="); i >= 0 {
-		if _, err := fmt.Sscanf(info[i:], "; pid=%d; pgid=%d;", &pid, &pgid); err == nil && pgid > 0 {
-			_ = syscall.Kill(-pgid, syscall.SIGCONT)
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-	}
+	f.waitStarted[cmd] = true
+	return true
 }
 
 // deployWait waits for a deployer started by startArgs. A deployer still
@@ -351,12 +335,11 @@ func (f *deployFleet) killHeldLockGroup() {
 // fleet's logs instead of holding the package to its timeout.
 func (f *deployFleet) deployWait(t *testing.T, cmd *exec.Cmd) error {
 	t.Helper()
+	if !f.claimWait(cmd) {
+		t.Fatalf("deployWait called more than once for deployer %d", cmd.Process.Pid)
+	}
 	done := make(chan error, 1)
-	go func() {
-		err := cmd.Wait()
-		f.markReaped(cmd)
-		done <- err
-	}()
+	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
 		return err
@@ -369,6 +352,9 @@ func (f *deployFleet) deployWait(t *testing.T, cmd *exec.Cmd) error {
 	for _, path := range paths {
 		fmt.Fprintf(&logs, "==> %s\n%s\n", path, fleetRead(path))
 	}
+	_ = os.WriteFile(filepath.Join(f.root, "abort"), nil, 0600)
+	_ = cmd.Process.Kill()
+	<-done
 	t.Fatalf("deployer %d still running after 2m\n%s\n%s", cmd.Process.Pid, ps, logs.String())
 	return nil
 }
@@ -399,13 +385,14 @@ func (f *deployFleet) startArgs(t *testing.T, name, host string, args []string, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		// While cmd is unreaped its process group cannot be recycled, so
-		// signalling -pid tears down the entire deployer tree before reaping.
-		if !f.isReaped(cmd) {
+		// If deployWait never claimed cmd, cmd is guaranteed unreaped, so its
+		// process group (-pid) cannot have been recycled. Signal abort first,
+		// tear down the deployer's process group, then reap cmd once.
+		if f.claimWait(cmd) {
+			_ = os.WriteFile(filepath.Join(f.root, "abort"), nil, 0600)
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGCONT)
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Wait()
-			f.markReaped(cmd)
 		}
 		log.Close()
 	})
