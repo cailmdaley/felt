@@ -400,6 +400,51 @@ defmodule ShuttleWeb.PaletteControllerTest do
       assert focused.([]) == nil
     end
 
+    test "a block wins over another thread sharing its window, in any table, and an entry with no session matches no session" do
+      place_uid = FiberUid.for("placed-thread")
+      bound_uid = FiberUid.for("bound-thread")
+      loose_uid = FiberUid.for("loose-thread")
+
+      entries =
+        for {id, uid} <- [
+              {"placed-thread", place_uid},
+              {"bound-thread", bound_uid},
+              {"loose-thread", loose_uid}
+            ],
+            do: make_entry(id, uid: uid, column: "in_flight")
+
+      bindings_doc = %{
+        "places" => %{
+          place_uid => %{"session_id" => "session:s", "window_id" => "window:w"},
+          loose_uid => %{"window_id" => "window:loose", "page_block_id" => "block:loose"}
+        },
+        "bindings" => %{
+          "bound-thread-#{bound_uid}-shuttle" => %{
+            "session_id" => "session:s",
+            "window_id" => "window:w",
+            "block_id" => "block:b",
+            "fiber" => "bound-thread"
+          }
+        }
+      }
+
+      focused = fn target ->
+        Palette.build(entries, [bindings: bindings_doc] ++ target).focused
+      end
+
+      both = [session_id: "session:s", window_id: "window:w"]
+      assert focused.([block_id: "block:b"] ++ both).fiber_id == bound_uid
+      assert focused.(window_id: "window:w", block_id: "block:b").fiber_id == bound_uid
+      # A block no thread is known by leaves its window to name one.
+      assert focused.([block_id: "block:split"] ++ both).fiber_id == place_uid
+      # A session that holds the window does not lend it another session's block.
+      assert focused.(session_id: "session:other", window_id: "window:w", block_id: "block:b") == nil
+
+      assert focused.(window_id: "window:loose").fiber_id == loose_uid
+      assert focused.(session_id: "session:s", window_id: "window:loose") == nil
+      assert focused.(session_id: "session:s", block_id: "block:loose") == nil
+    end
+
     test "offers Temper on a standing constitution whose run is active" do
       uid = FiberUid.for("watch")
 

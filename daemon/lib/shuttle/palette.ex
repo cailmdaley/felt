@@ -195,48 +195,55 @@ defmodule Shuttle.Palette do
 
   defp resolve_focused(_entries, _doc, _fid, _sid, _wid, _bid), do: nil
 
+  # What Rex names most exactly is looked for first, everywhere: the block, then
+  # its window. A session alone, with neither, names any of its threads.
   defp lookup_rex_identifier(doc, sid, wid, bid) do
-    lookup_place(doc["places"] || %{}, sid, wid, bid) ||
-      lookup_binding(doc["bindings"] || %{}, sid, wid, bid) ||
-      lookup_view(doc["views"] || %{}, sid, wid, bid)
-  end
+    targets =
+      case Enum.filter([block: bid, window: wid], fn {_kind, id} -> is_binary(id) end) do
+        [] -> [session: sid]
+        targets -> targets
+      end
 
-  defp lookup_place(places, sid, wid, bid) do
-    Enum.find_value(places, fn {uid, place} ->
-      if matches_rex_target?(place, sid, wid, bid), do: uid
+    Enum.find_value(targets, fn target ->
+      lookup_place(doc["places"] || %{}, sid, target) ||
+        lookup_binding(doc["bindings"] || %{}, sid, target) ||
+        lookup_view(doc["views"] || %{}, sid, target)
     end)
   end
 
-  defp lookup_binding(bindings, sid, wid, bid) do
+  defp lookup_place(places, sid, target) do
+    Enum.find_value(places, fn {uid, place} ->
+      if matches_rex_target?(place, sid, target), do: uid
+    end)
+  end
+
+  defp lookup_binding(bindings, sid, target) do
     Enum.find_value(bindings, fn {name, binding} ->
-      if matches_rex_target?(binding, sid, wid, bid) do
+      if matches_rex_target?(binding, sid, target) do
         non_empty(binding["page_uid"]) || non_empty(binding["fiber"]) || extract_uid(name)
       end
     end)
   end
 
-  defp lookup_view(views, sid, wid, bid) do
+  defp lookup_view(views, sid, target) do
     Enum.find_value(views, fn {root, view} ->
-      if matches_rex_target?(view, sid, wid, bid) do
+      if matches_rex_target?(view, sid, target) do
         non_empty(view["uid"]) || non_empty(view["fiber"]) || non_empty(root)
       end
     end)
   end
 
-  # A place is matched by whatever Rex knows of it: a window or block names it
-  # alone, within its session when Rex gives one. A session alone matches any of
-  # its places.
-  defp matches_rex_target?(entry, sid, wid, bid) when is_map(entry) do
-    (is_nil(sid) or entry["session_id"] in [nil, sid]) and
-      if is_binary(wid) or is_binary(bid) do
-        (is_binary(wid) and entry["window_id"] == wid) or
-          (is_binary(bid) and bid in [entry["block_id"], entry["page_block_id"]])
-      else
-        entry["session_id"] == sid
+  # Within Rex's session, when it gives one.
+  defp matches_rex_target?(entry, sid, target) when is_map(entry) do
+    (is_nil(sid) or entry["session_id"] == sid) and
+      case target do
+        {:block, bid} -> bid in [entry["block_id"], entry["page_block_id"]]
+        {:window, wid} -> entry["window_id"] == wid
+        {:session, sid} -> entry["session_id"] == sid
       end
   end
 
-  defp matches_rex_target?(_, _, _, _), do: false
+  defp matches_rex_target?(_, _, _), do: false
 
   defp extract_uid(name) when is_binary(name) do
     case Regex.run(@ulid_re, name) do
