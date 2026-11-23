@@ -38,7 +38,11 @@ a directory there. --agent and --effort default to the registry's choices.
 			if target == "" {
 				target = own
 			}
-			dir, err := a.resolveThreadProjectDir(cmd, quoted, target, projectDir)
+			owner, err := a.routeOwnerForCommand(cmd, quoted, target)
+			if err != nil {
+				return err
+			}
+			dir, err := a.captureProjectDir(owner, projectDir)
 			if err != nil {
 				return err
 			}
@@ -52,7 +56,7 @@ a directory there. --agent and --effort default to the registry's choices.
 			if chrome {
 				payload["chrome"] = true
 			}
-			body, err := a.postToHost(cmd, quoted, target, "/api/v1/capture", payload)
+			body, err := a.postToOwner(cmd, quoted, owner, "/api/v1/capture", payload)
 			if err != nil {
 				return err
 			}
@@ -83,4 +87,25 @@ a directory there. --agent and --effort default to the registry's choices.
 	cmd.Flags().BoolVar(&chrome, "chrome", false, "Launch with the browser enabled")
 	_ = cmd.MarkFlagRequired("project-dir")
 	return cmd
+}
+
+// captureProjectDir is the directory raw names on owner ("" for this host). An
+// owner too old to resolve one is sent raw, and checks it at launch.
+func (a *app) captureProjectDir(owner, raw string) (string, error) {
+	if owner == "" {
+		return a.resolveProjectDirFlag(raw)
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("--project-dir is required")
+	}
+	dir, err := a.resolveOwnerProjectDir(owner, raw)
+	var status daemonStatusError
+	if errors.As(err, &status) && status.status == 404 {
+		return raw, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolving --project-dir on %q: %w; nothing was launched", owner, err)
+	}
+	return dir, nil
 }

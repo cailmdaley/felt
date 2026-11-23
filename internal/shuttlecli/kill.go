@@ -24,7 +24,11 @@ worker is reported and is not an error. --json prints the daemon's answer,
 			if err != nil {
 				return err
 			}
-			body, err := a.postToHost(cmd, args, fiber.Host, "/api/v1/kill", map[string]any{
+			owner, err := a.routeOwnerForCommand(cmd, args, fiber.Host)
+			if err != nil {
+				return err
+			}
+			body, err := a.postToOwner(cmd, args, owner, "/api/v1/kill", map[string]any{
 				"fiber_id": fiber.UID, "origin": fiber.Host,
 			})
 			if err != nil {
@@ -51,13 +55,10 @@ worker is reported and is not an error. --json prints the daemon's answer,
 	}
 }
 
-// postToHost posts payload to path on the local daemon, which routes it to
-// host by the payload's origin. args name the action in an error's advice.
-func (a *app) postToHost(cmd *cobra.Command, args []string, host, path string, payload map[string]any) ([]byte, error) {
-	owner, err := a.routeOwnerForCommand(cmd, args, host)
-	if err != nil {
-		return nil, err
-	}
+// postToOwner posts payload to path on the local daemon, which routes it by
+// the payload's origin; owner is routeOwnerForCommand's answer, "" for this
+// host. args name the action in an error's advice.
+func (a *app) postToOwner(cmd *cobra.Command, args []string, owner, path string, payload map[string]any) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err

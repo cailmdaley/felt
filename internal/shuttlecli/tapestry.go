@@ -23,6 +23,9 @@ type tapestry struct {
 	Path      string `json:"path"`
 	FileURL   string `json:"file_url"`
 	ThreadURL string `json:"thread_url"`
+	// Source is local (this host owns the fiber), owner, or local_fallback: a
+	// Git copy here, answering for an owner that could not be reached.
+	Source string `json:"source"`
 
 	// noURL is why a URL is missing.
 	noURL error
@@ -47,7 +50,8 @@ listens on a unix socket.
            has no tapestry; fails when no URL reaches it
   --open   open it with the OS opener: the local file, or the owner's URL for
            a fiber another host owns
-  --json   {fiber, uid, host, exists, path, file_url, thread_url}`,
+  --json   {fiber, uid, host, exists, path, file_url, thread_url, source};
+           source is local, owner, or local_fallback for that Git copy`,
 		Example: `  shuttle tapestry bao-analysis
   shuttle tapestry bao-analysis --open`,
 		Args: cobra.ExactArgs(1),
@@ -59,7 +63,7 @@ listens on a unix socket.
 			if err != nil {
 				return err
 			}
-			t, err := a.findTapestry(fiber)
+			t, err := a.findTapestry(fiber, !path && !open)
 			if err != nil {
 				return err
 			}
@@ -103,9 +107,10 @@ func (t tapestry) missing() error {
 	return fmt.Errorf("%s has no %s on %s", t.Fiber, felt.CompanionNames[0], t.Host)
 }
 
-// findTapestry looks for fiber's tapestry on its owner.
-func (a *app) findTapestry(fiber ownedFiber) (tapestry, error) {
-	t := tapestry{Fiber: fiber.ID, UID: fiber.UID, Host: fiber.Host}
+// findTapestry looks for fiber's tapestry on its owner. Without urls, a fiber
+// this host owns is answered from disk and the daemon is not asked.
+func (a *app) findTapestry(fiber ownedFiber, urls bool) (tapestry, error) {
+	t := tapestry{Fiber: fiber.ID, UID: fiber.UID, Host: fiber.Host, Source: "local"}
 	if fiber.Path != "" {
 		path := filepath.Join(filepath.Dir(fiber.Path), felt.CompanionNames[0])
 		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
@@ -113,28 +118,34 @@ func (a *app) findTapestry(fiber ownedFiber) (tapestry, error) {
 		}
 	}
 
-	ownerPath, err := t.Path, error(nil)
+	ownerPath, reachable, err := t.Path, true, error(nil)
 	if fiber.Remote {
+		t.Source = "owner"
 		ownerPath, err = a.ownerTapestryPath(fiber)
-	} else {
+		// The local daemon still serves pages when its owner read fails.
+		var refused daemonStatusError
+		reachable = err == nil || errors.As(err, &refused)
+	} else if urls {
 		var endpoint string
 		if endpoint, err = a.daemonEndpoint("/api/v1/version"); err == nil {
 			_, err = a.getDaemon(endpoint, daemonReadTimeout)
 		}
+		reachable = err == nil
 	}
-	// A daemon that refuses a read still serves pages.
-	var refused daemonStatusError
-	reachable := err == nil || errors.As(err, &refused)
 	t.Exists = ownerPath != ""
 	if fiber.Remote && err != nil {
-		if t.Path == "" {
+		// Only silence lets a copy speak for the owner; a refusal is its answer.
+		if t.Path == "" || !ownerReadUnavailable(err, t.Host) {
 			return t, fmt.Errorf("reading %s from its owner %q: %w", t.Fiber, t.Host, err)
 		}
 		fmt.Fprintf(a.env.Stderr, "warning: owner %q did not answer (%v); showing this host's Git copy, which may be stale\n", t.Host, err)
-		t.Exists = true
+		t.Exists, t.Source = true, "local_fallback"
 	} else if fiber.Remote && ownerPath == "" {
 		// The owner holds none, so a copy here is a leftover.
 		t.Path = ""
+	}
+	if !fiber.Remote && !urls {
+		return t, nil
 	}
 
 	base, baseErr := a.browserURL()
@@ -212,13 +223,18 @@ func (a *app) openTapestry(t tapestry, remote bool) error {
 	if target == "" {
 		return fmt.Errorf("no URL for %s: %w", t.Fiber, t.noURL)
 	}
-	opener := "xdg-open"
 	if a.hostGOOS == "darwin" {
-		opener = "open"
+		if out, err := a.env.Command("open", target).CombinedOutput(); err != nil {
+			if detail := strings.TrimSpace(string(out)); detail != "" {
+				err = fmt.Errorf("%w: %s", err, detail)
+			}
+			return fmt.Errorf("open %s: %w", target, err)
+		}
+	} else if err := a.env.Command("xdg-open", target).Start(); err != nil {
+		// xdg-open can stay in the foreground as long as the browser it starts,
+		// so it runs on, without this process's streams.
+		return fmt.Errorf("xdg-open %s: %w", target, err)
 	}
-	if out, err := a.env.Command(opener, target).CombinedOutput(); err != nil {
-		return fmt.Errorf("%s %s: %w %s", opener, target, err, strings.TrimSpace(string(out)))
-	}
-	fmt.Fprintln(a.env.Stdout, "opened", target)
+	fmt.Fprintln(a.env.Stdout, "opening", target)
 	return nil
 }

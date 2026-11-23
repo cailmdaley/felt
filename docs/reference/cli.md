@@ -724,21 +724,6 @@ With the daemon unreachable, a fiber this host owns is read from the host's even
 A fiber another host owns needs the daemon.
 A daemon that listens on a unix socket has no URL to give.
 
-### `shuttle tapestry <fiber> [--path | --url | --open | --json]`
-
-Report a fiber's `tapestry.html`.
-With no flag, print whether it exists, its path on this machine, the `/api/v1/file` URL the local daemon serves it at, and the fiber's `/thread` page.
-
-| Flag | Prints |
-|---|---|
-| `--path` | Only the local path; fails when there is no copy here |
-| `--url` | Only the tapestry's URL, or the thread page's when the fiber has no tapestry; fails when the daemon is unreachable or listens on a unix socket |
-| `--open` | Opens it with `open` on macOS, else `xdg-open`: the local file, or the owner's URL for a fiber another host owns |
-| `--json` | `{fiber, uid, host, exists, path, file_url, thread_url}` |
-
-A fiber another host owns is read from its owner, so its tapestry has a URL without being synced here.
-When the owner can't be reached, a Git copy on this host answers with a warning; without one the command fails.
-
 ### `shuttle sent-files clear <fiber> [--path <file>]`
 
 Hide a fiber's sent-files trail without deleting artifact files or changing body embeds.
@@ -752,6 +737,22 @@ Recording must be enabled and works while the daemon is offline.
 A fiber assigned to another host is refused, even with `--local`.
 Run the command on that host.
 Unowned notes can be cleared locally.
+
+### `shuttle tapestry <fiber> [--path | --url | --open | --json]`
+
+Report a fiber's `tapestry.html`.
+With no flag, print whether it exists, its path on this machine, the `/api/v1/file` URL the local daemon serves it at, and the fiber's `/thread` page.
+
+| Flag | Prints |
+|---|---|
+| `--path` | Only the local path; fails when there is no copy here |
+| `--url` | Only the tapestry's URL, or the thread page's when the fiber has no tapestry; fails when the daemon is unreachable or listens on a unix socket |
+| `--open` | Opens it with `open` on macOS, else `xdg-open`: the local file, or the owner's URL for a fiber another host owns |
+| `--json` | `{fiber, uid, host, exists, path, file_url, thread_url, source}`; `source` is `local`, `owner`, or `local_fallback` for a Git copy here answering for an owner that could not be reached |
+
+A fiber another host owns is read from its owner, so its tapestry has a URL without being synced here.
+When the owner can't be reached, a Git copy on this host answers with a warning; without one, or when the owner refuses the read, the command fails.
+`--path` and `--open` on a fiber this host owns don't ask the daemon.
 
 ### `shuttle transcript [--date YYYY-MM-DD] [--fiber <id|slug>] [--since HH:MM[:SS]] [--recorder HOST] [--json]`
 

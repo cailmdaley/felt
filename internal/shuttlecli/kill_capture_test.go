@@ -138,7 +138,51 @@ func TestCaptureOnAnotherHost(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `"worker" is unreachable`) || strings.Contains(err.Error(), "private") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err = runIn(t, env, "", "capture", "p", "--host", "stranger", "--project-dir", "/x"); err == nil {
-		t.Fatal("captured on an unknown host")
+}
+
+// Nothing launches in a directory the owner would not resolve, except on an
+// owner too old to be asked, which checks the raw path itself.
+func TestRemoteCaptureResolvesItsDirectoryFirst(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, host string
+		status     int
+		wantDir    string
+	}{
+		{"unknown host", "stranger", 200, ""},
+		{"refused", "worker", 422, ""},
+		{"owner unreachable", "worker", 502, ""},
+		{"owner without the route", "worker", 404, "~/project"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			var captured requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/project-dir/resolve":
+					w.WriteHeader(tc.status)
+					fmt.Fprint(w, `{"error":"no"}`)
+				case "/api/v1/capture":
+					captured.record(t, r)
+					fmt.Fprint(w, `{"spawned":true,"agent":"claude-opus","tmux_session":"capture-1"}`)
+				default:
+					http.Error(w, "unexpected", http.StatusNotFound)
+				}
+			}))
+			_, stderr, err := executeIn(t, env, "", "capture", "a private prompt", "--host", tc.host, "--project-dir", "~/project")
+			if strings.Contains(stderr, "before dispatch") || err != nil && strings.Contains(err.Error(), "private") {
+				t.Fatalf("stderr %q, err %v", stderr, err)
+			}
+			if tc.wantDir == "" {
+				if err == nil || stderr != "" || len(captured.bodies) != 0 {
+					t.Fatalf("err %v, stderr %q, launched %v", err, stderr, captured.bodies)
+				}
+				return
+			}
+			if err != nil || len(captured.bodies) != 1 || captured.bodies[0]["project_dir"] != tc.wantDir {
+				t.Fatalf("err %v, launched %v", err, captured.bodies)
+			}
+		})
 	}
 }

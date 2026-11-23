@@ -119,21 +119,43 @@ const sentFilesCap = 50
 
 // sentFileEvent is the part of an event-stream line a trail reads.
 type sentFileEvent struct {
-	Type        string   `json:"type"`
-	Tool        string   `json:"tool"`
-	UID         string   `json:"uid"`
-	Path        *string  `json:"path"`
-	Files       []string `json:"files"`
-	Caption     string   `json:"caption"`
-	Show        bool     `json:"show"`
-	CWD         string   `json:"cwd"`
-	SessionID   *string  `json:"sessionId"`
-	TmuxSession string   `json:"tmuxSession"`
-	Timestamp   *int64   `json:"timestamp"`
+	Type string `json:"type"`
+	Tool string `json:"tool"`
+	UID  string `json:"uid"`
+	// Path is raw so an omitted path (a whole-fiber clear) differs from null.
+	Path        json.RawMessage `json:"path"`
+	Files       []string        `json:"files"`
+	Caption     *string         `json:"caption"`
+	Show        bool            `json:"show"`
+	CWD         string          `json:"cwd"`
+	SessionID   *string         `json:"sessionId"`
+	TmuxSession string          `json:"tmuxSession"`
+	Timestamp   *int64          `json:"timestamp"`
 	ToolInput   struct {
 		Files   []string `json:"files"`
 		Caption string   `json:"caption"`
 	} `json:"toolInput"`
+}
+
+// sent is the paths an event sent and the words they came with, or no paths
+// for an event that sent none. `shuttle send-file` names files at the top
+// level; a harness's SendUserFile call names them in its tool input, and a
+// subagent's is recorded as file_sent too.
+func (e sentFileEvent) sent() (paths []string, caption string) {
+	switch {
+	case e.Type == "file_sent" && e.Files != nil:
+		paths = e.Files
+	case e.Tool == "SendUserFile":
+		paths = e.ToolInput.Files
+	}
+	caption = e.ToolInput.Caption
+	if e.Type == "file_sent" && e.Caption != nil {
+		caption = *e.Caption
+	}
+	if strings.TrimSpace(caption) == "" {
+		caption = ""
+	}
+	return paths, caption
 }
 
 // sentFilesFromStream is uid's trail read from this host's event stream, by
@@ -156,22 +178,15 @@ func (a *app) sentFilesFromStream(uid string) ([]sentFile, error) {
 				return
 			}
 			path := ""
-			if event.Path != nil {
-				path = *event.Path
-				if !filepath.IsAbs(path) {
-					return
-				}
-			}
-			cleared[path] = max(cleared[path], *event.Timestamp)
-			return
-		}
-		paths, caption := event.Files, event.Caption
-		if event.Type != "file_sent" {
-			if event.Tool != "SendUserFile" {
+			if event.Path != nil && (json.Unmarshal(event.Path, &path) != nil || !filepath.IsAbs(path)) {
 				return
 			}
-			paths, caption = event.ToolInput.Files, event.ToolInput.Caption
+			if cutoff, ok := cleared[path]; !ok || *event.Timestamp > cutoff {
+				cleared[path] = *event.Timestamp
+			}
+			return
 		}
+		paths, caption := event.sent()
 		owner := fiberUIDFromTmuxSession(event.TmuxSession)
 		session := ""
 		if event.SessionID != nil {
@@ -182,9 +197,6 @@ func (a *app) sentFilesFromStream(uid string) ([]sentFile, error) {
 		}
 		if owner != uid && session != uid {
 			return
-		}
-		if strings.TrimSpace(caption) == "" {
-			caption = ""
 		}
 		for _, path := range paths {
 			if !filepath.IsAbs(path) && event.CWD != "" {
@@ -200,6 +212,9 @@ func (a *app) sentFilesFromStream(uid string) ([]sentFile, error) {
 		}
 	}
 	live, _ := shuttle.EventsFile(a.env)
+	if live == "" {
+		return nil, errors.New("daemon unreachable, and no state directory resolves to read the event stream from")
+	}
 	for _, path := range []string{live + eventsRotatedSuffix, live} {
 		if err := readSentFileEvents(path, read); err != nil {
 			return nil, err
@@ -207,8 +222,12 @@ func (a *app) sentFilesFromStream(uid string) ([]sentFile, error) {
 	}
 
 	files := []sentFile{}
+	hidden := func(path string, at *int64) bool {
+		cutoff, ok := cleared[path]
+		return ok && at != nil && *at <= cutoff
+	}
 	for path, file := range newest {
-		if file.Timestamp == nil || *file.Timestamp > max(cleared[""], cleared[path]) {
+		if !hidden("", file.Timestamp) && !hidden(path, file.Timestamp) {
 			files = append(files, file)
 		}
 	}

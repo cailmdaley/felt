@@ -16,7 +16,8 @@ type ownedFiber struct {
 	*felt.Felt
 	Host string
 	// Remote is true when Host is another machine, so the document read here
-	// (if any) is a Git copy rather than the owner's.
+	// (if any) is a Git copy rather than the owner's. Path names that document
+	// on this machine and is empty when there is none.
 	Remote bool
 }
 
@@ -28,6 +29,7 @@ func (a *app) resolveOwnedFiber(query string) (ownedFiber, error) {
 	if errors.As(err, &missing) {
 		remote, _, remoteErr := a.remoteFiber(query, false)
 		if remoteErr == nil {
+			remote.Path = "" // the owner's filesystem, not this one
 			f, err = remote, nil
 		} else if !errors.Is(remoteErr, errNoRemoteFiber) {
 			err = fmt.Errorf("%v; owner lookup: %w", err, remoteErr)
@@ -61,10 +63,11 @@ func (a *app) browserURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	base = strings.TrimRight(base, "/")
 	if base == "http://"+shuttle.DaemonSocketHost {
 		return "", errors.New("the daemon listens on a unix socket, which no URL reaches")
 	}
-	return strings.TrimRight(base, "/"), nil
+	return base, nil
 }
 
 // fileURL is where the daemon at base serves host's file at path.

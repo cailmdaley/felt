@@ -111,3 +111,90 @@ func TestSentFilesLsFallsBackToTheStream(t *testing.T) {
 		t.Fatalf("answered for another host's fiber: %s", out)
 	}
 }
+
+// A Claude subagent's SendUserFile is recorded as file_sent with its paths in
+// the tool input, the line the hook itself renders.
+func TestSentFilesLsFallbackReadsASubagentsSend(t *testing.T) {
+	t.Parallel()
+	env, sink, _ := sendFileTestEnv(t)
+	dir, storage := newStore(t)
+	seedFiber(t, storage, "work/reports", clearTestUID, "", nil, nil)
+	line, ok := newApp(env).renderEvent(eventHookInput{
+		Harness: "claude", HookEventName: "PreToolUse", SessionID: clearTestUID, AgentID: "child", CWD: "/cwd",
+		ToolName: "SendUserFile", ToolInput: json.RawMessage(`{"files":["report.html"],"caption":"From the child."}`),
+	})
+	if !ok || !strings.Contains(line, `"type":"file_sent"`) {
+		t.Fatalf("hook line = %s", line)
+	}
+	// Top-level names win on a file_sent event, and its caption outranks the tool's.
+	lines := line + `{"type":"file_sent","timestamp":1,"sessionId":"` + clearTestUID + `","files":["/x/top.html"],"caption":"top","toolInput":{"files":["/x/not.html"],"caption":"tool"}}
+{"type":"file_sent","timestamp":2,"sessionId":"` + clearTestUID + `","files":["/x/tool-words.html"],"toolInput":{"caption":"tool"}}
+{"type":"pre_tool_use","tool":"Write","timestamp":3,"sessionId":"` + clearTestUID + `","toolInput":{"files":["/x/not-sent.html"]}}
+`
+	if err := os.WriteFile(sink, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runIn(t, env, dir, "sent-files", "ls", "work/reports", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []string{}
+	for _, f := range listSentFiles(t, out).Files {
+		rows = append(rows, f.FullPath+" "+f.Caption)
+	}
+	if want := []string{"/cwd/report.html From the child.", "/x/tool-words.html tool", "/x/top.html top"}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("files = %q, want %q", rows, want)
+	}
+}
+
+func TestSentFilesLsFallbackClearCutoffs(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, clear string
+		sent        int
+		shown       bool
+	}{
+		{"no clear, time zero", "", 0, true},
+		{"path null is no clear", `,"path":null`, 100, true},
+		{"path not a string is no clear", `,"path":3`, 100, true},
+		{"relative path is no clear", `,"path":"a.html"`, 100, true},
+		{"omitted path clears the fiber", " ", 100, false},
+		{"the path clears itself", `,"path":"/x/a.html"`, 100, false},
+		{"another path clears only itself", `,"path":"/x/b.html"`, 100, true},
+		{"a later send shows", " ", 201, true},
+		{"a send at the cutoff is hidden", " ", 200, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env, sink, _ := sendFileTestEnv(t)
+			dir, storage := newStore(t)
+			seedFiber(t, storage, "work/reports", clearTestUID, "", nil, nil)
+			lines := fmt.Sprintf(`{"type":"file_sent","timestamp":%d,"sessionId":%q,"files":["/x/a.html"]}`+"\n", tc.sent, clearTestUID)
+			if tc.clear != "" {
+				lines += fmt.Sprintf(`{"type":"sent_files_cleared","timestamp":200,"uid":%q%s}`+"\n", clearTestUID, tc.clear)
+			}
+			if err := os.WriteFile(sink, []byte(lines), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := runIn(t, env, dir, "sent-files", "ls", "work/reports", "--json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(listSentFiles(t, out).Files) == 1; got != tc.shown {
+				t.Fatalf("shown = %v, want %v", got, tc.shown)
+			}
+		})
+	}
+}
+
+// With no state directory to resolve, there is no trail to call empty.
+func TestSentFilesFromStreamNeedsAStateDirectory(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	for _, key := range []string{"HOME", "SHUTTLE_DATA_DIR", "SHUTTLE_EVENTS_FILE"} {
+		env.Set(key, "")
+	}
+	if files, err := newApp(env).sentFilesFromStream(clearTestUID); err == nil {
+		t.Fatalf("claimed %v", files)
+	}
+}
