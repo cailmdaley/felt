@@ -10,7 +10,7 @@
 import type {
   ShuttleCaptureRequest, ShuttleCompositeResponse, ShuttleCreatedFiber, ShuttleCreateFiberRequest,
   ShuttleDeliverRequest, ShuttleDispatchRequest, ShuttleFiber, ShuttleFiberEnvelope, ShuttleFleetResponse,
-  ShuttleInboxRequest, ShuttleKillResult, ShuttleLifecycleRequest, ShuttleOffer, ShuttlePeerDirectory,
+  ShuttleInboxRequest, ShuttleKillResult, ShuttleLifecycleRequest, ShuttleMessageReceipt, ShuttleMessageRequest, ShuttleOffer, ShuttlePeerDirectory,
   ShuttleSentFile, ShuttleVersion,
 } from './types.js'
 
@@ -147,12 +147,17 @@ export class ShuttleClient {
     return await res.json() as T
   }
 
-  async #post<T>(path: string, body: unknown, label: string): Promise<T> {
-    const res = await this.#send(this.url(path), {
+  #postRaw(path: string, body: unknown, init: { signal?: AbortSignal } = {}): Promise<Response> {
+    return this.#send(this.url(path), {
+      ...init,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
+  }
+
+  async #post<T>(path: string, body: unknown, label: string): Promise<T> {
+    const res = await this.#postRaw(path, body)
     if (!res.ok) throw new DaemonRequestError(await responseError(res, label), res.status)
     return await res.json().catch(() => undefined) as T
   }
@@ -212,6 +217,16 @@ export class ShuttleClient {
     return origin && origin !== 'local' ? `${url}&origin=${encodeURIComponent(origin)}` : url
   }
 
+  /**
+   * The URL of a file's bytes on its owner under a path-shaped address
+   * (`GET /file-assets/{origin}/{path}`), from which a page's relative figures,
+   * styles and scripts resolve.
+   */
+  htmlAssetUrl(path: string, origin?: string): string {
+    const abs = path.startsWith('/') ? path : `/${path}`
+    return `${this.base}/api/v1/file-assets/${encodeURIComponent(origin || 'local')}${encodeId(abs)}`
+  }
+
   /** The address of a thread's page, which every daemon serves. */
   threadPageUrl(uid: string, host: string): string {
     return `${this.base}/thread?f=${encodeURIComponent(uid)}@${encodeURIComponent(host)}`
@@ -235,6 +250,18 @@ export class ShuttleClient {
   /** `POST /deliver`: put text in front of a fiber's worker. */
   deliver(request: ShuttleDeliverRequest): Promise<Record<string, unknown>> {
     return this.#post('/deliver', request, 'Delivery failed')
+  }
+
+  /**
+   * `POST /messages`: an idempotent message to one exact session. Resolves with
+   * the receipt whenever the daemon gave one, a refused or unconfirmed
+   * message's included: read its `status`. Anything else the daemon refuses throws.
+   */
+  async messages(request: ShuttleMessageRequest, init?: { signal?: AbortSignal }): Promise<ShuttleMessageReceipt> {
+    const res = await this.#postRaw('/messages', request, init)
+    const answer: unknown = await res.clone().json().catch(() => undefined)
+    if (isRecord(answer) && typeof answer.status === 'string' && typeof answer.message_id === 'string') return answer as unknown as ShuttleMessageReceipt
+    throw new DaemonRequestError(await responseError(res, 'Message failed'), res.status)
   }
 
   /** `POST /lifecycle`: one lifecycle verb on a fiber. */

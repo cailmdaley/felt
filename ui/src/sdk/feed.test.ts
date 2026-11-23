@@ -27,6 +27,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('ShuttleFeed', () => {
@@ -41,7 +42,7 @@ describe('ShuttleFeed', () => {
     expect(feed.getState()).toMatchObject({ status: 'ready', fibers: [row('a')], updatedAt: 42, error: null })
     expect(seen).toEqual(['loading', 'ready'])
     await vi.advanceTimersByTimeAsync(1000)
-    expect(read).toHaveBeenLastCalledWith({ etag: 'e1' })
+    expect(read).toHaveBeenLastCalledWith(expect.objectContaining({ etag: 'e1' }))
     expect(feed.getState().fibers).toEqual([row('a')])
     feed.stop()
   })
@@ -76,6 +77,48 @@ describe('ShuttleFeed', () => {
     feed.stop()
     await vi.advanceTimersByTimeAsync(5000)
     expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads a listener that throws as the page’s error: the feed stays ready and the next listener hears it', async () => {
+    const surfaced = vi.fn()
+    vi.stubGlobal('reportError', surfaced)
+    const { client: c } = client([{ notModified: false, response: { host: 'here', fibers: [row('a')], origins: {} }, etag: null }])
+    const feed = new ShuttleFeed(c)
+    const seen: ShuttleFeedState['status'][] = []
+    feed.subscribe(() => { throw new TypeError('page bug') })
+    feed.subscribe(state => seen.push(state.status))
+    expect(await feed.refresh()).toMatchObject({ status: 'ready', error: null, fibers: [row('a')] })
+    expect(seen).toEqual(['loading', 'ready'])
+    expect(surfaced).toHaveBeenCalledTimes(2)
+    expect(surfaced).toHaveBeenCalledWith(expect.objectContaining({ message: 'page bug' }))
+  })
+
+  it('aborts the read in flight when stopped, ignores how it ends, and starts again on a read of its own', async () => {
+    const reads: Array<{ signal: AbortSignal; land(read: CompositeRead): void; fail(error: Error): void }> = []
+    const c = new ShuttleClient()
+    vi.spyOn(c, 'fibersComposite').mockImplementation(({ signal } = {}) => new Promise((land, fail) => { reads.push({ signal: signal!, land, fail }) }))
+    const answer = (id: string): CompositeRead => ({ notModified: false, response: { host: 'here', fibers: [row(id)], origins: {} }, etag: id })
+    const feed = new ShuttleFeed(c, { intervalMs: 1000 })
+    feed.start()
+    feed.stop()
+    expect(reads[0].signal.aborted).toBe(true)
+    expect(feed.getState().status).toBe('idle')
+    feed.start()
+    expect(reads).toHaveLength(2)
+    reads[0].land(answer('stale'))
+    await flush()
+    expect(feed.getState()).toMatchObject({ status: 'loading', fibers: [] })
+    reads[1].land(answer('fresh'))
+    await flush()
+    expect(feed.getState()).toMatchObject({ status: 'ready', fibers: [row('fresh')] })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(reads).toHaveLength(3)
+    feed.stop()
+    reads[2].fail(new DOMException('aborted', 'AbortError'))
+    await flush()
+    expect(feed.getState()).toMatchObject({ status: 'ready', error: null, fibers: [row('fresh')] })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(reads).toHaveLength(3)
   })
 
   it('joins a read already in flight, and unsubscribes', async () => {

@@ -15,6 +15,8 @@ const instant = (...values: Array<string | number | null | undefined>): number =
 const archived = (row: ShuttleFiber): boolean => row.column === 'tempered' || row.column === 'discarded'
 const active = (row: ShuttleFiber): boolean => row.fiber.status === 'active'
 const standing = (row: ShuttleFiber): boolean => row.fiber.shuttle?.kind === 'standing'
+/** On a clock that Rest pauses: a standing fiber's cron, or a seat's pulse. */
+const scheduled = (row: ShuttleFiber): boolean => standing(row) || (row.fiber.shuttle?.seat === true && !!row.fiber.shuttle.pulse)
 
 /** Whether the owner holds a live worker for the fiber. */
 export const hasLiveWorker = (row: ShuttleFiber): boolean => !!row.runtime
@@ -24,6 +26,9 @@ export const askOf = (row: ShuttleFiber): { text: string; at: number } | undefin
   const ask = row.fiber.shuttle?.ask
   return active(row) && ask?.text?.trim() ? { text: ask.text.trim(), at: instant(ask.at) } : undefined
 }
+
+/** Whether a standing fiber's run waits on the human: its worker is live, or it ended with a question. */
+const runAwaitsHuman = (row: ShuttleFiber): boolean => standing(row) && active(row) && (hasLiveWorker(row) || !!askOf(row))
 
 /** Why a fiber's turn could not start, when it could not. */
 const blockedWhy = (row: ShuttleFiber): string | undefined =>
@@ -97,32 +102,37 @@ const offer = (verb: ShuttleOffer['verb'], label: string, request?: ShuttleOffer
 /**
  * The verbs a fiber offers in its current state, most likely first: what a
  * close for review wants (temper, discard), what moves armed work on (close
- * for review, rest, or a standing one's pause), what brings rested or closed
- * work back, withdrawing an open question, and stopping a live worker.
+ * for review, rest), what brings rested or closed work back, withdrawing an
+ * open question, and stopping a live worker. On a schedule, Rest pauses it and
+ * Resume resumes it; a standing fiber is never closed for review, and its run
+ * is tempered only while it waits on the human.
  */
 export function offersFor(row: ShuttleFiber): ShuttleOffer[] {
   const offers: ShuttleOffer[] = []
-  const status = row.fiber.status
-  switch (row.column) {
+  const rest = offer('rest', scheduled(row) ? 'Pause schedule' : 'Rest', { action: 'rest' })
+  const resume = offer('resume', scheduled(row) ? 'Resume schedule' : 'Resume', { action: 'resume' })
+  if (standing(row) && !archived(row)) {
+    if (row.fiber.status !== 'closed') {
+      if (runAwaitsHuman(row)) offers.push(offer('temper', 'Temper run', { action: 'close', tempered: true }))
+      offers.push(active(row) ? rest : resume)
+      if (row.column !== 'roles') offers.push(offer('discard', 'Retire', { action: 'close', tempered: false }, true))
+    }
+  } else switch (row.column) {
     case 'awaiting_review':
     case 'orchestrator_review':
       offers.push(offer('temper', 'Temper', { action: 'close', tempered: true }), offer('discard', 'Discard', { action: 'close', tempered: false }, true))
       offers.push(offer('reopen', 'Reopen', { action: 'reopen' }))
       break
     case 'in_flight':
-      if (standing(row)) offers.push(offer('pause', 'Pause schedule', { action: 'pause' }))
-      else offers.push(offer('review', 'Close for review', { action: 'close' }), offer('rest', 'Rest', { action: 'rest' }))
-      offers.push(offer('temper', standing(row) ? 'Temper run' : 'Temper', { action: 'close', tempered: true }))
-      offers.push(offer('discard', standing(row) ? 'Retire' : 'Discard', { action: 'close', tempered: false }, true))
+      offers.push(offer('review', 'Close for review', { action: 'close' }), rest)
+      offers.push(offer('temper', 'Temper', { action: 'close', tempered: true }), offer('discard', 'Discard', { action: 'close', tempered: false }, true))
       break
     case 'drafts':
-      offers.push(offer('resume', 'Resume', { action: 'resume' }), offer('discard', 'Discard', { action: 'close', tempered: false }, true))
-      break
     case 'resting':
-      offers.push(offer('resume', standing(row) ? 'Resume schedule' : 'Resume', { action: 'resume' }), offer('discard', standing(row) ? 'Retire' : 'Discard', { action: 'close', tempered: false }, true))
+      offers.push(resume, offer('discard', 'Discard', { action: 'close', tempered: false }, true))
       break
     case 'roles':
-      offers.push(status === 'active' ? offer('rest', 'Rest', { action: 'rest' }) : offer('resume', 'Resume', { action: 'resume' }))
+      offers.push(active(row) ? rest : resume)
       break
     case 'tempered':
     case 'discarded':

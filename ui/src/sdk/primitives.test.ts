@@ -31,7 +31,15 @@ function recording(answer: () => Promise<Response> = async () => new Response('{
   return { client: new ShuttleClient({ fetch }), bodies }
 }
 
+/** Where a page's own errors surface. */
+function uncaught() {
+  const seen = vi.fn()
+  vi.stubGlobal('reportError', seen)
+  return seen
+}
+
 afterEach(async () => {
+  vi.unstubAllGlobals()
   document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   await settle()
   document.body.innerHTML = ''
@@ -92,6 +100,21 @@ describe('createThreadRow', () => {
     expect(open).toHaveBeenCalledTimes(3)
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ origin: 'remote' }))
   })
+
+  it('opens once while a key is held, inside any control, and leaves a control of its own its clicks', () => {
+    const open = vi.fn()
+    const row = createThreadRow(fiber(), { now: NOW, onOpen: open })
+    const link = document.createElement('a')
+    link.append(row)
+    document.body.append(link)
+    row.querySelector<HTMLElement>('[data-slot="slug"]')!.click()
+    expect(open).toHaveBeenCalledTimes(1)
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true }))
+    expect(open).toHaveBeenCalledTimes(2)
+    row.appendChild(document.createElement('button')).click()
+    expect(open).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('createPost', () => {
@@ -140,7 +163,11 @@ describe('createFilePreview', () => {
     expect(figure.querySelector('[data-slot="age"] time')!.textContent).toBe('1m ago')
     const page = createFilePreview({ fullPath: '/r/tapestry.html', basename: 'tapestry.html', timestamp: null, sessionId: null }, client)
     expect(page.dataset.kind).toBe('page')
-    expect(page.querySelector('iframe[data-slot="media"]')!.getAttribute('sandbox')).toBe('allow-scripts')
+    const frame = page.querySelector<HTMLIFrameElement>('iframe[data-slot="media"]')!
+    expect(frame.getAttribute('sandbox')).toBe('')
+    expect(frame.hasAttribute('inert')).toBe(true)
+    expect(frame.tabIndex).toBe(-1)
+    expect(frame.getAttribute('src')).toBe('/api/v1/file-assets/local/r/tapestry.html')
     expect(page.querySelector('[data-slot="age"]')).toBeNull()
     unskinned(figure)
   })
@@ -162,7 +189,8 @@ describe('createTapestryFrame', () => {
     const framed = createTapestryFrame(fiber({ report_path: '/s/work/fit-model/tapestry.html' }), client)
     const frame = framed.querySelector<HTMLIFrameElement>('iframe[data-slot="frame"]')!
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
-    expect(frame.src).toBe('http://hub:4000/api/v1/file?path=%2Fs%2Fwork%2Ffit-model%2Ftapestry.html&origin=remote')
+    expect(frame.src).toBe('http://hub:4000/api/v1/file-assets/remote/s/work/fit-model/tapestry.html')
+    expect(new URL('fig.png', frame.src).href).toBe('http://hub:4000/api/v1/file-assets/remote/s/work/fit-model/fig.png')
     expect(framed.hasAttribute('data-empty')).toBe(false)
     const empty = createTapestryFrame(fiber(), client, { emptyText: 'Nothing yet' })
     expect(empty.hasAttribute('data-empty')).toBe(true)
@@ -208,6 +236,34 @@ describe('createActionMenu', () => {
     expect(menu.element.isConnected).toBe(false)
   })
 
+  it('reads a listener that throws as the page’s error: the menu closes, and nothing was refused', async () => {
+    const { client } = recording()
+    const onError = vi.fn(), surfaced = uncaught()
+    const menu = createActionMenu(fiber(), client, { onAction: () => { throw new Error('page bug') }, onError })
+    menu.open({ anchor: document.body.appendChild(document.createElement('button')) })
+    await settle()
+    document.querySelector<HTMLElement>('[data-verb="rest"]')!.click()
+    await settle()
+    expect(onError).not.toHaveBeenCalled()
+    expect(surfaced).toHaveBeenCalledWith(expect.objectContaining({ message: 'page bug' }))
+    expect(document.querySelector('[role="menu"][data-open]')).toBeNull()
+  })
+
+  it('returns focus to what had it when its anchor takes none', async () => {
+    const { client } = recording()
+    const before = document.body.appendChild(document.createElement('input'))
+    const anchor = document.body.appendChild(document.createElement('span'))
+    const focus = vi.spyOn(anchor, 'focus')
+    before.focus()
+    const menu = createActionMenu(fiber(), client)
+    menu.open({ anchor })
+    await settle()
+    menu.close()
+    await settle()
+    expect(focus).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(before)
+  })
+
   it('reports a refusal and stays open', async () => {
     const { client } = recording(async () => new Response(JSON.stringify({ error: 'not yours' }), { status: 400 }))
     const onError = vi.fn()
@@ -244,7 +300,7 @@ describe('createLifecycleBar', () => {
     const rest = bar.querySelector<HTMLButtonElement>('[data-verb="rest"]')!
     rest.click()
     await settle()
-    expect(bar.getAttribute('aria-busy')).not.toBeNull()
+    expect(bar.getAttribute('aria-busy')).toBe('true')
     expect(rest.hasAttribute('data-pending')).toBe(true)
     expect([...bar.querySelectorAll('button[data-verb]')].every(verb => verb.getAttribute('aria-disabled') === 'true' && verb.hasAttribute('data-disabled'))).toBe(true)
     bar.querySelector<HTMLButtonElement>('[data-verb="temper"]')!.click()
@@ -254,6 +310,19 @@ describe('createLifecycleBar', () => {
     expect(onAction).toHaveBeenCalledOnce()
     expect(bar.hasAttribute('aria-busy')).toBe(false)
     expect(rest.hasAttribute('data-pending')).toBe(false)
+  })
+
+  it('reads a listener that throws as the page’s error, and frees the verbs', async () => {
+    const { client } = recording()
+    const onError = vi.fn(), surfaced = uncaught()
+    const bar = createLifecycleBar(fiber(), client, { onAction: () => { throw new Error('page bug') }, onError })
+    document.body.append(bar)
+    await settle()
+    bar.querySelector<HTMLButtonElement>('[data-verb="rest"]')!.click()
+    await settle()
+    expect(onError).not.toHaveBeenCalled()
+    expect(surfaced).toHaveBeenCalledWith(expect.objectContaining({ message: 'page bug' }))
+    expect(bar.hasAttribute('aria-busy')).toBe(false)
   })
 
   it('reports a refusal and frees the verbs', async () => {
@@ -281,7 +350,7 @@ describe('createComposer', () => {
     input.value = '  use 20 bins  '
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }))
     await settle()
-    expect(bodies).toEqual([{ path: '/dispatch', body: { fiber_id: 'work/fit-model', origin: 'remote', user_message: 'use 20 bins', message_id: 'human-1' } }])
+    expect(bodies).toEqual([{ path: '/dispatch', body: { fiber_id: 'work/fit-model', origin: 'remote', force: true, ad_hoc: true, resume_mode: 'continue', user_message: 'use 20 bins', message_id: 'human-1' } }])
     expect(input.value).toBe('')
     expect(onSent).toHaveBeenCalledWith({}, 'use 20 bins')
     unskinned(form)
@@ -304,6 +373,86 @@ describe('createComposer', () => {
     await settle()
     expect(bodies).toEqual([{ path: '/dispatch', body: expect.objectContaining({ user_message: 'start over', resume_mode: 'fresh' }) }])
     expect((bodies[0].body as { message_id: string }).message_id).toMatch(/^human-[0-9a-f]{32}$/)
+  })
+
+  /** Sends `text` from the form and answers the body it posted. */
+  const sendOf = (form: HTMLFormElement, bodies: Array<{ body: unknown }>) => async (text: string): Promise<{ message_id: string; resume_mode: string }> => {
+    form.querySelector('textarea')!.value = text
+    form.requestSubmit()
+    await settle()
+    return bodies.at(-1)!.body as { message_id: string; resume_mode: string }
+  }
+
+  it('retries a message under its id, and gives a sent, changed or differently sent one a new id', async () => {
+    let refuse = true
+    const { client, bodies } = recording(async () => refuse ? new Response('busy', { status: 503 }) : new Response('{"dispatched":true}'))
+    const form = createComposer(fiber(), client, { modes: true })
+    document.body.append(form)
+    await settle()
+    const send = sendOf(form, bodies)
+    const first = await send('use 20 bins')
+    expect((await send('use 20 bins')).message_id).toBe(first.message_id)
+    const changed = await send('use 30 bins')
+    expect(changed.message_id).not.toBe(first.message_id)
+    form.querySelector<HTMLElementTagNameMap['ui-segmented-control']>('ui-segmented-control')!.api!.setValue('previous')
+    await settle()
+    const other = await send('use 30 bins')
+    expect(other).toMatchObject({ resume_mode: 'previous' })
+    expect(other.message_id).not.toBe(changed.message_id)
+    refuse = false
+    expect((await send('use 30 bins')).message_id).toBe(other.message_id)
+    expect((await send('use 30 bins')).message_id).not.toBe(other.message_id)
+  })
+
+  it('keeps a message whose first send the owner cannot confirm, and sends it again as a new one', async () => {
+    const answers = ['{"dispatched":false,"duplicate":true,"disposition":"unknown"}', '{"dispatched":false,"duplicate":true,"disposition":"delivered"}']
+    const { client, bodies } = recording(async () => new Response(answers.shift()))
+    const onSent = vi.fn(), onError = vi.fn()
+    const form = createComposer(fiber(), client, { onSent, onError })
+    document.body.append(form)
+    const send = sendOf(form, bodies)
+    const first = await send('hello')
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringMatching(/may not have arrived/) }), 'hello')
+    expect(form.querySelector('textarea')!.value).toBe('hello')
+    expect((await send('hello')).message_id).not.toBe(first.message_id)
+    expect(onSent).toHaveBeenCalledOnce()
+    expect(form.querySelector('textarea')!.value).toBe('')
+  })
+
+  it('keeps the focus on its button while it sends, and sends once', async () => {
+    let land!: (response: Response) => void
+    const { client, bodies } = recording(() => new Promise(resolve => { land = resolve }))
+    const form = createComposer(fiber(), client)
+    document.body.append(form)
+    form.querySelector('textarea')!.value = 'hello'
+    const submit = form.querySelector<HTMLButtonElement>('button[data-slot="submit"]')!
+    submit.focus()
+    submit.click()
+    await settle()
+    expect(form.getAttribute('aria-busy')).toBe('true')
+    expect(submit.getAttribute('aria-disabled')).toBe('true')
+    expect(submit.disabled).toBe(false)
+    expect(document.activeElement).toBe(submit)
+    submit.click()
+    land(new Response('{}'))
+    await settle()
+    expect(bodies).toHaveLength(1)
+    expect(form.hasAttribute('aria-busy')).toBe(false)
+    expect(submit.hasAttribute('aria-disabled')).toBe(false)
+  })
+
+  it('reads a listener that throws as the page’s error: the message was sent', async () => {
+    const { client } = recording()
+    const onError = vi.fn(), surfaced = uncaught()
+    const form = createComposer(fiber(), client, { onSent: () => { throw new Error('page bug') }, onError })
+    document.body.append(form)
+    form.querySelector('textarea')!.value = 'hello'
+    form.requestSubmit()
+    await settle()
+    expect(onError).not.toHaveBeenCalled()
+    expect(surfaced).toHaveBeenCalledWith(expect.objectContaining({ message: 'page bug' }))
+    expect(form.querySelector('textarea')!.value).toBe('')
+    expect(form.hasAttribute('aria-busy')).toBe(false)
   })
 
   it('keeps the message and reports a refusal', async () => {

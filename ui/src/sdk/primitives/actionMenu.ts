@@ -1,6 +1,7 @@
 import '@ui-sdk/web/menu'
 import type { ShuttleClient } from '../client.js'
 import { offersFor } from '../model.js'
+import { notify } from '../notify.js'
 import type { ShuttleFiber, ShuttleOffer } from '../types.js'
 import { part } from './dom.js'
 
@@ -21,7 +22,7 @@ export interface ActionMenu {
   /** `<div data-slot="shuttle-action-menu">`, holding the SDK menu. */
   readonly element: HTMLDivElement
   readonly offers: readonly ShuttleOffer[]
-  /** Open beside `anchor` (an element or a point), focusing the first item; focus returns to the anchor element on close. */
+  /** Open beside `anchor` (an element or a point), focusing the first item; focus returns on close to the anchor element, or, when it takes no focus, to what had it. */
   open(options: { anchor: HTMLElement | { x: number; y: number }; focus?: 'first' | 'last' }): void
   close(): void
   /** Close and take the menu out of the page. */
@@ -64,8 +65,8 @@ export function createActionMenu(fiber: ShuttleFiber, client: ShuttleClient, opt
     const offer = offers.find(each => each.verb === event.detail.value)
     if (!offer) return
     event.detail.waitUntil(client.act(fiber, offer).then(
-      result => { options.onAction?.(offer, result) },
-      error => { options.onError?.(error, offer); throw error },
+      result => notify(() => options.onAction?.(offer, result)),
+      error => { notify(() => options.onError?.(error, offer)); throw error },
     ))
   })
   let removeWhenClosed = false
@@ -81,7 +82,7 @@ export function createActionMenu(fiber: ShuttleFiber, client: ShuttleClient, opt
     open({ anchor, focus = 'first' }) {
       if (!element.isConnected) document.body.append(element)
       // A popup opened from code returns focus to what was focused before it.
-      if (anchor instanceof HTMLElement) anchor.focus({ preventScroll: true })
+      if (anchor instanceof HTMLElement && (anchor.tabIndex >= 0 || anchor.hasAttribute('tabindex'))) anchor.focus({ preventScroll: true })
       element.toggleAttribute('data-open', true)
       // It resolves when the menu closes; the menu reports what happened through its events.
       void root.api?.open({ anchor, focus })

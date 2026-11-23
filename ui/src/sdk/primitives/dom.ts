@@ -17,19 +17,29 @@ export function flag(el: HTMLElement, name: string, on: boolean): void {
   el.toggleAttribute(`data-${name}`, on)
 }
 
-/** Make an element a keyboard-reachable button that calls `activate` on a click, Enter or Space. */
+/** Set or clear `aria-busy`, which names its value. */
+export function setBusy(el: HTMLElement, on: boolean): void {
+  if (on) el.setAttribute('aria-busy', 'true')
+  else el.removeAttribute('aria-busy')
+}
+
+/** Whether `el` is `aria-busy`. */
+export const isBusy = (el: HTMLElement): boolean => el.getAttribute('aria-busy') === 'true'
+
+/** Make an element a keyboard-reachable button that calls `activate` on a click, Enter or Space, once per press; a control inside it keeps its own clicks. */
 export function pressable(el: HTMLElement, label: string, activate: () => void): void {
   el.setAttribute('role', 'button')
   el.tabIndex = 0
   el.setAttribute('aria-label', label)
   el.addEventListener('click', event => {
-    if (event.target !== el && (event.target as Element).closest('button, a, input, textarea, select, iframe')) return
+    const control = (event.target as Element).closest('button, a, input, textarea, select, iframe')
+    if (control && control !== el && el.contains(control)) return
     activate()
   })
   el.addEventListener('keydown', event => {
     if (event.target !== el || (event.key !== 'Enter' && event.key !== ' ')) return
     event.preventDefault()
-    activate()
+    if (!event.repeat) activate()
   })
 }
 

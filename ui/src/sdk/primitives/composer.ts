@@ -1,9 +1,14 @@
 import '@ui-sdk/web/segmented-control'
 import type { ShuttleClient } from '../client.js'
+import { notify } from '../notify.js'
 import type { ShuttleFiber } from '../types.js'
-import { button, flag, part } from './dom.js'
+import { button, flag, isBusy, part, setBusy } from './dom.js'
 
-/** How a message reaches the worker: as the owner decides, in a fresh conversation, or resuming the previous one. */
+/**
+ * How a message reaches the worker: `continue` as the worker's state chooses
+ * (typed into a live one, else resumed or started), `fresh` in a new
+ * conversation, which cuts a live one, or `previous` resuming the last.
+ */
 export type ComposerMode = 'continue' | 'fresh' | 'previous'
 
 const MODE_LABEL: Record<ComposerMode, string> = { continue: 'Continue', fresh: 'Fresh', previous: 'Previous' }
@@ -15,7 +20,7 @@ export interface ComposerOptions {
   placeholder?: string
   /** The form's accessible name. */
   label?: string
-  /** A message id per send; a random one by default. Give the same id to a retry of the same message. */
+  /** Mints a draft's message id; a random one by default. A retry of the same text in the same mode keeps its id, so the owner takes it once. */
   messageId?(text: string): string
   onSent?(result: unknown, text: string): void
   onError?(error: unknown, text: string): void
@@ -23,13 +28,19 @@ export interface ComposerOptions {
 
 const randomId = (): string => `human-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')}`
 
+/** The owner took nothing because this id came before, and cannot say that first send arrived. */
+const unconfirmed = (result: Record<string, unknown> | undefined): boolean => result?.duplicate === true && result.disposition !== 'delivered'
+
 /**
  * A message to a fiber's worker, `<form data-slot="shuttle-composer">`: its
  * `input` textarea, optional `modes` holding a segmented control
  * (`@ui-sdk/web/segmented-control`: continue, fresh, previous) and its
  * `submit` button. Submitting (or ⌘/Ctrl+Enter in the input) sends the text
- * through `client.dispatch`; while it is in flight the form is `aria-busy`
- * and `data-pending`. A sent message clears the input.
+ * through a forced `client.dispatch`, which reaches a live worker and starts a
+ * draft, resting or closed fiber; while it is in flight the form is
+ * `aria-busy` and `data-pending`, and its button `aria-disabled`, keeping the
+ * focus. A sent message clears the input; one refused, or whose first send
+ * the owner cannot confirm, stays in it.
  */
 export function createComposer(fiber: ShuttleFiber, client: ShuttleClient, options: ComposerOptions = {}): HTMLFormElement {
   const form = part('form', 'shuttle-composer')
@@ -40,6 +51,8 @@ export function createComposer(fiber: ShuttleFiber, client: ShuttleClient, optio
   input.setAttribute('aria-label', 'Message')
   if (options.placeholder) input.placeholder = options.placeholder
   let mode: ComposerMode = options.defaultMode ?? 'continue'
+  /** The message composed and the id every try of it goes out under. */
+  let draft: { key: string; id: string } | undefined
   form.append(input)
   if (options.modes) {
     const modes = part('div', 'modes')
@@ -67,27 +80,34 @@ export function createComposer(fiber: ShuttleFiber, client: ShuttleClient, optio
   form.addEventListener('submit', async event => {
     event.preventDefault()
     const text = input.value.trim()
-    if (!text || form.hasAttribute('aria-busy')) return
-    form.toggleAttribute('aria-busy', true)
+    if (!text || isBusy(form)) return
+    const key = `${mode}\0${text}`
+    if (draft?.key !== key) draft = { key, id: (options.messageId ?? randomId)(text) }
+    setBusy(form, true)
     flag(form, 'pending', true)
-    submit.disabled = true
+    submit.setAttribute('aria-disabled', 'true')
+    let told: () => void
     try {
       const result = await client.dispatch({
         fiber_id: fiber.fiber.id,
         origin: fiber.origin,
+        force: true,
+        ad_hoc: true,
+        resume_mode: mode,
         user_message: text,
-        message_id: (options.messageId ?? randomId)(text),
-        ...(mode === 'continue' ? {} : { resume_mode: mode }),
+        message_id: draft.id,
       })
+      draft = undefined
+      if (unconfirmed(result)) throw new Error('This message may not have arrived: its first send was interrupted. Check the conversation; sending it again sends it as a new message.')
       if (input.value.trim() === text) input.value = ''
-      options.onSent?.(result, text)
+      told = () => options.onSent?.(result, text)
     } catch (error) {
-      options.onError?.(error, text)
-    } finally {
-      form.toggleAttribute('aria-busy', false)
-      flag(form, 'pending', false)
-      submit.disabled = false
+      told = () => options.onError?.(error, text)
     }
+    setBusy(form, false)
+    flag(form, 'pending', false)
+    submit.removeAttribute('aria-disabled')
+    notify(told)
   })
   return form
 }

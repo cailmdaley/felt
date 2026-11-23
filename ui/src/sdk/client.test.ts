@@ -55,6 +55,7 @@ describe('ShuttleClient', () => {
     await client.capture({ prompt: 'p', project_dir: '/d' })
     await client.dispatch({ fiber_id: 'work/task', user_message: 'hi' })
     await client.deliver({ fiber_id: 'work/task', text: 'hi' })
+    await client.messages({ address: 'shuttle://here/claude/1', message_id: 'm1', text: 'hi' }).catch(() => {})
     await client.lifecycle({ action: 'rest', fiber: 'work/task', origin: 'remote' })
     await client.kill('work/task', 'remote')
     await client.inbox({ action: 'list', fiber_id: 'work/task' })
@@ -63,10 +64,23 @@ describe('ShuttleClient', () => {
       ['/capture', 'POST', { prompt: 'p', project_dir: '/d' }],
       ['/dispatch', 'POST', { fiber_id: 'work/task', user_message: 'hi' }],
       ['/deliver', 'POST', { fiber_id: 'work/task', text: 'hi' }],
+      ['/messages', 'POST', { address: 'shuttle://here/claude/1', message_id: 'm1', text: 'hi' }],
       ['/lifecycle', 'POST', { action: 'rest', fiber: 'work/task', origin: 'remote' }],
       ['/kill', 'POST', { fiber_id: 'work/task', origin: 'remote' }],
       ['/inbox', 'POST', { action: 'list', fiber_id: 'work/task' }],
     ])
+  })
+
+  it('resolves a message with its receipt, a refused one’s too, and throws what came with none', async () => {
+    const request = { address: 'shuttle://here/claude/1', message_id: 'm1', text: 'hi' }
+    const receipt = (status: string) => ({ message_id: 'm1', address: request.address, status, transport: 'claude' })
+    const abort = new AbortController()
+    const taken = recording(() => json(receipt('accepted')))
+    expect(await taken.client.messages(request, { signal: abort.signal })).toEqual(receipt('accepted'))
+    expect(taken.calls[0].init?.signal).toBe(abort.signal)
+    expect(await recording(() => json(receipt('rejected'), 409)).client.messages(request)).toEqual(receipt('rejected'))
+    expect(await recording(() => json(receipt('unknown'), 502)).client.messages(request)).toEqual(receipt('unknown'))
+    await expect(recording(() => json({ error: 'bad address' }, 400)).client.messages(request)).rejects.toMatchObject({ message: 'bad address', status: 400 })
   })
 
   it('takes an offer on its owner: a lifecycle verb, or a kill', async () => {
@@ -95,6 +109,8 @@ describe('ShuttleClient', () => {
     expect(client.fileUrl('/home/me/~x/a b.html')).toBe('/api/v1/file?path=%2Fhome%2Fme%2F%7Ex%2Fa%20b.html')
     expect(client.fileUrl('rel.png', 'remote')).toBe('/api/v1/file?path=%2Frel.png&origin=remote')
     expect(client.fileUrl('/a.png', 'local')).toBe('/api/v1/file?path=%2Fa.png')
+    expect(client.htmlAssetUrl('/home/me/a b/tapestry.html', 'host/a')).toBe('/api/v1/file-assets/host%2Fa/home/me/a%20b/tapestry.html')
+    expect(client.htmlAssetUrl('/r/x.html')).toBe('/api/v1/file-assets/local/r/x.html')
     expect(client.threadPageUrl('U1', 'host-a')).toBe('/thread?f=U1@host-a')
   })
 })

@@ -221,9 +221,13 @@ export interface ShuttleLifecycleRequest extends ShuttleLifecycleVerb {
 export interface ShuttleDispatchRequest {
   fiber_id: string
   origin?: string
+  /** Launch whatever the fiber's state, on its owning host. */
   force?: boolean
+  /** Implies `force`; a standing fiber's run stands outside its schedule. */
+  ad_hoc?: boolean
   user_message?: string | null
-  resume_mode?: 'previous' | 'fresh'
+  /** `continue` lets the worker's state choose; a live worker has the message typed into it. */
+  resume_mode?: 'previous' | 'fresh' | 'continue'
   message_id?: string
   existing_only?: boolean
   project_dir?: string | null
@@ -239,6 +243,35 @@ export interface ShuttleDeliverRequest {
   message_id?: string
   resume_mode?: 'previous' | 'fresh'
   [key: string]: unknown
+}
+
+/** `POST /messages`: an idempotent message to one exact session. */
+export interface ShuttleMessageRequest {
+  /** The receiving session, exactly as `/peers` lists it: `shuttle://HOST/HARNESS/NATIVE_ID`. */
+  address: string
+  /** The idempotency key: the same id with the same content retries safely. */
+  message_id: string
+  /** Nonempty unless `notify_when_idle`. */
+  text?: string
+  from?: string
+  reply_to?: string
+  notify_address?: string
+  /** Start a turn with the text (the default), or add it as context. */
+  wake?: boolean
+  context_if_busy?: boolean
+  idle_only?: boolean
+  notify_when_idle?: boolean
+  notify_wake?: boolean
+}
+
+/** `POST /messages`'s answer (`MessageReceipt`): `status` says what became of the message. */
+export interface ShuttleMessageReceipt {
+  message_id: string
+  address: string
+  status: 'accepted' | 'context_added' | 'submitted' | 'queued' | 'subscribed' | 'unknown' | 'rejected'
+  transport: string
+  detail?: string | null
+  idle?: { state: 'watching' | 'unsupported'; signal?: string | null; detail?: string | null }
 }
 
 /** `POST /capture`. */
@@ -279,7 +312,7 @@ export interface ShuttleKillResult { fiber_id: string; killed: boolean; session?
 export type ShuttleAttention = 'waiting' | 'working' | 'quiet'
 
 /** A verb a fiber offers in its current state. */
-export type ShuttleVerb = 'resume' | 'rest' | 'pause' | 'review' | 'temper' | 'discard' | 'reopen' | 'ask-clear' | 'kill'
+export type ShuttleVerb = 'resume' | 'rest' | 'review' | 'temper' | 'discard' | 'reopen' | 'ask-clear' | 'kill'
 
 /** One verb a fiber offers, with its word and the request it makes. */
 export interface ShuttleOffer {

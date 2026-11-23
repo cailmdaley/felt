@@ -1,8 +1,9 @@
 import '@ui-sdk/web/toolbar'
 import type { ShuttleClient } from '../client.js'
 import { offersFor } from '../model.js'
+import { notify } from '../notify.js'
 import type { ShuttleFiber, ShuttleOffer } from '../types.js'
-import { flag, part } from './dom.js'
+import { flag, isBusy, part, setBusy } from './dom.js'
 
 export interface LifecycleBarOptions {
   /** The verbs to draw; every offer but stopping the worker (`kill`, a menu's) by default. */
@@ -28,7 +29,7 @@ export function createLifecycleBar(fiber: ShuttleFiber, client: ShuttleClient, o
   toolbar.setAttribute('aria-label', options.label ?? `Lifecycle of ${fiber.fiber.name}`)
   const verbs: HTMLButtonElement[] = []
   const busy = (on: boolean): void => {
-    root.toggleAttribute('aria-busy', on)
+    setBusy(root, on)
     for (const verb of verbs) {
       verb.setAttribute('aria-disabled', String(on))
       flag(verb, 'disabled', on)
@@ -42,19 +43,19 @@ export function createLifecycleBar(fiber: ShuttleFiber, client: ShuttleClient, o
     verb.dataset.verb = offer.verb
     flag(verb, 'destructive', !!offer.destructive)
     verb.addEventListener('click', async () => {
-      if (root.hasAttribute('aria-busy')) return
+      if (isBusy(root)) return
       busy(true)
       flag(verb, 'pending', true)
+      let told: () => void
       try {
-        // Taken first: an optional call skips evaluating its arguments when there is no listener.
         const result = await client.act(fiber, offer)
-        options.onAction?.(offer, result)
+        told = () => options.onAction?.(offer, result)
       } catch (error) {
-        options.onError?.(error, offer)
-      } finally {
-        flag(verb, 'pending', false)
-        busy(false)
+        told = () => options.onError?.(error, offer)
       }
+      flag(verb, 'pending', false)
+      busy(false)
+      notify(told)
     })
     verbs.push(verb)
     const holder = document.createElement('ui-toolbar-button')

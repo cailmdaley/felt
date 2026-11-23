@@ -51,8 +51,23 @@ describe('offersFor', () => {
     expect(verbs(fiber({ column: 'tempered' }, { status: 'closed' }))).toEqual(['reopen'])
   })
 
-  it('pauses a standing schedule instead of resting it, and offers to withdraw a question and stop a worker', () => {
-    expect(verbs(fiber({ runtime: { state: 'running' } }, { shuttle: { kind: 'standing', ...ask } }))).toEqual(['pause', 'temper', 'discard', 'ask-clear', 'kill'])
+  it('rests a standing fiber as its schedule’s pause, and tempers its run only while it waits on the human', () => {
+    const standing = (patch: Partial<ShuttleFiber>, doc: Partial<ShuttleFiberDoc> = {}, more: object = {}) =>
+      offersFor(fiber(patch, { shuttle: { kind: 'standing', ...more }, ...doc })).map(offer => [offer.verb, offer.label, offer.request?.action])
+    const temper = ['temper', 'Temper run', 'close'], pause = ['rest', 'Pause schedule', 'rest'], retire = ['discard', 'Retire', 'close']
+    expect(standing({ runtime: { state: 'running' } })).toEqual([temper, pause, retire, ['kill', 'Stop worker', undefined]])
+    expect(standing({}, {}, ask)).toEqual([temper, pause, retire, ['ask-clear', 'Clear question', 'ask-clear']])
+    expect(standing({ column: 'resting' })).toEqual([pause, retire])
+    expect(standing({})).toEqual([pause, retire])
+    expect(standing({ column: 'resting' }, { status: 'open' })).toEqual([['resume', 'Resume schedule', 'resume'], retire])
+    expect(standing({ column: 'awaiting_review' }, { status: 'closed' })).toEqual([])
+    expect(standing({ column: 'discarded' }, { status: 'closed' })).toEqual([['reopen', 'Reopen', 'reopen']])
+  })
+
+  it('names a pulsed seat’s rest as its schedule’s', () => {
+    const seat = { seat: true, pulse: { every: '59m' } }
+    expect(offersFor(fiber({}, { shuttle: seat })).map(offer => offer.label)).toEqual(['Close for review', 'Pause schedule', 'Temper', 'Discard'])
+    expect(offersFor(fiber({ column: 'roles' }, { status: 'open', shuttle: seat })).map(offer => offer.label)).toEqual(['Resume schedule'])
   })
 
   it('carries each verb’s request and marks what ends the work', () => {

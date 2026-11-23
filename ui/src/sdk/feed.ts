@@ -5,6 +5,7 @@
  * tells its subscribers whenever its state changes.
  */
 import { DaemonBootingError, daemonErrorMessage, type ShuttleClient } from './client.js'
+import { notify } from './notify.js'
 import type { ShuttleCompositeResponse, ShuttleFiber } from './types.js'
 
 export type ShuttleFeedStatus = 'idle' | 'loading' | 'ready' | 'booting' | 'error'
@@ -39,7 +40,7 @@ export class ShuttleFeed {
   #etag: string | null = null
   #timer: ReturnType<typeof setTimeout> | undefined
   #running = false
-  #inflight: Promise<ShuttleFeedState> | undefined
+  #inflight: { read: Promise<ShuttleFeedState>; abort: AbortController } | undefined
   readonly #onVisibility = (): void => {
     if (!this.#running) return
     if (this.#hidden()) this.#clear()
@@ -61,10 +62,13 @@ export class ShuttleFeed {
     if (!this.#hidden()) void this.refresh()
   }
 
-  /** Stop polling; the state stays as it was. */
+  /** Stop polling and abort a read in flight; the state stays as it was, a first read cut short leaving it idle. */
   stop(): void {
     this.#running = false
     this.#clear()
+    this.#inflight?.abort.abort()
+    this.#inflight = undefined
+    if (this.#state.status === 'loading') this.#set({ status: 'idle' })
     this.#document?.removeEventListener('visibilitychange', this.#onVisibility)
   }
 
@@ -80,31 +84,40 @@ export class ShuttleFeed {
 
   /** Read the feed now (joining a read already in flight), and resolve with the state it leaves. */
   refresh(): Promise<ShuttleFeedState> {
-    this.#inflight ??= this.#read().finally(() => {
+    if (this.#inflight) return this.#inflight.read
+    const abort = new AbortController()
+    const read = this.#read(abort.signal).finally(() => {
+      if (abort.signal.aborted) return
       this.#inflight = undefined
       this.#schedule()
     })
-    return this.#inflight
+    this.#inflight = { read, abort }
+    // Told once the read is in flight, so a listener that refreshes joins it.
+    if (!this.#state.response) this.#set({ status: 'loading' })
+    return read
   }
 
-  async #read(): Promise<ShuttleFeedState> {
-    if (!this.#state.response) this.#set({ status: 'loading' })
+  /** One read of the feed; one aborted meanwhile changes nothing. */
+  async #read(signal: AbortSignal): Promise<ShuttleFeedState> {
+    let patch: Partial<ShuttleFeedState>
     try {
-      const read = await this.#client.fibersComposite({ etag: this.#etag })
+      const read = await this.#client.fibersComposite({ etag: this.#etag, signal })
+      if (signal.aborted) return this.#state
       this.#etag = read.etag
-      if (read.notModified) this.#set({ status: 'ready', error: null, updatedAt: this.#now() })
-      else this.#set({ status: 'ready', response: read.response, fibers: read.response.fibers ?? [], error: null, updatedAt: this.#now() })
+      patch = { status: 'ready', error: null, updatedAt: this.#now(), ...(read.notModified ? {} : { response: read.response, fibers: read.response.fibers ?? [] }) }
     } catch (error) {
-      this.#set(error instanceof DaemonBootingError
+      if (signal.aborted) return this.#state
+      patch = error instanceof DaemonBootingError
         ? { status: 'booting', error: error.message }
-        : { status: 'error', error: daemonErrorMessage(error) })
+        : { status: 'error', error: daemonErrorMessage(error) }
     }
+    this.#set(patch)
     return this.#state
   }
 
   #set(patch: Partial<ShuttleFeedState>): void {
     this.#state = { ...this.#state, ...patch }
-    for (const listener of [...this.#listeners]) listener(this.#state)
+    for (const listener of [...this.#listeners]) notify(() => listener(this.#state))
   }
 
   #schedule(): void {

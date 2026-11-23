@@ -1,7 +1,8 @@
 // The SDK stands below the board: a page builds on it with nothing of the
 // board's. Nothing under src/sdk/ may import from the board, the pages, the
-// forms or the map, nor load a stylesheet, nor dress an element with a class
-// or an inline style; a skin is the page's.
+// forms or the map, nor load a stylesheet, nor dress an element with a class,
+// an inline style or a style element of its own, nor build one from markup; a
+// skin is the page's.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -54,13 +55,17 @@ it('src/sdk imports nothing above it, and no stylesheet', () => {
   expect(found).toEqual([])
 })
 
-it('src/sdk holds no stylesheet, class or inline style', () => {
+/** Whether a line of source dresses an element or builds one from markup. */
+const dresses = (line: string): boolean =>
+  /\.(className|classList|style|innerHTML|outerHTML|insertAdjacentHTML|adoptedStyleSheets)\b|setAttribute\(\s*['"`](class|style)['"`]|(createElement|part)\(\s*['"`](style|link)['"`]/.test(line)
+
+it('src/sdk holds no stylesheet, class, style or markup string', () => {
   const files = sources(SDK)
   expect(files.filter(file => /\.(css|scss|less)$/.test(file)).map(file => relative(SDK, file))).toEqual([])
   const dressed = files
     .filter(file => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file))
     .flatMap(file => readFileSync(file, 'utf8').split('\n').flatMap((line, index) =>
-      /\.(className|classList|style)\b|setAttribute\(\s*['"](class|style)['"]/.test(line) ? [`${relative(SDK, file)}:${index + 1}  ${line.trim()}`] : []))
+      dresses(line) ? [`${relative(SDK, file)}:${index + 1}  ${line.trim()}`] : []))
   expect(dressed).toEqual([])
 })
 
@@ -75,4 +80,9 @@ it('the guard sees what it exists to catch', () => {
   expect(crossing(at, 'marked')).toBe('a package beyond @ui-sdk/core and @ui-sdk/web')
   expect(crossing(join(SDK, 'primitives', 'x.ts'), '../model.js')).toBeUndefined()
   expect(crossing(at, '@ui-sdk/web/menu')).toBeUndefined()
+  for (const line of [
+    'el.className = "x"', 'el.classList.add("x")', 'el.style.color = "red"', 'el.setAttribute("style", "")', 'el.innerHTML = text', 'el.outerHTML = text',
+    'el.insertAdjacentHTML("beforeend", text)', 'document.adoptedStyleSheets = []', "document.createElement('style')", "part('link', 'x')",
+  ]) expect(dresses(line), line).toBe(true)
+  expect(dresses("part('div', 'style-guide')")).toBe(false)
 })

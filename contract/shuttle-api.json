@@ -862,9 +862,10 @@
                     "type": "string",
                     "enum": [
                       "previous",
-                      "fresh"
+                      "fresh",
+                      "continue"
                     ],
-                    "description": "previous resumes the prior conversation, or types user_message into a live one; fresh starts a new conversation, stopping a live worker first. Absent or any other value lets the owner decide from how the last run ended."
+                    "description": "previous resumes the prior conversation, or types user_message into a live one; fresh starts a new conversation, stopping a live worker first; continue types user_message into a live worker, otherwise starts fresh after a clean handoff and resumes, or starts cold, after any other end. Absent or any other value lets the owner decide from how the last run ended."
                   },
                   "project_dir": {
                     "type": [

@@ -31,29 +31,30 @@ const extension = (name: string): string => /\.([a-z0-9]+)$/i.exec(name)?.[1]?.t
 
 /**
  * A file as `<div data-slot="shuttle-file-preview" data-kind>`: a `figure`
- * shows its picture in an `<img>`, a `page` the top of its page in a
- * sandboxed `<iframe>`, a `card` or a `row` its extension; each has its
+ * shows its picture in an `<img>`, a `page` the top of its page in an inert
+ * `<iframe>` that runs no scripts, a `card` or a `row` its extension; each has its
  * `name`, its `caption` when a send gave one, and its `age`.
  */
 export function createFilePreview(input: FilePreviewFile | ShuttleSentFile, client: ShuttleClient, options: FilePreviewOptions = {}): HTMLDivElement {
   const file = 'fullPath' in input ? sentFile(input) : input
   const name = file.name ?? file.path.split('/').pop() ?? file.path
   const kind = options.kind ?? fileKindOf(file.path)
-  const url = client.fileUrl(file.path, options.origin)
   const root = part('div', 'shuttle-file-preview')
   root.dataset.kind = kind
   root.dataset.path = file.path
   let media: HTMLElement
   if (kind === 'figure') {
     const img = part('img', 'media')
-    img.src = url
+    img.src = client.fileUrl(file.path, options.origin)
     img.alt = name
     img.loading = 'lazy'
     media = img
   } else if (kind === 'page') {
     const frame = part('iframe', 'media')
-    frame.setAttribute('sandbox', 'allow-scripts')
-    frame.src = url
+    frame.setAttribute('sandbox', '')
+    frame.toggleAttribute('inert', true)
+    frame.tabIndex = -1
+    frame.src = client.htmlAssetUrl(file.path, options.origin)
     frame.title = name
     frame.loading = 'lazy'
     media = frame
