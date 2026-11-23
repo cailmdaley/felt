@@ -782,7 +782,14 @@ defmodule Shuttle.DispatcherTest do
       }
     })
 
-    assert {:ok, _} = Dispatcher.dispatch("tests/haiku", runner: MockRunner, restoration: true)
+    assert {:ok, _} =
+             Dispatcher.dispatch("tests/haiku",
+               runner: MockRunner,
+               restoration: true,
+               transcript: fn ^session ->
+                 %{path: "/t/#{session}.jsonl", mtime: ~U[2026-10-29 00:01:00Z]}
+               end
+             )
 
     {"tmux", ["new-session" | args]} =
       Enum.find(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
@@ -813,7 +820,14 @@ defmodule Shuttle.DispatcherTest do
       }
     })
 
-    assert {:ok, _} = Dispatcher.dispatch("tests/haiku", runner: MockRunner, restoration: true)
+    assert {:ok, _} =
+             Dispatcher.dispatch("tests/haiku",
+               runner: MockRunner,
+               restoration: true,
+               transcript: fn ^session ->
+                 %{path: "/t/#{session}.jsonl", mtime: ~U[2026-10-29 00:01:00Z]}
+               end
+             )
 
     {"tmux", ["new-session" | args]} =
       Enum.find(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
@@ -847,6 +861,9 @@ defmodule Shuttle.DispatcherTest do
              Dispatcher.dispatch("tests/haiku",
                runner: MockRunner,
                restoration: true,
+               transcript: fn ^session ->
+                 %{path: "/t/#{session}.jsonl", mtime: ~U[2026-10-29 00:01:00Z]}
+               end,
                turn_phase: fn ^session -> "working" end
              )
 
@@ -865,6 +882,25 @@ defmodule Shuttle.DispatcherTest do
   test "stale restoration authorization cannot fall through to a fresh dispatch" do
     assert {:error, {:restoration_marker_stale, _}} =
              Dispatcher.dispatch("tests/haiku", runner: MockRunner, restoration: true)
+
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
+  test "restoration refuses a session whose transcript is absent on this host" do
+    session = "11111111-2222-3333-4444-555555555555"
+
+    MockRunner.override_fiber("tests/haiku", %{
+      shuttle: %{
+        "runtime" => %{"session_uuid" => session, "dispatched_at" => "2026-10-29T00:00:00Z"}
+      }
+    })
+
+    assert {:error, {:restoration_marker_stale, _}} =
+             Dispatcher.dispatch("tests/haiku",
+               runner: MockRunner,
+               restoration: true,
+               transcript: fn _ -> nil end
+             )
 
     refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end

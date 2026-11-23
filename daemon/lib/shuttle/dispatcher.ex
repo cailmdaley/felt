@@ -112,7 +112,7 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
          :ok <- check_host_owner(fiber, Keyword.get(opts, :own_host_id)),
-         :ok <- validate_restoration_request(opts, fiber, prompt_context, force),
+         {:ok, restoration?} <- validate_restoration_request(opts, fiber, prompt_context, force),
          :ok <- check_dispatchable(fiber, force, opts),
          {:ok, fiber} <-
            maybe_reopen_on_force(
@@ -134,12 +134,12 @@ defmodule Shuttle.Dispatcher do
           is_binary(Keyword.get(opts, :resume_session)) ->
             {:previous, Keyword.get(opts, :resume_session)}
 
-          restoration?(opts, fiber, prompt_context, force) ->
+          restoration? ->
             {:previous, Shuttle.Continuation.resumable_session_id(fiber)}
 
           true ->
             resolve_resume_intent(prompt_context, fiber,
-              resume_mode: Keyword.get(opts, :resume_mode)
+              Keyword.take(opts, [:resume_mode, :transcript])
             )
         end
 
@@ -174,7 +174,7 @@ defmodule Shuttle.Dispatcher do
             resume_session: Keyword.get(opts, :resume_session),
             developer_instructions: Keyword.get(opts, :developer_instructions),
             runner: runner,
-            restoration: restoration?(opts, fiber, prompt_context, force),
+            restoration: restoration?,
             turn_phase: Keyword.get(opts, :turn_phase),
             previous_session: previous_session,
             threads: Keyword.get(opts, :threads),
@@ -197,13 +197,13 @@ defmodule Shuttle.Dispatcher do
   end
 
   # A restoration flag authorizes only the same dirty continuation observed in
-  # the freshly-read fiber. Manual dispatches and human continuation directives
-  # keep their own resume semantics.
+  # the freshly-read fiber, with its transcript present on this host. Manual
+  # dispatches and human continuation directives keep their own resume semantics.
   defp restoration?(opts, fiber, prompt_context, force) do
     Keyword.get(opts, :restoration, false) and not force and
       is_nil(Keyword.get(opts, :resume_mode)) and autonomous_context?(prompt_context) and
       is_nil(Keyword.get(opts, :user_message)) and
-      Shuttle.Continuation.restoration?(fiber)
+      Shuttle.Continuation.restoration?(fiber, Keyword.take(opts, [:transcript]))
   end
 
   defp autonomous_context?(:constitution), do: true
@@ -211,14 +211,17 @@ defmodule Shuttle.Dispatcher do
   defp autonomous_context?(_), do: false
 
   defp validate_restoration_request(opts, fiber, prompt_context, force) do
-    if Keyword.get(opts, :restoration, false) and
-         not restoration?(opts, fiber, prompt_context, force) do
-      dispatch_refused(
-        :restoration_marker_stale,
-        "the worker's durable continuation marker no longer authorizes restoration; poll again before dispatching"
-      )
+    if Keyword.get(opts, :restoration, false) do
+      if restoration?(opts, fiber, prompt_context, force) do
+        {:ok, true}
+      else
+        dispatch_refused(
+          :restoration_marker_stale,
+          "the worker's durable continuation marker no longer authorizes restoration; poll again before dispatching"
+        )
+      end
     else
-      :ok
+      {:ok, false}
     end
   end
 

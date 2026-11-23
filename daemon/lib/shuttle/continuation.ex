@@ -175,11 +175,29 @@ defmodule Shuttle.Continuation do
     end
   end
 
-  @doc "True when durable runtime markers identify an interrupted worker to restore."
-  @spec restoration?(map()) :: boolean()
-  def restoration?(fiber) do
-    not clean_handoff_since_dispatch?(fiber) and
-      is_binary(resumable_session_id(fiber))
+  @doc """
+  True when durable runtime markers identify an interrupted worker whose
+  conversation transcript is present on this host and does not predate the
+  dispatch.
+
+  A re-homed constitution still carries the old host's `session_uuid` and
+  `dispatched_at` with no local transcript, so it is not restorable here and
+  starts fresh instead of looping on an unopenable session.
+
+  Options:
+    * `:transcript` — `fn session_id -> %{path, mtime} | nil end`, the
+      transcript lookup (default `&transcript_stat/1`).
+  """
+  @spec restoration?(map(), keyword()) :: boolean()
+  def restoration?(fiber, opts \\ []) do
+    with false <- clean_handoff_since_dispatch?(fiber),
+         session_id when is_binary(session_id) <- resumable_session_id(fiber),
+         lookup <- Keyword.get(opts, :transcript, &transcript_stat/1),
+         %{} = transcript <- lookup.(session_id) do
+      not predates_dispatch?(transcript, fiber)
+    else
+      _ -> false
+    end
   end
 
   # Nested-only. A non-map `runtime:` (degenerate/null) reads as absent —

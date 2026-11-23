@@ -68,9 +68,11 @@ defmodule Shuttle.PollerQuarantineTest do
 
   test "boot quarantine restores a dead worker from its durable marker" do
     fiber_id = "tests/quarantine-dirty-resume"
+    session = "b1e0a3c2-0000-4000-8000-000000000001"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    write_dispatch_marker(fiber_id, "b1e0a3c2-0000-4000-8000-000000000001")
+    write_dispatch_marker(fiber_id, session)
+    write_transcript(session)
 
     {:ok, poller} =
       start_poller!(
@@ -93,6 +95,35 @@ defmodule Shuttle.PollerQuarantineTest do
     end)
 
     assert Poller.snapshot(poller).boot_quarantine
+  end
+
+  test "boot quarantine parks a re-homed constitution whose session transcript is absent on this host" do
+    fiber_id = "tests/quarantine-rehomed-foreign-session"
+    foreign_session = "b1e0a3c2-0000-4000-8000-000000000099"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+    write_dispatch_marker(fiber_id, foreign_session)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_rehomed,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true
+      )
+
+    sync_poll_cycle!(poller)
+
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id, reason: "boot quarantine — awaiting release"}] =
+               Poller.snapshot(poller).pending_launch
+    end)
+
+    refute Enum.any?(MockRunner.commands(), fn
+             {"tmux", ["new-session" | _]} -> true
+             _ -> false
+           end)
   end
 
   test "boot quarantine does NOT park work it observed running; a was-running fiber re-dispatches on exit" do

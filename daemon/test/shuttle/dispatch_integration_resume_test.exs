@@ -182,6 +182,52 @@ defmodule Shuttle.DispatchIntegrationResumeTest do
     refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
   end
 
+  test "re-homed constitution with foreign session_uuid dispatches fresh on first attempt instead of resuming",
+       %{host: host} do
+    write_fiber(host, "tests/poller-rehomed-foreign-session", """
+    ---
+    name: Poller rehomed foreign session fiber
+    status: active
+    tags:
+      - constitution
+    shuttle:
+      kind: oneshot
+      agent: claude-sonnet
+      host: test-host
+    ---
+    A constitution re-homed from another host carrying the old host's session_uuid.
+    """)
+
+    foreign_session = "c1a0e5e0-0000-4000-8000-0000000000ff"
+    write_dispatch_marker(host, "tests/poller-rehomed-foreign-session", foreign_session)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_rehomed_foreign_session,
+        runner: IntegrationRunner,
+        poll_interval_ms: 600_000,
+        felt_stores: [host]
+      )
+
+    assert {:ok, _} =
+             Poller.dispatch_fiber(poller, "tests/poller-rehomed-foreign-session", [])
+
+    script = read_run_script()
+    refute script =~ "--resume"
+    assert script =~ "--session-id "
+    assert script =~ "Previous session: #{foreign_session} ended without a handoff"
+    assert script =~ "its transcript is not on this host."
+
+    new_uuid =
+      get_in(read_frontmatter(host, "tests/poller-rehomed-foreign-session"), [
+        "shuttle",
+        "runtime",
+        "session_uuid"
+      ])
+
+    assert is_binary(new_uuid) and new_uuid != "" and new_uuid != foreign_session
+  end
+
   # A human resuming a standing card's session from its History: the Poller
   # runs it as the card's worker, resuming exactly that session (not the
   # latest), with nothing injected and no fresh fallback, so the board, the

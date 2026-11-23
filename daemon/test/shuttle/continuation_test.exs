@@ -6,15 +6,32 @@ defmodule Shuttle.ContinuationTest do
 
   alias Shuttle.Test.RecordingRunner
 
-  test "restoration requires a dispatched conversation without a newer clean handoff" do
+  test "restoration requires a dispatched conversation with a local transcript and no newer clean handoff" do
     runtime = %{"dispatched_at" => "2026-06-21T12:00:00Z", "session_uuid" => "worker"}
     fiber = fn fields -> %{"shuttle" => %{"runtime" => fields}} end
-    assert Continuation.restoration?(fiber.(runtime))
-    refute Continuation.restoration?(fiber.(Map.delete(runtime, "session_uuid")))
-    refute Continuation.restoration?(fiber.(Map.delete(runtime, "dispatched_at")))
+
+    present = [
+      transcript: fn "worker" -> %{path: "/t/worker.jsonl", mtime: ~U[2026-06-21 12:01:00Z]} end
+    ]
+
+    assert Continuation.restoration?(fiber.(runtime), present)
+    refute Continuation.restoration?(fiber.(Map.delete(runtime, "session_uuid")), present)
+    refute Continuation.restoration?(fiber.(Map.delete(runtime, "dispatched_at")), present)
 
     refute Continuation.restoration?(
-             fiber.(Map.put(runtime, "handed_off_at", "2026-06-21T12:00:00Z"))
+             fiber.(Map.put(runtime, "handed_off_at", "2026-06-21T12:00:00Z")),
+             present
+           )
+
+    # Absent transcript (e.g. constitution re-homed from another host) is not restorable here.
+    refute Continuation.restoration?(fiber.(runtime), transcript: fn _ -> nil end)
+
+    # Transcript predating this dispatch belongs to a predecessor, not this run.
+    refute Continuation.restoration?(
+             fiber.(runtime),
+             transcript: fn "worker" ->
+               %{path: "/t/worker.jsonl", mtime: ~U[2026-06-21 11:59:59Z]}
+             end
            )
   end
 
