@@ -604,6 +604,7 @@ defmodule Shuttle.PollerDocumentsTest do
                    "--status",
                    "all",
                    "--json",
+                   "--unreadable",
                    "--any",
                    "field:shuttle",
                    "--any",

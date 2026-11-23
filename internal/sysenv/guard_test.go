@@ -37,6 +37,7 @@ var processReadAllowlist = map[string]string{
 	"felt/storage.go storageReadWorkers os.Getenv":           "FELT_READ_WORKERS configures the storage pool across all command entry points",
 	"atomicfile/atomicfile.go - os.Getenv":                   "FELT_TEST_FSYNC=0 turns off fsync for a whole test process and the CLIs it runs; files reach atomicfile with no Env",
 	"felt/person.go PersonAt exec.Command":                   "felt.person is the git config of the repository holding a fiber, read where Storage creates fibers; Storage carries no Env",
+	"felt/enclosing.go configuredEnclosingStore exec.Command": "felt.enclosing is the git config of the repository holding a store, read where Storage finds its enclosing store; Storage carries no Env",
 }
 
 // TestProductionReadsTheProcessOnlyThroughEnv fails when non-test code under
