@@ -26,6 +26,17 @@ var antigravityHookEvents = []string{"SessionStart", "PreInvocation", "PreToolUs
 // source: the agy hook shim, the script it sources, and the skills.
 var antigravityPluginFiles = []string{"hooks/agy.sh", "hooks/shuttle-bin.sh", "skills"}
 
+func pluginSourceVersion(pluginDir string) string {
+	var meta struct {
+		Version string `json:"version"`
+	}
+	data, err := os.ReadFile(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"))
+	if err != nil || json.Unmarshal(data, &meta) != nil {
+		return ""
+	}
+	return meta.Version
+}
+
 func (a *app) setupAntigravityCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "antigravity",
@@ -86,9 +97,13 @@ func materializeAntigravityPlugin(dir, pluginDir string) error {
 		}
 	}
 	manifest := map[string]string{
+		"$schema":     "https://antigravity.google/schemas/v1/plugin.json",
 		"name":        "felt",
 		"displayName": "Felt",
 		"description": "felt and Shuttle for Antigravity: the felt and shuttle skills, and hooks that report this session to Shuttle and deliver its messages.",
+	}
+	if version := pluginSourceVersion(pluginDir); version != "" {
+		manifest["version"] = version
 	}
 	// The shim bounds shuttle at five seconds, inside this timeout (seconds).
 	hook := func(command string) []map[string]any {

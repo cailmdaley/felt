@@ -44,7 +44,7 @@ func TestSetupAntigravityInstallsTheNativePlugin(t *testing.T) {
 
 	var manifest map[string]string
 	readJSON(t, filepath.Join(dir, "plugin.json"), &manifest)
-	if manifest["name"] != "felt" {
+	if manifest["name"] != "felt" || manifest["version"] == "" {
 		t.Fatalf("plugin.json = %v", manifest)
 	}
 	var hooks map[string]map[string][]map[string]any
