@@ -53,8 +53,7 @@ Its popups and composite controls are built on Vercel's `@ui-sdk/core` and `@ui-
 It has three parts.
 
 **Client and feed.**
-`ShuttleClient` has methods to read fibers, the fleet and files, and to create, capture, launch, message, change and stop work.
-For a route without a method, such as `POST /messages`, `client.url(path)` gives the address to `fetch`.
+`ShuttleClient` wraps all 15 Core routes (plus `/inbox`) to read fibers, the fleet and files, and to create, capture, launch, message, change and stop work; `client.url(path)` builds an address for any additional route.
 `ShuttleFeed` polls the fleet's fibers and tells you when they change.
 `DaemonBootingError`, `isDaemonBooting` and `daemonErrorMessage` sort out a daemon that is starting from one that failed.
 

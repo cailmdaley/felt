@@ -117,7 +117,7 @@ func scannedPath(rel string) bool {
 	if strings.HasSuffix(rel, ".md") {
 		return true
 	}
-	if rel == "Makefile" || rel == "scripts/bootstrap.sh" {
+	if rel == "Makefile" || rel == "scripts/bootstrap.sh" || rel == "docs/llms.txt" {
 		return true
 	}
 	for _, dir := range []string{"daemon/config/", "daemon/lib/", "cmd/", "internal/", "daemon/share/", "ui/", "bin/"} {
