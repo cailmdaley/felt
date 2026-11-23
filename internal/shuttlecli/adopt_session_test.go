@@ -175,3 +175,166 @@ func TestAdoptSessionExistingFlag(t *testing.T) {
 		t.Fatalf("status = %q, want active", got.Status)
 	}
 }
+
+func TestAdoptSessionRejectsActiveFiberWithoutMutating(t *testing.T) {
+	t.Parallel()
+	dir, st := newStore(t)
+	env := testEnv(t)
+	ownHost(t, env, "fir")
+
+	if err := st.Write(&felt.Felt{ID: "roles/builder", Name: "Builder", Tags: []string{"role"}}); err != nil {
+		t.Fatal(err)
+	}
+	seedFiber(t, st, "work/running", "Running Task", felt.StatusActive, map[string]any{
+		"kind":        "oneshot",
+		"host":        "fir",
+		"agent":       "claude-opus",
+		"project_dir": dir,
+	}, nil)
+
+	claimCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/claim" {
+			claimCalled = true
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+
+	_, _, err := executeIn(t, env, dir,
+		"-C", dir,
+		"adopt", "work/running",
+		"--existing",
+		"--agent", "codex-sol",
+		"--role", "builder",
+		"--tmux-session", "sess",
+		"--session-uuid", "uuid-active",
+	)
+	if err == nil || !strings.Contains(err.Error(), "already active") {
+		t.Fatalf("expected already-active error, got %v", err)
+	}
+	if claimCalled {
+		t.Fatal("claim endpoint should not be called for an already-active fiber")
+	}
+	got := mustRead(t, st, "work/running")
+	if got.Role != "" {
+		t.Fatalf("role was mutated on active fiber: %q", got.Role)
+	}
+	block, ok, err := shuttle.BlockOf(got)
+	if err != nil || !ok || block.Agent != "claude-opus" {
+		t.Fatalf("block was mutated on active fiber: %+v, %v, %v", block, ok, err)
+	}
+}
+
+func TestAdoptSessionAttachesHarnessPIDWithExplicitSessionUUID(t *testing.T) {
+	t.Parallel()
+	dir, _ := newStore(t)
+	env := testEnv(t)
+	ownHost(t, env, "fir")
+
+	var claimPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/document-changed" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		claimPayload = nil
+		_ = json.NewDecoder(r.Body).Decode(&claimPayload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"claimed":true}`))
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	// Simulate ambient hook passing --session-uuid when envSession is unset.
+	app := newApp(env)
+	app.eventReceiverPID = func() int { return 4242 }
+	_, stderr, err := executeApp(t, app, dir,
+		"-C", dir,
+		"adopt", "work/with-pid", "With PID",
+		"--session-uuid", "uuid-self",
+		"--tmux-session", "human-tmux",
+	)
+	if err != nil {
+		t.Fatalf("adopt failed: %v (stderr: %s)", err, stderr)
+	}
+	if pid, ok := claimPayload["harness_pid"].(float64); !ok || int(pid) != 4242 {
+		t.Fatalf("expected harness_pid=4242 when --session-uuid passed, got %v", claimPayload["harness_pid"])
+	}
+
+	// When adopting a different session than the current harness env, omit harness_pid.
+	env.Set("CLAUDE_CODE_SESSION_ID", "uuid-current-env")
+	app2 := newApp(env)
+	app2.eventReceiverPID = func() int { return 4242 }
+	_, stderr, err = executeApp(t, app2, dir,
+		"-C", dir,
+		"adopt", "work/other-session", "Other Session",
+		"--session-uuid", "uuid-foreign",
+		"--tmux-session", "human-tmux",
+	)
+	if err != nil {
+		t.Fatalf("adopt foreign failed: %v (stderr: %s)", err, stderr)
+	}
+	if _, present := claimPayload["harness_pid"]; present {
+		t.Fatalf("did not expect harness_pid for foreign session_uuid, got %v", claimPayload["harness_pid"])
+	}
+}
+
+func TestAdoptSessionClearsHorizonAndGuardsFlags(t *testing.T) {
+	t.Parallel()
+	dir, st := newStore(t)
+	env := testEnv(t)
+	ownHost(t, env, "fir")
+	env.Set("REX_SESSION", "session:env-own")
+	env.Set("REX_BLOCK", "block:env-own")
+	env.Set("TMUX_PANE", "%99")
+
+	// --carry without --document-file must error.
+	if _, _, err := executeIn(t, env, dir, "-C", dir, "adopt", "work/x", "--carry"); err == nil || !strings.Contains(err.Error(), "--carry requires --document-file") {
+		t.Fatalf("expected --carry guard error, got %v", err)
+	}
+
+	// Resting fiber with horizon: stashed.
+	resting := &felt.Felt{ID: "work/resting", Name: "Resting", Status: felt.StatusOpen}
+	if err := resting.SetExtraField("horizon", "stashed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write(resting); err != nil {
+		t.Fatal(err)
+	}
+
+	var claimPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/document-changed" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&claimPayload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"claimed":true}`))
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+
+	// Foreign --rex-session must NOT inherit unrelated env REX_BLOCK.
+	_, stderr, err := executeIn(t, env, dir,
+		"-C", dir,
+		"adopt", "work/resting",
+		"--existing",
+		"--rex-session", "session:foreign",
+		"--session-uuid", "uuid-rest",
+	)
+	if err != nil {
+		t.Fatalf("adopt resting failed: %v (stderr: %s)", err, stderr)
+	}
+	if claimPayload["tmux_session"] != "session:foreign" || claimPayload["tmux_pane"] != "" {
+		t.Fatalf("foreign rex-session inherited unrelated pane: %v", claimPayload)
+	}
+	got := mustRead(t, st, "work/resting")
+	if got.Status != felt.StatusActive {
+		t.Fatalf("status = %q, want active", got.Status)
+	}
+	if _, hasHorizon := got.ExtraFields["horizon"]; hasHorizon {
+		t.Fatalf("expected horizon to be cleared on activation, got %v", got.ExtraFields["horizon"])
+	}
+}

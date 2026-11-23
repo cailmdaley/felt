@@ -88,23 +88,27 @@ func (a *app) ambientSessionContext(input eventHookInput, host string) string {
 	var b strings.Builder
 	b.WriteString("[Shuttle ambient mode]\n")
 	b.WriteString("Ambient Shuttle mode is active for this unattached session.\n")
-	fmt.Fprintf(&b, "- session_uuid: %s\n", input.SessionID)
+	fmt.Fprintf(&b, "- session_uuid: %s\n", sanitizeAmbientLine(input.SessionID))
 	if host != "" {
-		fmt.Fprintf(&b, "- host: %s\n", host)
+		fmt.Fprintf(&b, "- host: %s\n", sanitizeAmbientLine(host))
 	}
 	if projectDir != "" {
-		fmt.Fprintf(&b, "- project_dir: %s\n", projectDir)
+		fmt.Fprintf(&b, "- project_dir: %s\n", sanitizeAmbientLine(projectDir))
 	}
 	if storeRoot != "" {
-		fmt.Fprintf(&b, "- store: %s\n", storeRoot)
+		fmt.Fprintf(&b, "- store: %s\n", sanitizeAmbientLine(storeRoot))
 	}
 	if termDesc != "" {
-		fmt.Fprintf(&b, "- terminal: %s\n", termDesc)
+		fmt.Fprintf(&b, "- terminal: %s\n", sanitizeAmbientLine(termDesc))
 	}
 	b.WriteString("Once the user's request turns into substantive work (skip trivial one-off questions or if the user asks not to track), quietly choose a fitting parent/slug in the felt store and run:\n")
 	fmt.Fprintf(&b, "  %s\n", strings.Join(cmdParts, " "))
 	b.WriteString("This adopts the session into a fiber so it appears on Desk and in Rex's sidebar with its tapestry and handoffs.")
 	return b.String()
+}
+
+func sanitizeAmbientLine(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
 
 func (a *app) daemonReachableQuick() bool {

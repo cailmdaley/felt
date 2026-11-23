@@ -189,4 +189,42 @@ func TestAmbientSessionStartInjection(t *testing.T) {
 			t.Fatalf("expected no ambient output on PostToolUse, got %q", out)
 		}
 	})
+
+	t.Run("quotes spaces and single quotes in paths and sanitizes newlines", func(t *testing.T) {
+		t.Parallel()
+		specialDir := filepath.Join(t.TempDir(), "my project's dir")
+		if err := os.MkdirAll(filepath.Join(specialDir, ".felt"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out := runHook(t, map[string]string{
+			"SHUTTLE_AMBIENT": "1",
+			"REX_SESSION":     "session:a b",
+			"REX_BLOCK":       "block:it's",
+		}, "", eventHookInput{
+			HookEventName: "SessionStart",
+			Harness:       "claude",
+			SessionID:     "sess\nnewline",
+			CWD:           specialDir,
+		})
+		var env sessionEnvelope
+		if err := json.Unmarshal([]byte(out), &env); err != nil {
+			t.Fatalf("unmarshal envelope (%q): %v", out, err)
+		}
+		ctx := env.HookSpecificOutput.AdditionalContext
+		wantQuoted := shellQuoteArg(specialDir)
+		if !strings.Contains(wantQuoted, `'"'"'`) {
+			t.Fatalf("expected single-quote escaping in %q", wantQuoted)
+		}
+		for _, want := range []string{
+			"- session_uuid: sess newline\n",
+			"--project-dir " + wantQuoted,
+			"--store " + wantQuoted,
+			"--rex-session 'session:a b'",
+			"--rex-block 'block:it'\"'\"'s'",
+		} {
+			if !strings.Contains(ctx, want) {
+				t.Fatalf("ambient context missing %q:\n%s", want, ctx)
+			}
+		}
+	})
 }

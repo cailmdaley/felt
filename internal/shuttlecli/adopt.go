@@ -66,6 +66,9 @@ the poller cannot launch a duplicate worker.`,
 				}
 				return a.runCarriedAdopt(args[0], documentFile, carry)
 			}
+			if carry {
+				return fmt.Errorf("--carry requires --document-file")
+			}
 			return a.runSessionAdopt(cmd, args, opts)
 		},
 	}
@@ -150,11 +153,14 @@ func (a *app) runSessionAdopt(cmd *cobra.Command, args []string, opts adoptSessi
 		return err
 	}
 
+	_, envSession := a.currentSession()
 	sessionUUID := strings.TrimSpace(opts.sessionUUID)
-	harnessPID := 0
 	if sessionUUID == "" {
-		_, sessionUUID = a.currentSession()
-		if pid := a.eventReceiverPID(); sessionUUID != "" && pid > 0 {
+		sessionUUID = envSession
+	}
+	harnessPID := 0
+	if sessionUUID != "" && (envSession == "" || sessionUUID == envSession) {
+		if pid := a.eventReceiverPID(); pid > 0 {
 			harnessPID = pid
 		}
 	}
@@ -210,6 +216,9 @@ func (a *app) runSessionAdopt(cmd *cobra.Command, args []string, opts adoptSessi
 		} else {
 			if existingBlock.Host != ownHost {
 				return fmt.Errorf("fiber %s is owned by host %q; this host is %q", f.ID, existingBlock.Host, ownHost)
+			}
+			if f.Status == felt.StatusActive {
+				return fmt.Errorf("fiber %s is already active; cannot adopt an active constitution", f.ID)
 			}
 			if f.Status == felt.StatusClosed {
 				return fmt.Errorf("fiber %s is closed; reopen it before adopting", f.ID)
@@ -298,6 +307,10 @@ func (a *app) runSessionAdopt(cmd *cobra.Command, args []string, opts adoptSessi
 		return fmt.Errorf("reloading claimed fiber %s for activation: %w", f.ID, err)
 	}
 	locked.Status, locked.ClosedAt = felt.StatusActive, nil
+	if err := locked.SetExtraField("horizon", nil); err != nil {
+		unlock()
+		return fmt.Errorf("clearing horizon on claimed fiber %s: %w", f.ID, err)
+	}
 	writeErr := a.writeFiber(st, locked)
 	unlock()
 	if writeErr != nil {
@@ -320,17 +333,13 @@ func (a *app) runSessionAdopt(cmd *cobra.Command, args []string, opts adoptSessi
 func (a *app) resolveAdoptTerminal(opts adoptSessionOptions) (string, string, error) {
 	if sid := strings.TrimSpace(opts.rexSession); sid != "" {
 		bid := strings.TrimSpace(opts.rexBlock)
-		if bid == "" {
+		if bid == "" && sid == strings.TrimSpace(a.env.Getenv("REX_SESSION")) {
 			bid = strings.TrimSpace(a.env.Getenv("REX_BLOCK"))
 		}
 		return sid, bid, nil
 	}
 	if ts := strings.TrimSpace(opts.tmuxSession); ts != "" {
-		pane := strings.TrimSpace(opts.tmuxPane)
-		if pane == "" {
-			pane = strings.TrimSpace(a.env.Getenv("TMUX_PANE"))
-		}
-		return ts, pane, nil
+		return ts, strings.TrimSpace(opts.tmuxPane), nil
 	}
 	ref, refErr := a.currentTerminal()
 	// A human-born Rex terminal has native IDs but no worker binding.
