@@ -49,7 +49,7 @@ describe('composite app runtime', () => {
 })
 
 describe('worker liveness is the daemon runtime', () => {
-  const board = (kind: 'pinned' | 'standing' | 'oneshot', runtime: unknown) =>
+  const board = (kind: 'standing' | 'oneshot', runtime: unknown) =>
     buildKanbanResponseFromComposite(parseCompositeFeed(servedFeed({
       host: 'laptop',
       fibers: [{

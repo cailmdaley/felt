@@ -184,10 +184,9 @@ export interface KanbanCard {
    */
   shuttleHost?: string
   /**
-   * `shuttle.kind` — `oneshot` (default) or `standing`; a stored legacy
-   * `pinned` arrives as `oneshot`. Present iff the fiber has a shuttle block.
-   * Drives the kind segmented control in the fiber page and reveals the
-   * schedule/tz row when standing.
+   * `shuttle.kind` — `oneshot` (default) or `standing`. Present iff the fiber
+   * has a shuttle block. Drives the kind segmented control in the fiber page
+   * and reveals the schedule/tz row when standing.
    */
   shuttleKind?: ShuttleKind
   /**

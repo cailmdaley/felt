@@ -141,9 +141,7 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
 - **Two kinds; one resting place.** `shuttle.kind` is `oneshot` or
   `standing` (which carries a cron `schedule:` and has no review: a run's exit
   re-arms it, a run that needs the human asks, `rest` pauses the schedule and
-  `close --tempered=false` retires it). The CLI
-  (`shuttle.NormalizeKind`), the daemon (`Poller.block_kind`) and the board
-  read a `pinned` kind as `oneshot`, and `shuttle check` warns about it. A
+  `close --tempered=false` retires it). A
   constitution at rest is `status: open` + `horizon: stashed`, column
   Resting; `shuttle rest` puts it there without review. "Role" names only an
   identity under `roles/`, never a kind of constitution. A constitution with

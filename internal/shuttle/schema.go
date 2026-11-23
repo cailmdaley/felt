@@ -153,19 +153,6 @@ func (s *Schedule) UnmarshalYAML(value *yaml.Node) error {
 //     dispatches, and a human accept re-arms it after each run.
 var ValidKinds = []string{"oneshot", "standing"}
 
-// LegacyKinds maps retired kind values to the kind they are read as. A stored
-// legacy value still parses, so no fiber stops dispatching; `shuttle check`
-// warns about it, and the next config write stores the current kind.
-var LegacyKinds = map[string]string{"pinned": "oneshot"}
-
-// NormalizeKind returns the kind a stored value is read as.
-func NormalizeKind(kind string) string {
-	if current, ok := LegacyKinds[kind]; ok {
-		return current
-	}
-	return kind
-}
-
 // ValidRole reports whether role is `<office>` or `<office>/<person>`, each a
 // slug.
 func ValidRole(role string) bool { return felt.ValidRole(role) }
@@ -232,7 +219,7 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		add("blocked_on", "must be a single line")
 	}
 
-	if !slices.Contains(ValidKinds, NormalizeKind(b.Kind)) {
+	if !slices.Contains(ValidKinds, b.Kind) {
 		add("kind", fmt.Sprintf("must be one of %v, got %q", ValidKinds, b.Kind))
 	}
 

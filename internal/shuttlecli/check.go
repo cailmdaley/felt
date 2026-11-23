@@ -75,14 +75,6 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 						Message: "tempered is a verdict on a closed card and is ignored here; remove it (shuttle rest, reopen and resume clear it as they move a card)",
 					})
 				}
-				if stored := shuttle.StoredKind(fiber); shuttle.LegacyKinds[stored] != "" {
-					issues = append(issues, felt.CheckIssue{
-						Level:   felt.CheckLevelWarning,
-						FiberID: fiber.ID,
-						Path:    shuttle.FacetKey + ".kind",
-						Message: fmt.Sprintf("kind %q is retired and read as %q; scripts/migrate-pinned.py rewrites it", stored, shuttle.LegacyKinds[stored]),
-					})
-				}
 				if legacy := felt.MappingValueNode(fiber.ExtraFields[shuttle.FacetKey], "role"); legacy != nil && legacy.Kind == yaml.ScalarNode {
 					issues = append(issues, felt.CheckIssue{
 						Level: felt.CheckLevelWarning, FiberID: fiber.ID, Path: shuttle.FacetKey + ".role",

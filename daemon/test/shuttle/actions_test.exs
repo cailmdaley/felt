@@ -267,19 +267,6 @@ defmodule Shuttle.ActionsTest do
     end
   end
 
-  describe "legacy kind: pinned" do
-    test "a closed legacy pinned card resolves exactly as a closed oneshot" do
-      for target <- @kanban_targets do
-        pinned = %{"id" => "work/hub", "status" => "closed", "shuttle" => %{"kind" => "pinned"}}
-        oneshot = put_in(pinned, ["shuttle", "kind"], "oneshot")
-
-        assert Actions.resolve_transition(pinned, target) ==
-                 Actions.resolve_transition(oneshot, target),
-               "legacy pinned dragged to #{target} must resolve as a oneshot"
-      end
-    end
-  end
-
   describe "an awaiting oneshot (closed + untempered)" do
     # A closed oneshot with no verdict ran and awaits the human verdict. Every
     # column a card can be dropped on has the meaning of that column: drafts

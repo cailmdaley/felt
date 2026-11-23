@@ -27,8 +27,6 @@
    "fiber": {"status": "active", "shuttle": {"kind": "oneshot"}}},
   {"name": "armed oneshot put down is still in flight", "live": false, "column": "in_flight", "turn": "none", "state": "Working", "roster": "Armed",
    "fiber": {"status": "active", "horizon": "stashed", "shuttle": {"kind": "oneshot"}}},
-  {"name": "armed under a retired kind is a oneshot", "live": false, "column": "in_flight", "turn": "none", "state": "Working", "roster": "Armed",
-   "fiber": {"status": "active", "shuttle": {"kind": "pinned"}}},
   {"name": "armed oneshot asking", "live": true, "column": "in_flight", "turn": "question", "state": "Waiting",
    "fiber": {"status": "active", "shuttle": {"kind": "oneshot", "ask": {"text": "which?", "at": "2026-10-22T10:00:00Z"}}}},
   {"name": "an ask outlives its worker", "live": false, "column": "in_flight", "turn": "question", "state": "Waiting",

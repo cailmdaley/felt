@@ -277,14 +277,14 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     Body.
     """)
 
-    # Closed pinned constitutions still belong on the Shuttle board: their
+    # Closed constitutions still belong on the Shuttle board: their
     # lifecycle state is awaiting/reviewable, not "invisible".
-    write_fiber!(store, "tests/closed-pinned", """
+    write_fiber!(store, "tests/closed-oneshot", """
     ---
-    name: Closed pinned
+    name: Closed oneshot
     status: closed
     shuttle:
-      kind: pinned
+      kind: oneshot
       host: test-host
     ---
 
@@ -340,7 +340,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       |> Enum.sort()
 
     assert all_names == [
-             "Closed pinned",
+             "Closed oneshot",
              "Managed",
              "Owned elsewhere",
              "Plain todo",
@@ -362,7 +362,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       |> Enum.map(& &1["fiber"]["name"])
       |> Enum.sort()
 
-    assert owner_names == ["Closed pinned", "Managed", "Plain todo"]
+    assert owner_names == ["Closed oneshot", "Managed", "Plain todo"]
 
     # The owner feed takes precedence over fields=index without body=true.
     owner_index = get(api_conn(), "/api/v1/fibers?shuttle=true&fields=index")
@@ -392,7 +392,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     name: Live worker
     status: active
     shuttle:
-      kind: pinned
+      kind: oneshot
       host: test-host
     ---
 
@@ -510,7 +510,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         "uid" => uid,
         "name" => "Live worker",
         "status" => "active",
-        "shuttle" => %{"kind" => "pinned", "host" => "test-host"}
+        "shuttle" => %{"kind" => "oneshot", "host" => "test-host"}
       }
     }
 
@@ -1744,7 +1744,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     name: felt debug
     status: open
     shuttle:
-      kind: pinned
+      kind: oneshot
       host: test-host
     ---
 

@@ -65,21 +65,18 @@ defmodule Shuttle.LifecycleStoreTest do
   end
 
   describe "the standing-only writer refuses a oneshot" do
-    # conclude belongs to the cron lifecycle. A oneshot — and a `kind: pinned`,
-    # read as one — is refused by kind and left alone.
-    for kind <- ["oneshot", "pinned"] do
-      test "conclude leaves a #{kind} document untouched" do
-        with_oneshot_doc(
-          fn fiber_id, path ->
-            before = File.read!(path)
-            assert {:error, msg} = conclude(fiber_id)
-            assert msg =~ "standing"
-            assert File.read!(path) == before
-          end,
-          status: "active",
-          kind: unquote(kind)
-        )
-      end
+    # conclude belongs to the cron lifecycle. A oneshot is refused by kind and
+    # left alone.
+    test "conclude leaves a oneshot document untouched" do
+      with_oneshot_doc(
+        fn fiber_id, path ->
+          before = File.read!(path)
+          assert {:error, msg} = conclude(fiber_id)
+          assert msg =~ "standing"
+          assert File.read!(path) == before
+        end,
+        status: "active"
+      )
     end
   end
 
@@ -339,17 +336,15 @@ defmodule Shuttle.LifecycleStoreTest do
     end
   end
 
-  # Schedule-less variant of with_standing_doc: a oneshot block (or the
-  # legacy kind passed as :kind).
+  # Schedule-less variant of with_standing_doc: a oneshot block.
   defp with_oneshot_doc(fun, opts) do
     status = Keyword.get(opts, :status, "open")
-    kind = Keyword.get(opts, :kind, "oneshot")
     tempered = Keyword.get(opts, :tempered, nil)
 
     loom =
       Path.join(
         System.tmp_dir!(),
-        "shuttle-lifecycle-pin-test-#{System.unique_integer([:positive])}"
+        "shuttle-lifecycle-oneshot-test-#{System.unique_integer([:positive])}"
       )
 
     felt_dir = Path.join([loom, ".felt", "ai-futures", "tokenmaxxing", "operator"])
@@ -363,7 +358,7 @@ defmodule Shuttle.LifecycleStoreTest do
     name: Operator
     status: #{status}
     #{tempered_line}shuttle:
-      kind: #{kind}
+      kind: oneshot
       host: test-host
       agent: claude-opus
     ---

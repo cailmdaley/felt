@@ -226,27 +226,28 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n--local\n"
   end
 
-  # Only the legal kinds reach the CLI — an arbitrary string, or the retired
-  # `pinned`, is rejected here rather than forwarded as a positional felt would
-  # have to argue with.
+  # Only the legal kinds reach the CLI — any other value is rejected here
+  # rather than forwarded as a positional felt would have to argue with.
   test "reshape rejects a kind outside oneshot/standing" do
     fixture_store!("shuttle-lifecycle-reshape-badkind", "tests/badkind", "Bad kind")
     args_file = install_fake_cli!()
 
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "reshape",
-          "fiber" => "tests/badkind",
-          "kind" => "perpetual"
-        })
-      )
+    for bad <- ["perpetual", "pinned"] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{
+            "action" => "reshape",
+            "fiber" => "tests/badkind",
+            "kind" => bad
+          })
+        )
 
-    assert conn.status == 400
-    assert conn.resp_body =~ "unknown shuttle kind"
-    refute File.exists?(args_file)
+      assert conn.status == 400
+      assert conn.resp_body =~ "unknown shuttle kind"
+      refute File.exists?(args_file)
+    end
   end
 
   # Regression: a project whose `.felt` symlinks INTO a subtree of the loom sees

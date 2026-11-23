@@ -96,27 +96,19 @@ func TestValidate_BadKind(t *testing.T) {
 	}
 }
 
-func TestValidate_LegacyPinnedReadsAsOneshot(t *testing.T) {
+func TestValidate_PinnedRejected(t *testing.T) {
 	t.Parallel()
-	// A stored `pinned` is retired but still read, as a oneshot, so a fiber
-	// that carries it keeps parsing and validating.
-	if got := NormalizeKind("pinned"); got != "oneshot" {
-		t.Fatalf("NormalizeKind(pinned) = %q, want oneshot", got)
-	}
 	b := &Block{Kind: "pinned", ProjectDir: "/tmp/project", Host: "test-host"}
-	if errs := Validate(b, nil); len(errs) != 0 {
-		t.Fatalf("a legacy pinned block must validate, got: %v", errs)
+	errs := Validate(b, nil)
+	if len(errs) == 0 || errs[0].Field != "kind" {
+		t.Fatalf("expected kind validation error for pinned, got: %v", errs)
 	}
 	f := &felt.Felt{ID: "hub", Name: "hub"}
 	if err := f.SetExtraField(FacetKey, map[string]any{"kind": "pinned", "host": "h"}); err != nil {
 		t.Fatal(err)
 	}
-	block, ok, err := BlockOf(f)
-	if err != nil || !ok || block.Kind != "oneshot" {
-		t.Fatalf("BlockOf = %+v, %v, %v; want kind oneshot", block, ok, err)
-	}
-	if got := StoredKind(f); got != "pinned" {
-		t.Fatalf("StoredKind = %q, want the stored pinned", got)
+	if err := ValidateFacet(f); err == nil {
+		t.Fatal("ValidateFacet accepted kind: pinned")
 	}
 }
 

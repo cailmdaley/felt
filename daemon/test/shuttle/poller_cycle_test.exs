@@ -223,31 +223,4 @@ defmodule Shuttle.PollerCycleTest do
              cmd == "tmux" and hd(args) == "new-session"
            end)
   end
-
-  test "a legacy kind:pinned active fiber dispatches as a oneshot" do
-    # `pinned` is a retired kind read as oneshot (`Poller.block_kind/1`, the
-    # CLI's `shuttle.NormalizeKind`): an armed one dispatches on the tick like
-    # any oneshot, with no kind-specific gate.
-    fiber = make_fiber("tests/legacy-pinned", %{"status" => "active"})
-    MockRunner.set_fiber("tests/legacy-pinned", fiber)
-    MockRunner.set_shuttle("tests/legacy-pinned", "kind: pinned\nagent: claude-opus\n", "active")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_legacy_pinned,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    sync_poll_cycle!(poller)
-    _ = Poller.snapshot(poller)
-
-    assert wait_until(fn ->
-             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "tmux" and hd(args) == "new-session"
-             end)
-           end),
-           "an armed legacy pinned fiber must dispatch as a oneshot"
-  end
 end

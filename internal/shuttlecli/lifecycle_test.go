@@ -791,21 +791,6 @@ func TestShuttleRest_RoutesThroughDaemon(t *testing.T) {
 	}
 }
 
-// TestShuttleRest_LegacyPinnedRests: the stored legacy kind is no obstacle;
-// rest is how a former pinned constitution is put down.
-func TestShuttleRest_LegacyPinnedRests(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "hub", felt.StatusActive, map[string]any{"kind": "pinned", "agent": "claude-opus"}, nil)
-	if out, err := runIn(t, env, dir, "rest", "hub", "--local"); err != nil {
-		t.Fatalf("rest: %v\n%s", err, out)
-	}
-	if got := mustRead(t, storage, "hub"); got.Status != felt.StatusOpen {
-		t.Fatalf("status = %q, want open", got.Status)
-	}
-}
-
 // Standing, tempered and discarded constitutions all rest with no verdict.
 func TestShuttleRest_StandingAndVerdict(t *testing.T) {
 	t.Parallel()

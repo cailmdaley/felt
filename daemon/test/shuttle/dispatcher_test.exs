@@ -1498,7 +1498,7 @@ defmodule Shuttle.DispatcherTest do
     test "the continuation follows resume_mode, kind, session, handoff, surface and transcript",
          ctx do
       for mode <- [nil, "previous", "fresh", "continue"],
-          kind <- ["oneshot", "pinned", "standing"],
+          kind <- ["oneshot", "standing"],
           runtime <- [:dispatched, :undated, :no_session, :never],
           handoff <- [:none, :before_dispatch, :at_dispatch, :after_dispatch],
           surface <- [nil, "app"],

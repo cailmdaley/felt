@@ -52,7 +52,8 @@ func unclose(f *felt.Felt, status string) error {
 	if err := setTempered(f, nil); err != nil {
 		return err
 	}
-	if block, ok, _ := shuttle.BlockOf(f); ok && block.Review != nil {
+	block, hasBlock, blockErr := shuttle.BlockOf(f)
+	if blockErr == nil && hasBlock && block.Review != nil {
 		if err := shuttle.SetNodeField(f, "review", nil); err != nil {
 			return err
 		}
@@ -62,7 +63,7 @@ func unclose(f *felt.Felt, status string) error {
 			return err
 		}
 	}
-	if status == felt.StatusActive && !wasActive && shuttle.StoredKind(f) == "standing" {
+	if status == felt.StatusActive && !wasActive && blockErr == nil && hasBlock && block.Kind == "standing" {
 		if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return err
 		}

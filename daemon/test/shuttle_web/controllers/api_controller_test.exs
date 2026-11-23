@@ -399,7 +399,7 @@ defmodule ShuttleWeb.APIControllerTest do
       {"tests/api-start-blank-dir", closed, bare_oneshot, %{"project_dir" => "   "},
        "no project_dir"},
       {"tests/api-standing-no-dir", closed, standing, %{}, "no project_dir"},
-      {"tests/api-pinned-no-dir", %{"status" => "open"}, "kind: pinned\nproject_dir: \"\"\n", %{},
+      {"tests/api-open-no-dir", %{"status" => "open"}, "kind: oneshot\nproject_dir: \"\"\n", %{},
        "no project_dir"},
       {"tests/api-start-missing-dir", %{}, "kind: oneshot\nproject_dir: /nonexistent/elsewhere\n",
        %{}, "/nonexistent/elsewhere"}

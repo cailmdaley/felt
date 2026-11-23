@@ -168,9 +168,6 @@ a verdict. A stashed horizon alone does not stop a schedule.
 
 Oneshots alone make a coherent system. Ignore standing until you want it.
 
-A stored `kind: pinned` is read as `oneshot`; `shuttle check` warns about it, and
-`scripts/migrate-pinned.py` rewrites it.
-
 ### Channels
 
 `shuttle.channel: <name>` names the board channel a constitution speaks in,

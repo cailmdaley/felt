@@ -166,7 +166,7 @@ defmodule Shuttle.FrontmatterEditTest do
   describe "render/1 — fresh map → YAML block (creation-path emit)" do
     test "nested map + scalars render as valid YAML that round-trips" do
       extra = %{
-        "shuttle" => %{"kind" => "pinned", "host" => "cineca", "project_dir" => "/leonardo/cmbx"},
+        "shuttle" => %{"kind" => "oneshot", "host" => "cineca", "project_dir" => "/leonardo/cmbx"},
         "horizon" => "now"
       }
 

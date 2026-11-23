@@ -83,7 +83,7 @@ MIX := env -u ROOTDIR -u BINDIR -u PROGNAME -u EMU PATH='$(MIX_PATH)' mix
 AGENT_STORES ?=
 AGENT_PATH ?=
 
-.PHONY: build cli cli-install ui ui-unlocked daemon daemon-unlocked test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test \
+.PHONY: build cli cli-install ui ui-unlocked daemon daemon-unlocked test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test \
         all start start-selected stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
@@ -207,7 +207,7 @@ endif
 # slot (scripts/suite-slot.sh), so workers sharing a host run them in turn.
 SUITE_SLOT := sh $(CURDIR)/scripts/suite-slot.sh
 
-test: go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test
+test: go-test mix-test js-test plugin-hooks-test bootstrap-test
 
 go-test:
 	$(SUITE_SLOT) go test ./...
@@ -226,11 +226,6 @@ mix-test:
 # properties inside it cover every other zone.
 js-test:
 	cd ui && $(SUITE_SLOT) npm test
-
-# scripts/migrate-pinned.py's planning: liveness first, the owner's state,
-# and no plan when an owner cannot be vouched for.
-migrate-test:
-	python3 scripts/test-migrate-pinned.py
 
 # scripts/bootstrap.sh's login-PATH handling and fail-fast boundaries, with
 # every tool it would run stubbed: nothing is installed, registered, or

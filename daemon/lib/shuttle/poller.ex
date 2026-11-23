@@ -5541,16 +5541,10 @@ defmodule Shuttle.Poller do
     %{state | orphans: [orphan | state.orphans]}
   end
 
-  # A shuttle block's dispatch kind: `kind:`, else "oneshot". A retired kind
-  # reads as the kind it stands for (`pinned` → "oneshot"), matching the CLI's
-  # `shuttle.NormalizeKind`, so a document a daemon reads raw behaves the same
-  # as one the CLI resolved.
+  # A shuttle block's dispatch kind: `kind:`, else "oneshot".
   @doc false
   def block_kind(shuttle) do
-    case Map.get(shuttle, "kind", "oneshot") do
-      "pinned" -> "oneshot"
-      kind -> kind
-    end
+    Map.get(shuttle, "kind", "oneshot")
   end
 
   # A fiber's dispatch kind; "oneshot" when it carries no shuttle block.

@@ -24,7 +24,7 @@ func TestAskValidationAndConfigPreservation(t *testing.T) {
 	if err := f.SetExtraField(FacetKey, &Block{Kind: "oneshot", Ask: ask}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetConfig(f, &Block{Kind: "pinned"}); err != nil {
+	if err := SetConfig(f, &Block{Kind: "standing", Schedule: &Schedule{Expr: "0 9 * * *", TZ: "UTC"}}); err != nil {
 		t.Fatal(err)
 	}
 	b, _, err := BlockOf(f)
