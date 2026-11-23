@@ -98,10 +98,10 @@ stream.`,
 			}
 			for _, rec := range records {
 				if rec.IsAlias() {
-					fmt.Fprintf(a.env.Stdout, "%s %-22s → %s%s\n", sourceMarker(rec), rec.ID, rec.AliasOf, formatAlias(rec))
+					fmt.Fprintf(a.env.Stdout, "%s %-22s → %s%s\n", sourceMarker(rec), rec.ID, rec.AliasOf, formatAlias(rec, reg))
 					continue
 				}
-				fmt.Fprintf(a.env.Stdout, "%s %-22s %-7s %-16s%s\n", sourceMarker(rec), rec.ID, rec.CLI, rec.Model, formatConstraints(rec))
+				fmt.Fprintf(a.env.Stdout, "%s %-22s %-7s %-16s%s\n", sourceMarker(rec), rec.ID, rec.CLI, rec.Model, formatConstraints(rec, reg))
 			}
 			fmt.Fprintln(cmd.ErrOrStderr(), a.registryFooter(reg))
 			return nil
@@ -309,7 +309,22 @@ func (a *app) registryFooter(reg *shuttle.AgentRegistry) string {
 		reg.BuiltinCount(), user, reg.UserPath(), reg.BuiltinsMode(), total)
 }
 
-func formatConstraints(a shuttle.AgentRecord) string {
+// leadParts is the table's lead annotation for any row, alias rows included:
+// "lead" when the name is lead-only (itself or through its base), and
+// "threads=<id>" when it names a thread_agent.
+func leadParts(a shuttle.AgentRecord, reg *shuttle.AgentRegistry) []string {
+	var parts []string
+	lead, next := reg.Lead(a.ID)
+	if lead {
+		parts = append(parts, "lead")
+	}
+	if next != "" {
+		parts = append(parts, "threads="+next)
+	}
+	return parts
+}
+
+func formatConstraints(a shuttle.AgentRecord, reg *shuttle.AgentRegistry) string {
 	var parts []string
 	if len(a.EffortLevels) > 0 {
 		parts = append(parts, "effort="+strings.Join(a.EffortLevels, ","))
@@ -320,32 +335,27 @@ func formatConstraints(a shuttle.AgentRecord) string {
 	if a.ChromeCapable {
 		parts = append(parts, "chrome")
 	}
-	if a.LeadOnly {
-		parts = append(parts, "lead")
-	}
-	if a.ThreadAgent != "" {
-		parts = append(parts, "threads="+a.ThreadAgent)
-	}
+	parts = append(parts, leadParts(a, reg)...)
 	if len(parts) == 0 {
 		return ""
 	}
 	return "  [" + strings.Join(parts, " ") + "]"
 }
 
-func formatAlias(a shuttle.AgentRecord) string {
-	if a.Axes == nil {
-		return ""
-	}
+func formatAlias(a shuttle.AgentRecord, reg *shuttle.AgentRegistry) string {
 	var parts []string
-	if a.Axes.Effort != "" {
-		parts = append(parts, "effort="+a.Axes.Effort)
+	if a.Axes != nil {
+		if a.Axes.Effort != "" {
+			parts = append(parts, "effort="+a.Axes.Effort)
+		}
+		if a.Axes.Chrome {
+			parts = append(parts, "chrome")
+		}
+		if a.Axes.Headless {
+			parts = append(parts, "headless")
+		}
 	}
-	if a.Axes.Chrome {
-		parts = append(parts, "chrome")
-	}
-	if a.Axes.Headless {
-		parts = append(parts, "headless")
-	}
+	parts = append(parts, leadParts(a, reg)...)
 	if len(parts) == 0 {
 		return ""
 	}

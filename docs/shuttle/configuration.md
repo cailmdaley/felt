@@ -93,8 +93,9 @@ If a resume cannot resolve a registry record and falls back to a bare agent, tha
 Codex workers run through the selected terminal backend using the Codex CLI.
 
 `lead_only: true` marks an agent meant for leads only: a thread cut under it
-without `--agent` runs on its `thread_agent`, or on the default agent when
-`thread_agent` is unset. The built-in `claude-fable` and `pi-fable` are
+without `--agent` runs on its `thread_agent`; with none set, on the default
+agent, or on the first agent that is not lead-only when the default is. A
+parent with no agent is judged as the default agent. The built-in `claude-fable` and `pi-fable` are
 lead-only, so a Fable orchestrator's threads start on `claude-opus`. An alias of
 a lead-only agent is lead-only too, and may name its own `thread_agent`. A
 `thread_agent` that names no agent is a load warning.

@@ -124,9 +124,10 @@ remote draft made with --disabled stays in this store while you write it;
 			if err != nil {
 				return err
 			}
-			block.Agent = reg.ThreadAgent(block.Agent)
 			if cmd.Flags().Changed("agent") {
 				block.Agent = agent
+			} else if block.Agent, err = reg.ThreadAgent(block.Agent); err != nil {
+				return err
 			}
 			if cmd.Flags().Changed("role") {
 				if !shuttle.ValidRole(role) {

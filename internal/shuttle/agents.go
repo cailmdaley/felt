@@ -297,32 +297,58 @@ func (r *AgentRegistry) Default() (AgentRecord, error) {
 	return AgentRecord{}, fmt.Errorf("agent registry is empty")
 }
 
-// ThreadAgent is the agent a thread cut under parent defaults to. A lead-only
-// parent (the record itself, or the base an alias names) hands its threads to
-// its thread_agent — the alias's, else the base's — or else to the registry's
-// default. Any other parent, known or not, passes through unchanged.
-func (r *AgentRegistry) ThreadAgent(parent string) string {
-	rec, ok := r.Find(parent)
+// Lead reports whether name is lead-only — set on its own record or on the base
+// an alias names — and the thread_agent it hands threads to: the alias's, else
+// the base's.
+func (r *AgentRegistry) Lead(name string) (leadOnly bool, threadAgent string) {
+	rec, ok := r.Find(name)
 	if !ok {
-		return parent
+		return false, ""
 	}
-	leadOnly, next := rec.LeadOnly, rec.ThreadAgent
+	leadOnly, threadAgent = rec.LeadOnly, rec.ThreadAgent
 	if rec.IsAlias() {
 		if base, ok := r.Find(rec.AliasOf); ok {
 			leadOnly = leadOnly || base.LeadOnly
-			if next == "" {
-				next = base.ThreadAgent
+			if threadAgent == "" {
+				threadAgent = base.ThreadAgent
 			}
 		}
 	}
+	return leadOnly, threadAgent
+}
+
+// ThreadAgent is the agent a thread cut under parent defaults to. An unnamed
+// parent runs the registry default, and is judged as that agent. A lead-only
+// parent hands its threads to its thread_agent, else to the default agent when
+// that is not lead-only, else to the first base agent that is not. Any other
+// parent, known or not, passes through unchanged.
+func (r *AgentRegistry) ThreadAgent(parent string) (string, error) {
+	effective := parent
+	if effective == "" {
+		def, err := r.Default()
+		if err != nil {
+			return parent, nil
+		}
+		effective = def.ID
+	}
+	leadOnly, next := r.Lead(effective)
 	if !leadOnly {
-		return parent
+		return parent, nil
 	}
 	if next != "" {
-		return next
+		return next, nil
 	}
-	def, _ := r.Default() // never empty: Find just matched a record
-	return def.ID
+	if def, err := r.Default(); err == nil {
+		if lead, _ := r.Lead(def.ID); !lead {
+			return def.ID, nil
+		}
+	}
+	for _, rec := range r.agents {
+		if lead, _ := r.Lead(rec.ID); !rec.IsAlias() && !lead {
+			return rec.ID, nil
+		}
+	}
+	return "", fmt.Errorf("agent %q is lead-only and no agent that is not could take its threads; set its thread_agent or pass --agent", effective)
 }
 
 // IDs returns all agent IDs in the registry.
