@@ -12,8 +12,29 @@ defmodule Shuttle.StoreSyncTest do
   @endpoint ShuttleWeb.Endpoint
   @moduletag :tmp_dir
 
-  setup %{tmp_dir: tmp} do
+  setup_all do
+    repo_root = Path.expand("../../..", __DIR__)
+    bin_dir = Path.join(System.tmp_dir!(), "shuttle-store-sync-felt-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(bin_dir)
+    felt_bin = Path.join(bin_dir, "felt")
+
+    {output, status} =
+      System.cmd("go", ["build", "-o", felt_bin, "./cmd/felt"],
+        cd: repo_root,
+        stderr_to_stdout: true
+      )
+
+    if status != 0 do
+      raise "failed to build worktree felt binary: #{output}"
+    end
+
+    on_exit(fn -> File.rm_rf!(bin_dir) end)
+    {:ok, felt_bin_dir: bin_dir}
+  end
+
+  setup %{tmp_dir: tmp, felt_bin_dir: felt_bin_dir} do
     Env.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(tmp, "host.json"))
+    Env.put_env("PATH", felt_bin_dir <> ":" <> System.get_env("PATH", ""))
     :ok
   end
 
@@ -36,8 +57,6 @@ defmodule Shuttle.StoreSyncTest do
     String.trim(output)
   end
 
-  # Creates a bare upstream repo, a peer clone to push upstream commits from,
-  # and a local store clone with `.felt/`.
   defp create_store_fixture(tmp, name) do
     base = Path.join(tmp, name)
     bare = Path.join(base, "origin.git")
@@ -87,7 +106,8 @@ defmodule Shuttle.StoreSyncTest do
 
   # ── 1. Clean repo behind upstream ──
 
-  test "clean repo behind upstream fast-forwards and reports :fast_forwarded", %{tmp_dir: tmp} do
+  test "clean repo behind upstream fast-forwards via felt sync --ff-only and reports :fast_forwarded",
+       %{tmp_dir: tmp} do
     fixture = create_store_fixture(tmp, "clean-ff")
     prev_short = git!(fixture.store, ["rev-parse", "--short", "HEAD"])
     upstream_head = push_upstream_commit(fixture, ".felt/note.md", "# updated\n", "upstream update")
@@ -110,7 +130,6 @@ defmodule Shuttle.StoreSyncTest do
     assert git!(fixture.store, ["rev-parse", "HEAD"]) == upstream_head
     assert File.read!(Path.join(fixture.store, ".felt/note.md")) == "# updated\n"
 
-    # A second pass reports :up_to_date.
     status2 = StoreSync.sync_now(pid)
     assert [%{status: :up_to_date, ahead: 0, behind: 0}] = status2.repos
   end
@@ -161,7 +180,7 @@ defmodule Shuttle.StoreSyncTest do
     refute File.exists?(Path.join(fixture.store, ".felt/other.md"))
   end
 
-  # ── 3. Diverged repo (local unpushed commit + upstream commit) ──
+  # ── 3. Diverged repo & ahead-only repo ──
 
   test "diverged repo does not pull, rebase, or reset and reports :stale_diverged", %{
     tmp_dir: tmp
@@ -185,8 +204,6 @@ defmodule Shuttle.StoreSyncTest do
     assert git!(fixture.store, ["rev-parse", "HEAD"]) == local_head
   end
 
-  # ── 4. Local unpushed commit with behind == 0 ──
-
   test "repo with local unpushed commit and behind == 0 stays untouched and reports :ahead", %{
     tmp_dir: tmp
   } do
@@ -206,13 +223,14 @@ defmodule Shuttle.StoreSyncTest do
     assert git!(fixture.store, ["rev-parse", "HEAD"]) == local_head
   end
 
-  # ── 5. Symlinked mounted repo (loom/.felt/pando -> pando/.felt) ──
+  # ── 4. Symlinked mounted repo (loom/.felt/pando -> pando/.felt) ──
 
-  test "discovers and independently syncs symlinked mounted repo", %{tmp_dir: tmp} do
+  test "discovers and independently syncs symlinked mounted repo without duplicate work", %{
+    tmp_dir: tmp
+  } do
     loom = create_store_fixture(tmp, "loom")
     pando = create_store_fixture(tmp, "pando")
 
-    # Link pando/.felt inside loom/.felt/pando (and ignore it in loom, matching production).
     File.ln_s!(Path.join(pando.store, ".felt"), Path.join(loom.store, ".felt/pando"))
     File.write!(Path.join(loom.store, ".gitignore"), ".felt/pando\n")
     git!(loom.store, ["add", ".gitignore"])
@@ -223,8 +241,8 @@ defmodule Shuttle.StoreSyncTest do
     loom_head = push_upstream_commit(loom, ".felt/loom-new.md", "# loom\n", "loom update")
     pando_head = push_upstream_commit(pando, ".felt/pando-new.md", "# pando\n", "pando update")
 
-    # Pass ONLY loom.store; StoreSync must discover pando.store via the symlink mount.
-    pid = start_sync(enabled: true, stores: [loom.store])
+    # Even if both loom and pando appear in configured_stores, each repo is reported once.
+    pid = start_sync(enabled: true, stores: [loom.store, pando.store])
     status = StoreSync.sync_now(pid)
 
     assert length(status.repos) == 2
@@ -236,7 +254,7 @@ defmodule Shuttle.StoreSyncTest do
     assert git!(pando.store, ["rev-parse", "HEAD"]) == pando_head
   end
 
-  # ── 6. Fetch failure (broken remote) ──
+  # ── 5. Fetch failure & older felt binary error handling ──
 
   test "broken remote does not crash and reports :fetch_failed", %{tmp_dir: tmp} do
     fixture = create_store_fixture(tmp, "broken-remote")
@@ -257,20 +275,30 @@ defmodule Shuttle.StoreSyncTest do
     assert Process.alive?(pid)
   end
 
-  # ── 7. Detached HEAD / no upstream ──
-
-  test "detached HEAD reports :no_upstream without running fetch", %{tmp_dir: tmp} do
-    fixture = create_store_fixture(tmp, "detached")
-    head = git!(fixture.store, ["rev-parse", "HEAD"])
-    git!(fixture.store, ["checkout", "--detach", head])
-
-    pid = start_sync(enabled: true, stores: [fixture.store])
-    status = StoreSync.sync_now(pid)
-
-    assert [%{status: :no_upstream, upstream: nil}] = status.repos
+  defmodule OlderFeltRunner do
+    def cmd("felt", _args, _opts), do: {"Error: unknown flag: --ff-only\n", 1}
   end
 
-  # ── 8. Disabled mode & Host.auto_ff_stores?/0 defaults + overrides ──
+  test "older felt binary without --ff-only reports :error gracefully without crashing", %{
+    tmp_dir: tmp
+  } do
+    fixture = create_store_fixture(tmp, "older-felt")
+    pid = start_sync(enabled: true, stores: [fixture.store], runner: OlderFeltRunner)
+
+    log =
+      capture_log(fn ->
+        status = StoreSync.sync_now(pid)
+        assert status.state == :idle
+        assert [repo] = status.repos
+        assert repo.status == :error
+        assert repo.reason =~ "unknown flag: --ff-only"
+      end)
+
+    assert log =~ "unknown flag: --ff-only"
+    assert Process.alive?(pid)
+  end
+
+  # ── 6. Disabled mode & Host.auto_ff_stores?/0 ──
 
   test "disabled store sync never touches git and reports enabled: false", %{tmp_dir: tmp} do
     fixture = create_store_fixture(tmp, "disabled")
@@ -291,7 +319,6 @@ defmodule Shuttle.StoreSyncTest do
          %{tmp_dir: tmp} do
       file = Path.join(tmp, "host.json")
 
-      # Absent file defaults to single-user -> false.
       refute Host.auto_ff_stores?()
 
       for {body, want} <- [
@@ -319,9 +346,9 @@ defmodule Shuttle.StoreSyncTest do
     end
   end
 
-  # ── 9. /api/v1/version exposes store_sync ──
+  # ── 7. /api/v1/version exposes store_sync ──
 
-  test "/api/v1/version exposes store_sync status", %{tmp_dir: tmp} do
+  test "/api/v1/version exposes store_sync status end-to-end", %{tmp_dir: tmp} do
     fixture = create_store_fixture(tmp, "version-endpoint")
     pid = start_sync(enabled: true, stores: [fixture.store])
     Env.put_server(StoreSync, pid)

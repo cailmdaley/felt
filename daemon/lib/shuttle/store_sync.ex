@@ -2,25 +2,16 @@ defmodule Shuttle.StoreSync do
   @moduledoc """
   Periodic read-only fast-forward sync for clean felt store repositories.
 
-  When enabled (`Shuttle.Host.auto_ff_stores?/0`), discovers every git
-  repository backing a configured felt store and any symlinked mounted store
-  under `.felt/`, deduplicated by realpath. For each repository, it fetches
-  from upstream and runs `git merge --ff-only @{u}` ONLY when:
+  When enabled (`Shuttle.Host.auto_ff_stores?/0`), shells
+  `felt -C <store> sync --ff-only --json` for each configured felt store.
+  `felt sync --ff-only` owns Git locking (`felt-sync.lock`), mount discovery
+  (e.g. `~/loom` and mounted `~/pando`), bounded network fetch timeouts, and
+  uninterruptible local `git merge --ff-only` execution.
 
-    * an upstream tracking branch is configured (not detached HEAD),
-    * no git merge/rebase/cherry-pick/revert/bisect operation is in progress,
-    * `git status --porcelain` is completely empty (no staged, unstaged, or
-      untracked files), and
-    * the branch has zero local commits ahead of upstream (`ahead == 0`) and
-      at least one commit behind (`behind > 0`).
-
-  It never commits, pushes, rebases, stashes, resets, checks out, or cleans.
-  In any other state it leaves the repository untouched and records why it is
-  stale or could not be synced, which `/api/v1/version` and `shuttle doctor`
-  surface.
-
-  Git work runs in a supervised, unlinked task so it never occupies this
-  GenServer's mailbox or the Poller's critical path.
+  The daemon runs `felt` with `timeout_ms: :infinity` and never SIGKILLs it
+  mid-pass, so a local fast-forward merge is never interrupted while holding
+  Git's `index.lock`. Results are cached in this GenServer and exposed via
+  `/api/v1/version` and `shuttle doctor`.
   """
 
   use GenServer
@@ -28,19 +19,7 @@ defmodule Shuttle.StoreSync do
 
   @boot_delay_ms 10_000
   @default_interval_ms 300_000
-  @git_timeout_ms 30_000
-  @pass_timeout_ms 180_000
-  @max_substore_scan_depth 16
-
-  @in_progress_markers [
-    "MERGE_HEAD",
-    "REBASE_HEAD",
-    "rebase-merge",
-    "rebase-apply",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-    "BISECT_LOG"
-  ]
+  @default_fetch_timeout "30s"
 
   # ── Public API ──
 
@@ -68,7 +47,7 @@ defmodule Shuttle.StoreSync do
   resulting status report.
   """
   @spec sync_now(GenServer.server(), timeout()) :: map()
-  def sync_now(server \\ Shuttle.Env.server(__MODULE__), timeout \\ 30_000) do
+  def sync_now(server \\ Shuttle.Env.server(__MODULE__), timeout \\ :infinity) do
     GenServer.call(server, :sync_now, timeout)
   end
 
@@ -114,7 +93,7 @@ defmodule Shuttle.StoreSync do
     {:noreply, start_pass(state)}
   end
 
-  # Ticks arriving during a pass do not overlap another git pass.
+  # Ticks arriving during a pass do not overlap another sync pass.
   def handle_info(:sync, state), do: {:noreply, state}
 
   def handle_info({ref, result}, %{task: %{ref: ref}} = state) do
@@ -126,35 +105,27 @@ defmodule Shuttle.StoreSync do
     {:noreply, finish(state, {:error, "store sync task exited: #{inspect(reason)}"})}
   end
 
-  def handle_info({:sync_timeout, ref}, %{task: %{ref: ref, pid: pid}} = state) do
-    Process.exit(pid, :kill)
-    Process.demonitor(ref, [:flush])
-    {:noreply, finish(state, {:error, "store sync pass exceeded its deadline"})}
-  end
-
   def handle_info(_, state), do: {:noreply, state}
 
   # ── Pass orchestration ──
 
   defp start_pass(state) do
     if state.timer, do: Process.cancel_timer(state.timer)
-    owner = self()
     opts = state.opts
     callers = Shuttle.Env.callers()
-    pass_timeout = Keyword.get(opts, :pass_timeout_ms, @pass_timeout_ms)
 
+    # Unlinked task with no hard kill timer: `felt sync --ff-only` bounds its
+    # own network fetch with `--fetch-timeout` and lets local merges finish
+    # without risking a killed Git process holding index.lock.
     task =
       Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
         Shuttle.Env.adopt_callers(callers)
         run_pass(opts)
       end)
 
-    watch_owner(owner, task.pid)
-    deadline = Process.send_after(self(), {:sync_timeout, task.ref}, pass_timeout)
-
     %{
       state
-      | task: %{pid: task.pid, ref: task.ref, deadline: deadline},
+      | task: %{pid: task.pid, ref: task.ref},
         timer: nil,
         started: System.monotonic_time(:millisecond),
         status: %{state.status | state: :running}
@@ -162,7 +133,6 @@ defmodule Shuttle.StoreSync do
   end
 
   defp finish(state, result) do
-    Process.cancel_timer(state.task.deadline)
     duration = System.monotonic_time(:millisecond) - state.started
 
     status =
@@ -217,19 +187,7 @@ defmodule Shuttle.StoreSync do
   defp schedule(state, :infinity), do: %{state | timer: nil}
   defp schedule(state, delay), do: %{state | timer: Process.send_after(self(), :sync, delay)}
 
-  defp watch_owner(owner, task) do
-    spawn(fn ->
-      owner_ref = Process.monitor(owner)
-      task_ref = Process.monitor(task)
-
-      receive do
-        {:DOWN, ^owner_ref, :process, _, _} -> Process.exit(task, :kill)
-        {:DOWN, ^task_ref, :process, _, _} -> :ok
-      end
-    end)
-  end
-
-  # ── Pure sync pass & repo discovery ──
+  # ── Sync pass via `felt sync --ff-only --json` ──
 
   @doc false
   def run_pass(opts \\ []) do
@@ -237,82 +195,116 @@ defmodule Shuttle.StoreSync do
 
     if enabled? do
       stores = Keyword.get_lazy(opts, :stores, &Shuttle.FeltStores.configured_stores/0)
-      repos = discover_repos(stores, opts)
-      results = Enum.map(repos, &sync_repo(&1, opts))
-      {:ok, results}
+      runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
+      fetch_timeout = Keyword.get(opts, :fetch_timeout, @default_fetch_timeout)
+
+      {repos, _seen} =
+        Enum.reduce(stores, {[], MapSet.new()}, fn store, {acc, seen} ->
+          store_real = resolve_realpath(store)
+
+          if MapSet.member?(seen, store_real) do
+            {acc, seen}
+          else
+            case sync_store(store, store_real, runner, fetch_timeout) do
+              {:ok, store_repos} ->
+                new_repos = Enum.reject(store_repos, &MapSet.member?(seen, &1.path))
+
+                new_seen =
+                  Enum.reduce(store_repos, MapSet.put(seen, store_real), fn r, s ->
+                    MapSet.put(s, r.path)
+                  end)
+
+                {acc ++ new_repos, new_seen}
+
+              {:error, repo_error} ->
+                {acc ++ [repo_error], MapSet.put(seen, store_real)}
+            end
+          end
+        end)
+
+      {:ok, repos}
     else
       :disabled
     end
   end
 
-  @doc """
-  Discover unique git repository roots backing `stores` and any symlinked
-  mounted stores under their `.felt/` directories, deduplicated by realpath.
-  """
-  @spec discover_repos([String.t()], keyword()) :: [String.t()]
-  def discover_repos(stores, opts \\ []) when is_list(stores) do
-    runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
-    timeout_ms = Keyword.get(opts, :git_timeout_ms, @git_timeout_ms)
+  defp sync_store(store, store_real, runner, fetch_timeout) do
+    args = [
+      "-C",
+      store,
+      "sync",
+      "--ff-only",
+      "--json",
+      "--fetch-timeout",
+      fetch_timeout
+    ]
 
-    stores
-    |> Enum.flat_map(&expand_store_and_mounts/1)
-    |> Enum.map(&resolve_realpath/1)
-    |> Enum.uniq()
-    |> Enum.flat_map(&git_toplevel(&1, runner, timeout_ms))
-    |> Enum.map(&resolve_realpath/1)
-    |> Enum.uniq()
-    |> Enum.sort()
-  end
+    case runner.cmd("felt", args, stderr_to_stdout: true, timeout_ms: :infinity) do
+      {output, 0} ->
+        decode_report(output, store_real)
 
-  defp expand_store_and_mounts(store) do
-    expanded = Shuttle.Env.expand(store)
-    felt_real = resolve_realpath(Path.join(expanded, ".felt"))
-    mounts = scan_symlinked_mounts(felt_real, felt_real, 0)
-    [expanded | mounts]
-  end
-
-  # Walk real directories under `.felt/` up to @max_substore_scan_depth,
-  # collecting the parent of any symlink resolving to a directory named `.felt`
-  # outside the linking store. Never descends into symlinks.
-  defp scan_symlinked_mounts(_store_real, _dir, depth) when depth > @max_substore_scan_depth,
-    do: []
-
-  defp scan_symlinked_mounts(store_real, dir, depth) do
-    case File.ls(dir) do
-      {:ok, entries} ->
-        Enum.flat_map(entries, fn entry ->
-          path = Path.join(dir, entry)
-
-          case Shuttle.FS.lstat(path) do
-            {:ok, %File.Stat{type: :symlink}} ->
-              case Shuttle.Realpath.resolve(path) do
-                {:ok, target} ->
-                  if Path.basename(target) == ".felt" and
-                       not inside?(target, store_real) and
-                       Shuttle.FS.dir?(target) do
-                    [Path.dirname(target)]
-                  else
-                    []
-                  end
-
-                {:error, _} ->
-                  []
-              end
-
-            {:ok, %File.Stat{type: :directory}} ->
-              scan_symlinked_mounts(store_real, path, depth + 1)
-
-            _ ->
-              []
-          end
-        end)
-
-      {:error, _} ->
-        []
+      {output, status} ->
+        reason = concise_error("felt sync --ff-only", output, status)
+        Logger.warning("StoreSync: #{store_real}: #{reason}")
+        {:error, %{path: store_real, status: :error, reason: reason}}
     end
   end
 
-  defp inside?(path, prefix), do: path == prefix or String.starts_with?(path, prefix <> "/")
+  defp decode_report(output, store_real) do
+    case Jason.decode(output) do
+      {:ok, %{"repos" => repos}} when is_list(repos) ->
+        normalized = Enum.map(repos, &normalize_repo/1)
+        Enum.each(normalized, &log_repo/1)
+        {:ok, normalized}
+
+      _ ->
+        reason = "felt sync --ff-only returned invalid JSON"
+        Logger.warning("StoreSync: #{store_real}: #{reason}")
+        {:error, %{path: store_real, status: :error, reason: reason}}
+    end
+  end
+
+  defp normalize_repo(repo) when is_map(repo) do
+    %{
+      path: repo["path"],
+      status: normalize_status(repo["status"]),
+      upstream: repo["upstream"],
+      ahead: repo["ahead"],
+      behind: repo["behind"],
+      previous_sha: repo["previous_sha"],
+      sha: repo["sha"],
+      commits: repo["commits"],
+      synced_at: repo["synced_at"],
+      reason: repo["reason"]
+    }
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  @known_statuses %{
+    "up_to_date" => :up_to_date,
+    "fast_forwarded" => :fast_forwarded,
+    "stale_dirty" => :stale_dirty,
+    "stale_diverged" => :stale_diverged,
+    "ahead" => :ahead,
+    "no_upstream" => :no_upstream,
+    "fetch_failed" => :fetch_failed,
+    "error" => :error
+  }
+
+  defp normalize_status(status), do: Map.get(@known_statuses, status, :error)
+
+  defp log_repo(%{status: :fast_forwarded, path: path} = repo) do
+    Logger.info(
+      "StoreSync: fast-forwarded #{path} (#{repo[:previous_sha]}..#{repo[:sha]}, #{repo[:commits]} commit(s))"
+    )
+  end
+
+  defp log_repo(%{status: :fetch_failed, path: path, reason: reason}) do
+    Logger.warning("StoreSync: fetch failed for #{path}: #{reason}")
+  end
+
+  defp log_repo(_), do: :ok
 
   defp resolve_realpath(path) do
     expanded = Shuttle.Env.expand(path)
@@ -323,244 +315,7 @@ defmodule Shuttle.StoreSync do
     end
   end
 
-  defp git_toplevel(dir, runner, timeout_ms) do
-    case git(runner, dir, ["rev-parse", "--show-toplevel"], timeout_ms) do
-      {output, 0} ->
-        case String.trim(output) do
-          "" -> []
-          root -> [root]
-        end
-
-      _ ->
-        []
-    end
-  end
-
-  @doc """
-  Inspect one git repository and fast-forward it iff clean, on a tracked branch
-  with zero commits ahead, and behind upstream.
-  """
-  @spec sync_repo(String.t(), keyword()) :: map()
-  def sync_repo(repo, opts \\ []) do
-    runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
-    timeout_ms = Keyword.get(opts, :git_timeout_ms, @git_timeout_ms)
-
-    with {:ok, upstream} <- resolve_upstream(runner, repo, timeout_ms),
-         :ok <- fetch_upstream(runner, repo, upstream, timeout_ms),
-         {:ok, ahead, behind} <- ahead_behind(runner, repo, upstream, timeout_ms) do
-      check_and_fast_forward(runner, repo, upstream, ahead, behind, timeout_ms)
-    else
-      {:no_upstream, reason} ->
-        %{
-          path: repo,
-          status: :no_upstream,
-          upstream: nil,
-          ahead: nil,
-          behind: nil,
-          reason: reason
-        }
-
-      {:fetch_failed, upstream, reason} ->
-        Logger.warning("StoreSync: fetch failed for #{repo}: #{reason}")
-
-        %{
-          path: repo,
-          status: :fetch_failed,
-          upstream: upstream,
-          ahead: nil,
-          behind: nil,
-          reason: reason
-        }
-
-      {:error, upstream, reason} ->
-        %{
-          path: repo,
-          status: :fetch_failed,
-          upstream: upstream,
-          ahead: nil,
-          behind: nil,
-          reason: reason
-        }
-    end
-  end
-
-  defp resolve_upstream(runner, repo, timeout_ms) do
-    case git(runner, repo, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], timeout_ms) do
-      {output, 0} ->
-        case String.trim(output) do
-          "" -> {:no_upstream, "detached HEAD or no upstream configured"}
-          upstream -> {:ok, upstream}
-        end
-
-      _ ->
-        {:no_upstream, "detached HEAD or no upstream configured"}
-    end
-  end
-
-  defp fetch_upstream(runner, repo, upstream, timeout_ms) do
-    case git(runner, repo, ["fetch", "--quiet"], timeout_ms) do
-      {_output, 0} ->
-        :ok
-
-      {output, status} ->
-        {:fetch_failed, upstream, format_git_error("git fetch", output, status)}
-    end
-  end
-
-  defp ahead_behind(runner, repo, upstream, timeout_ms) do
-    case git(runner, repo, ["rev-list", "--left-right", "--count", "HEAD...@{u}"], timeout_ms) do
-      {output, 0} ->
-        case String.split(String.trim(output)) do
-          [ahead_s, behind_s] ->
-            with {ahead, ""} <- Integer.parse(ahead_s),
-                 {behind, ""} <- Integer.parse(behind_s) do
-              {:ok, ahead, behind}
-            else
-              _ -> {:error, upstream, "unexpected rev-list count: #{String.trim(output)}"}
-            end
-
-          _ ->
-            {:error, upstream, "unexpected rev-list count: #{String.trim(output)}"}
-        end
-
-      {output, status} ->
-        {:error, upstream, format_git_error("git rev-list", output, status)}
-    end
-  end
-
-  defp check_and_fast_forward(runner, repo, upstream, ahead, behind, timeout_ms) do
-    cond do
-      git_op_in_progress?(runner, repo, timeout_ms) ->
-        %{
-          path: repo,
-          status: :stale_dirty,
-          upstream: upstream,
-          ahead: ahead,
-          behind: behind,
-          reason: "git operation in progress"
-        }
-
-      dirty_tree?(runner, repo, timeout_ms) ->
-        %{
-          path: repo,
-          status: :stale_dirty,
-          upstream: upstream,
-          ahead: ahead,
-          behind: behind,
-          reason: "working tree has uncommitted changes"
-        }
-
-      ahead == 0 and behind == 0 ->
-        %{
-          path: repo,
-          status: :up_to_date,
-          upstream: upstream,
-          ahead: 0,
-          behind: 0,
-          reason: nil
-        }
-
-      ahead == 0 and behind > 0 ->
-        fast_forward(runner, repo, upstream, behind, timeout_ms)
-
-      ahead > 0 and behind == 0 ->
-        %{
-          path: repo,
-          status: :ahead,
-          upstream: upstream,
-          ahead: ahead,
-          behind: 0,
-          reason: "#{ahead} local commit(s) ahead of #{upstream}"
-        }
-
-      true ->
-        %{
-          path: repo,
-          status: :stale_diverged,
-          upstream: upstream,
-          ahead: ahead,
-          behind: behind,
-          reason: "branch has diverged (#{ahead} ahead, #{behind} behind #{upstream})"
-        }
-    end
-  end
-
-  defp fast_forward(runner, repo, upstream, behind, timeout_ms) do
-    prev_sha = short_sha(runner, repo, timeout_ms)
-
-    case git(runner, repo, ["merge", "--ff-only", "@{u}"], timeout_ms) do
-      {_output, 0} ->
-        new_sha = short_sha(runner, repo, timeout_ms)
-        Logger.info("StoreSync: fast-forwarded #{repo} (#{prev_sha}..#{new_sha}, #{behind} commit(s))")
-
-        %{
-          path: repo,
-          status: :fast_forwarded,
-          upstream: upstream,
-          ahead: 0,
-          behind: 0,
-          previous_sha: prev_sha,
-          sha: new_sha,
-          commits: behind,
-          synced_at: now_iso(),
-          reason: nil
-        }
-
-      {output, status} ->
-        reason = format_git_error("git merge --ff-only", output, status)
-        Logger.warning("StoreSync: fast-forward refused for #{repo}: #{reason}")
-
-        %{
-          path: repo,
-          status: :stale_dirty,
-          upstream: upstream,
-          ahead: 0,
-          behind: behind,
-          reason: reason
-        }
-    end
-  end
-
-  defp git_op_in_progress?(runner, repo, timeout_ms) do
-    case git(runner, repo, ["rev-parse", "--git-dir"], timeout_ms) do
-      {output, 0} ->
-        raw = String.trim(output)
-        git_dir = if Path.type(raw) == :absolute, do: raw, else: Path.expand(raw, repo)
-        Enum.any?(@in_progress_markers, &File.exists?(Path.join(git_dir, &1)))
-
-      _ ->
-        true
-    end
-  end
-
-  defp dirty_tree?(runner, repo, timeout_ms) do
-    case git(runner, repo, ["status", "--porcelain"], timeout_ms) do
-      {"", 0} -> false
-      _ -> true
-    end
-  end
-
-  defp short_sha(runner, repo, timeout_ms) do
-    case git(runner, repo, ["rev-parse", "--short", "HEAD"], timeout_ms) do
-      {output, 0} -> String.trim(output)
-      _ -> nil
-    end
-  end
-
-  defp git(runner, dir, args, timeout_ms) do
-    runner.cmd("git", ["-C", dir | args],
-      stderr_to_stdout: true,
-      timeout_ms: timeout_ms,
-      env: [{"GIT_TERMINAL_PROMPT", "0"}]
-    )
-  end
-
-  defp format_git_error(cmd, output, :timeout) do
-    trimmed = String.trim(output)
-    if trimmed == "", do: "#{cmd} timed out", else: String.slice(trimmed, 0, 240)
-  end
-
-  defp format_git_error(cmd, output, status) do
+  defp concise_error(cmd, output, status) do
     first_line =
       output
       |> String.trim()

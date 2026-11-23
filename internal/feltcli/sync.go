@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,8 +21,26 @@ import (
 
 const syncGitTimeout = 2 * time.Minute
 
+type syncFFReport struct {
+	Repos []syncFFRepoResult `json:"repos"`
+}
+
+type syncFFRepoResult struct {
+	Path        string `json:"path"`
+	Status      string `json:"status"`
+	Upstream    string `json:"upstream,omitempty"`
+	Ahead       *int   `json:"ahead,omitempty"`
+	Behind      *int   `json:"behind,omitempty"`
+	PreviousSHA string `json:"previous_sha,omitempty"`
+	SHA         string `json:"sha,omitempty"`
+	Commits     int    `json:"commits,omitempty"`
+	SyncedAt    string `json:"synced_at,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
 func (a *app) syncCmd() *cobra.Command {
 	var syncPush bool
+	var ffOnly bool
 	var fetchTimeout time.Duration
 	command := &cobra.Command{
 		Use:   "sync",
@@ -49,15 +68,25 @@ tracking branch. --fetch-timeout bounds the network fetch only; the local merge
 runs to completion without a hard deadline, so a slow filesystem cannot leave a
 killed merge holding the Git index lock.
 
+--ff-only runs a strict fast-forward pass: it fetches the tracking branch and
+runs git merge --ff-only only when the working tree is completely clean (no
+staged, unstaged, or untracked files), no Git operation is in progress, and the
+branch has zero local commits ahead of upstream. Any other state is left
+untouched and reported with its reason (use --json for structured output).
+
 Sync ends by naming every fiber in the store whose frontmatter no longer
 parses, and then exits non-zero although the merge and push completed: such a
 fiber is invisible to every listing, board and daemon until it is fixed.`,
-		Example: `  felt sync          before substantive work
-  felt sync --push   after committing`,
+		Example: `  felt sync                   before substantive work
+  felt sync --push            after committing
+  felt sync --ff-only --json  fast-forward clean store repos only`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if fetchTimeout <= 0 {
 				return fmt.Errorf("--fetch-timeout must be positive")
+			}
+			if ffOnly && syncPush {
+				return fmt.Errorf("--ff-only cannot be combined with --push")
 			}
 			storage, _, err := felt.RequireStore(a.env, a.dir)
 			if err != nil {
@@ -67,12 +96,27 @@ fiber is invisible to every listing, board and daemon until it is fixed.`,
 			if err != nil {
 				return fmt.Errorf("resolving felt store path %s: %w", storage.Root(), err)
 			}
+			if ffOnly {
+				report := a.syncStoreAndMountsFFOnly(cmd.Context(), storeRoot, fetchTimeout)
+				if a.json {
+					return a.outputJSON(report)
+				}
+				for _, r := range report.Repos {
+					if r.Reason != "" {
+						fmt.Fprintf(a.env.Stdout, "%s: %s (%s)\n", r.Path, r.Status, r.Reason)
+					} else {
+						fmt.Fprintf(a.env.Stdout, "%s: %s\n", r.Path, r.Status)
+					}
+				}
+				return nil
+			}
 			err = a.syncStoreAndMounts(cmd.Context(), storeRoot, syncPush, fetchTimeout, a.env.Stdout)
 			return errors.Join(err, reportUnreadable(storage, a.env.Stdout))
 		},
 	}
 	command.GroupID = groupStore
 	command.Flags().BoolVar(&syncPush, "push", false, "Push the branch to its tracking branch after a successful merge")
+	command.Flags().BoolVar(&ffOnly, "ff-only", false, "Fast-forward clean store repositories with zero local commits ahead; leave all others untouched")
 	command.Flags().DurationVar(&fetchTimeout, "fetch-timeout", syncGitTimeout, "Deadline for the network fetch only; local merge has no hard deadline")
 	return command
 }
@@ -309,7 +353,7 @@ func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fet
 }
 
 func rejectGitOperationInProgress(git func(...string) (string, error), gitDir string) error {
-	for _, marker := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-apply", "rebase-merge"} {
+	for _, marker := range []string{"MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-apply", "rebase-merge"} {
 		if _, err := os.Stat(filepath.Join(gitDir, marker)); err == nil {
 			return fmt.Errorf("Git operation %q is in progress; finish or abort it, then retry `felt sync`", marker)
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -320,6 +364,189 @@ func rejectGitOperationInProgress(git func(...string) (string, error), gitDir st
 		return fmt.Errorf("Git index has unresolved conflicts; resolve and commit them, then retry `felt sync`")
 	}
 	return nil
+}
+
+func (a *app) syncStoreAndMountsFFOnly(parent context.Context, storeRoot string, fetchTimeout time.Duration) syncFFReport {
+	if parent == nil {
+		parent = context.Background()
+	}
+	seen := map[string]bool{}
+	var repos []string
+	addRepo := func(dir string) {
+		out, err := a.runSyncGit(parent, dir, syncGitTimeout, "rev-parse", "--show-toplevel")
+		if err != nil {
+			return
+		}
+		root := strings.TrimSpace(out)
+		if root == "" {
+			return
+		}
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolved
+		}
+		if !seen[root] {
+			seen[root] = true
+			repos = append(repos, root)
+		}
+	}
+	addRepo(storeRoot)
+	for _, mount := range a.mountedRepositories(parent, storeRoot) {
+		addRepo(mount.repo)
+	}
+	results := make([]syncFFRepoResult, 0, len(repos))
+	for _, repo := range repos {
+		results = append(results, a.syncStoreFFOnly(parent, repo, fetchTimeout))
+	}
+	return syncFFReport{Repos: results}
+}
+
+func (a *app) syncStoreFFOnly(parent context.Context, repo string, fetchTimeout time.Duration) syncFFRepoResult {
+	if parent == nil {
+		parent = context.Background()
+	}
+	git := func(args ...string) (string, error) {
+		timeout := syncGitTimeout
+		switch args[0] {
+		case "fetch":
+			timeout = fetchTimeout
+		case "merge":
+			timeout = 0 // Never cancel a local Git mutation while it holds index.lock.
+		}
+		return a.runSyncGit(parent, repo, timeout, args...)
+	}
+
+	commonDir, err := git("rev-parse", "--git-common-dir")
+	if err != nil {
+		return syncFFRepoResult{Path: repo, Status: "error", Reason: conciseSyncError(err)}
+	}
+	commonDir = strings.TrimSpace(commonDir)
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(repo, commonDir)
+	}
+	gitDir, err := git("rev-parse", "--git-dir")
+	if err != nil {
+		return syncFFRepoResult{Path: repo, Status: "error", Reason: conciseSyncError(err)}
+	}
+	gitDir = strings.TrimSpace(gitDir)
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(repo, gitDir)
+	}
+	unlock, err := lockSyncRepository(commonDir)
+	if err != nil {
+		return syncFFRepoResult{Path: repo, Status: "error", Reason: conciseSyncError(err)}
+	}
+	defer unlock()
+
+	branch, err := git("symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return syncFFRepoResult{Path: repo, Status: "no_upstream", Reason: "detached HEAD or no upstream configured"}
+	}
+	branch = strings.TrimSpace(branch)
+	tracking, err := git("for-each-ref", "--format=%(upstream:remotename)\n%(upstream:remoteref)\n%(upstream)\n%(upstream:short)", "refs/heads/"+branch)
+	if err != nil {
+		return syncFFRepoResult{Path: repo, Status: "error", Reason: conciseSyncError(err)}
+	}
+	parts := strings.Split(strings.TrimRight(tracking, "\n"), "\n")
+	if len(parts) < 4 {
+		return syncFFRepoResult{Path: repo, Status: "no_upstream", Reason: "detached HEAD or no upstream configured"}
+	}
+	remote := strings.TrimSpace(parts[0])
+	mergeRef := strings.TrimSpace(parts[1])
+	upstreamRef := strings.TrimSpace(parts[2])
+	upstreamShort := strings.TrimSpace(parts[3])
+	if remote == "" || !strings.HasPrefix(mergeRef, "refs/heads/") {
+		return syncFFRepoResult{Path: repo, Status: "no_upstream", Reason: "detached HEAD or no upstream configured"}
+	}
+
+	refspec := mergeRef
+	if upstreamRef != "" {
+		refspec = "+" + mergeRef + ":" + upstreamRef
+	}
+	if _, err := git("fetch", "--quiet", "--no-tags", remote, refspec); err != nil {
+		return syncFFRepoResult{Path: repo, Status: "fetch_failed", Upstream: upstreamShort, Reason: conciseSyncError(err)}
+	}
+
+	countsOut, err := git("rev-list", "--left-right", "--count", "HEAD...FETCH_HEAD")
+	if err != nil {
+		return syncFFRepoResult{Path: repo, Status: "error", Upstream: upstreamShort, Reason: conciseSyncError(err)}
+	}
+	fields := strings.Fields(countsOut)
+	if len(fields) != 2 {
+		return syncFFRepoResult{Path: repo, Status: "error", Upstream: upstreamShort, Reason: "unexpected rev-list count: " + strings.TrimSpace(countsOut)}
+	}
+	ahead, err1 := strconv.Atoi(fields[0])
+	behind, err2 := strconv.Atoi(fields[1])
+	if err1 != nil || err2 != nil {
+		return syncFFRepoResult{Path: repo, Status: "error", Upstream: upstreamShort, Reason: "unexpected rev-list count: " + strings.TrimSpace(countsOut)}
+	}
+
+	if err := rejectGitOperationInProgress(git, gitDir); err != nil {
+		return syncFFRepoResult{Path: repo, Status: "stale_dirty", Upstream: upstreamShort, Ahead: &ahead, Behind: &behind, Reason: "git operation in progress"}
+	}
+	statusOut, err := git("status", "--porcelain")
+	if err != nil {
+		return syncFFRepoResult{Path: repo, Status: "error", Upstream: upstreamShort, Ahead: &ahead, Behind: &behind, Reason: conciseSyncError(err)}
+	}
+	if statusOut != "" {
+		return syncFFRepoResult{Path: repo, Status: "stale_dirty", Upstream: upstreamShort, Ahead: &ahead, Behind: &behind, Reason: "working tree has uncommitted changes"}
+	}
+
+	zero := 0
+	switch {
+	case ahead == 0 && behind == 0:
+		return syncFFRepoResult{Path: repo, Status: "up_to_date", Upstream: upstreamShort, Ahead: &zero, Behind: &zero}
+
+	case ahead == 0 && behind > 0:
+		prevOut, _ := git("rev-parse", "--short", "HEAD")
+		prevSHA := strings.TrimSpace(prevOut)
+		if _, err := git("merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", "FETCH_HEAD"); err != nil {
+			return syncFFRepoResult{Path: repo, Status: "stale_dirty", Upstream: upstreamShort, Ahead: &zero, Behind: &behind, Reason: conciseSyncError(err)}
+		}
+		newOut, _ := git("rev-parse", "--short", "HEAD")
+		newSHA := strings.TrimSpace(newOut)
+		return syncFFRepoResult{
+			Path:        repo,
+			Status:      "fast_forwarded",
+			Upstream:    upstreamShort,
+			Ahead:       &zero,
+			Behind:      &zero,
+			PreviousSHA: prevSHA,
+			SHA:         newSHA,
+			Commits:     behind,
+			SyncedAt:    time.Now().UTC().Format(time.RFC3339),
+		}
+
+	case ahead > 0 && behind == 0:
+		return syncFFRepoResult{
+			Path:     repo,
+			Status:   "ahead",
+			Upstream: upstreamShort,
+			Ahead:    &ahead,
+			Behind:   &zero,
+			Reason:   fmt.Sprintf("%d local commit(s) ahead of %s", ahead, upstreamShort),
+		}
+
+	default:
+		return syncFFRepoResult{
+			Path:     repo,
+			Status:   "stale_diverged",
+			Upstream: upstreamShort,
+			Ahead:    &ahead,
+			Behind:   &behind,
+			Reason:   fmt.Sprintf("branch has diverged (%d ahead, %d behind %s)", ahead, behind, upstreamShort),
+		}
+	}
+}
+
+func conciseSyncError(err error) string {
+	msg := strings.TrimSpace(err.Error())
+	if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
+		msg = strings.TrimSpace(msg[:idx])
+	}
+	if len(msg) > 240 {
+		return msg[:240]
+	}
+	return msg
 }
 
 func hasUnmergedIndex(git func(...string) (string, error)) bool {
@@ -336,7 +563,13 @@ func (a *app) runSyncGit(parent context.Context, dir string, timeout time.Durati
 	}
 	fullArgs := append([]string{"--no-optional-locks", "-C", dir}, args...)
 	cmd := a.env.CommandContext(ctx, "git", fullArgs...)
+	if a.env.Getenv("GIT_TERMINAL_PROMPT") == "" {
+		cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+	}
 	if args[0] == "fetch" || args[0] == "push" {
+		if a.env.Getenv("GIT_SSH_COMMAND") == "" {
+			cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=15")
+		}
 		cancelSyncNetworkTree(cmd)
 		cmd.WaitDelay = time.Second
 	}

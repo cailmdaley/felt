@@ -402,7 +402,7 @@ func (a *app) printStoreSyncReceipt(sync *ReceiptStoreSync) {
 	}
 	for _, repo := range sync.Repos {
 		switch repo.Status {
-		case "stale_dirty", "stale_diverged", "fetch_failed", "no_upstream":
+		case "stale_dirty", "stale_diverged", "fetch_failed", "no_upstream", "error":
 			detail := repo.Reason
 			if detail == "" {
 				detail = repo.Status
