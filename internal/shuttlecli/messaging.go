@@ -193,7 +193,8 @@ List with inbox ls <fiber> --scheduled; cancel with inbox cancel <fiber> <id>.
 A fiber send always uses its durable inbox; attachments become retained file references. The receipt says
 what became of this message: woken, followed_up in a turn, delivered (as context,
 or before a retry), held as context for cost, starting, queued or scheduled.
-A message held for cost and still unread an hour later gets a fresh session.
+A message held for cost and still unread after an hour is escalated: a fresh
+session when the launch gate allows, else the existing worker is woken.
 --notify-when-idle subscribes when the worker takes the entry, by hook or wake;
 with no text, the fiber's owner subscribes its live worker at once, and a fiber
 with no live worker refuses it.

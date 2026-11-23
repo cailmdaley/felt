@@ -306,7 +306,7 @@ A tracked worker whose conversation is not yet known is consumed as `-` with its
 | `ask`/`idle`, idle, costly, only `hold` | Wait; `ask` remains hook-eligible |
 | `ask`/`idle`/`force`, no worker | Reserve a launch and return `launch`, when the fiber passes the gate below |
 
-A cost hold does not strand an `ask`: once it has been due for the escalation window (an hour; `SHUTTLE_COST_HOLD_ESCALATE_SEC` in the consumer's environment), it counts as `if_costly: fresh`.
+A cost hold does not strand an `ask`: once it has been due for the escalation window (an hour; `SHUTTLE_COST_HOLD_ESCALATE_SEC` in the consumer's environment, when finite and nonnegative), it counts as `if_costly: fresh`, so it gets a fresh session when the gate allows and otherwise wakes the worker.
 Its age runs from the later of `queued_at` and `not_before`, so a daemon restart does not reset it, and the poll's consume of every live worker is what notices it.
 A `none` entry is never escalated, and an entry the worker's hook took in time is no longer pending.
 

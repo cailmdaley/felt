@@ -64,7 +64,7 @@ func TestMessageToDormantFiberReportsWhatItsOwnerDid(t *testing.T) {
 		{"no detail", "", `{"delivery":"context","queued":true,"delivered":false,"status":"queued"}`,
 			"queued for work/worker: not delivered; queued in work/worker's inbox (msg-next-worker)\n", "ask"},
 		{"cost hold", "", `{"delivery":"context","queued":true,"delivered":false,"status":"held","consumed":{"action":"wait","held":"cost"}}`,
-			"held as context for cost on work/worker; still unread in an hour, it gets a fresh session (msg-next-worker)\n", "ask"},
+			"held as context for cost on work/worker; if still unread after an hour, Shuttle escalates it (fresh session, or wakes the worker) (msg-next-worker)\n", "ask"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -381,11 +382,12 @@ func decideLaunch(due []mailboxPendingItem, held []string, inFlight bool) string
 }
 
 // costHoldEscalation is how long an ask entry is held as context for cost
-// before it asks for a fresh session instead: an hour, or
-// SHUTTLE_COST_HOLD_ESCALATE_SEC seconds.
+// before it asks for a fresh session instead: SHUTTLE_COST_HOLD_ESCALATE_SEC
+// seconds when that is a finite, nonnegative duration, else an hour.
 func costHoldEscalation(env *sysenv.Env) time.Duration {
-	if s, err := strconv.ParseFloat(env.Getenv("SHUTTLE_COST_HOLD_ESCALATE_SEC"), 64); err == nil {
-		return time.Duration(s * float64(time.Second))
+	s, err := strconv.ParseFloat(env.Getenv("SHUTTLE_COST_HOLD_ESCALATE_SEC"), 64)
+	if ns := s * float64(time.Second); err == nil && ns >= 0 && ns < math.MaxInt64 {
+		return time.Duration(ns)
 	}
 	return time.Hour
 }

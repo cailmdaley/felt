@@ -73,6 +73,37 @@ func TestConsumeEscalatesAStaleCostHold(t *testing.T) {
 		}
 	})
 
+	t.Run("an idle entry is never escalated", func(t *testing.T) {
+		env, w := consumeFixture(t)
+		w.Idle, w.Costly = true, true
+		putWish(t, env, "pulse", "idle", "hold")
+		age(t, env, "pulse", 48*time.Hour)
+		if r := consume(t, env, w); r.Action != "wait" || r.Held != "cost" {
+			t.Fatalf("an idle entry escalated: %+v", r)
+		}
+	})
+
+	t.Run("an old quiet entry does not escalate a fresh ask", func(t *testing.T) {
+		env, w := consumeFixture(t)
+		w.Idle, w.Costly = true, true
+		putWish(t, env, "old", "none", "hold")
+		age(t, env, "old", 48*time.Hour)
+		putWish(t, env, "new", "ask", "hold")
+		if r := consume(t, env, w); r.Action != "wait" || r.Held != "cost" {
+			t.Fatalf("a fresh ask escalated beside an old quiet entry: %+v", r)
+		}
+	})
+
+	t.Run("an unusable window falls back to the hour", func(t *testing.T) {
+		env, w := consumeFixture(t)
+		w.Idle, w.Costly = true, true
+		putWish(t, env, "m", "ask", "hold")
+		env.Set("SHUTTLE_COST_HOLD_ESCALATE_SEC", "-1")
+		if r := consume(t, env, w); r.Action != "wait" || r.Held != "cost" {
+			t.Fatalf("a negative window escalated: %+v", r)
+		}
+	})
+
 	t.Run("an entry read in time leaves nothing to escalate", func(t *testing.T) {
 		env, w := consumeFixture(t)
 		w.Idle, w.Costly = true, true
