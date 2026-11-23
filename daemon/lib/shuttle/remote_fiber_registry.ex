@@ -61,10 +61,11 @@ defmodule Shuttle.RemoteFiberRegistry do
       only a live success clears it. `last_polled_at` is restored unfaked, so
       the board still reports "last seen at T" truthfully.
 
-    * **Only a warm success is written.** A cold empty 200 keeps last-good
-      fibers but adopts the cold feed's etag; persisting that pair would let a
-      restart restore warm rows behind a cold etag, whose first conditional
-      fetch 304s and would then mark those rows fresh. Writing only on results
+    * **Only a warm success is written.** A cold 200 serves remembered rows
+      (the owner's own last warm feed, or none, keeping ours) and adopts the
+      cold feed's etag; persisting that pair would let a restart restore rows
+      behind a cold etag, whose first conditional fetch 304s and would then
+      mark those rows fresh. Writing only on results
       that advance `last_polled_at` (a warm 200 and a 304) keeps the invariant
       that a persisted etag always describes the persisted rows.
 
@@ -532,20 +533,23 @@ defmodule Shuttle.RemoteFiberRegistry do
     }
   end
 
-  # A COLD empty 200 (owner just restarted; its first Lustre poll hasn't warmed
-  # the cache) must NOT erase the viewer's last-good feed, or every owner
-  # restart would blank its rows on the board. Keep last-good fibers,
-  # refresh etag/cache, clear the error, but do NOT advance `last_polled_at`:
-  # staleness stays honest (time-since-last-WARM-success) until a warm feed
-  # arrives. `restored?` is left alone for the same reason: a cold feed has not
-  # confirmed the rows we restored, so they stay flagged as remembered.
+  # A COLD 200 (owner just restarted; its first Lustre poll hasn't warmed the
+  # cache) carries the owner's last warm feed, persisted before its restart, or
+  # no rows at all. Those rows are the owner's own last-known truth and replace
+  # the viewer's; an empty cold feed must NOT erase the viewer's last-good
+  # rows, or every owner restart would blank them on the board. Either way the
+  # rows are remembered, not observed: refresh etag/cache, clear the error, but
+  # do NOT advance `last_polled_at`, so staleness stays honest
+  # (time-since-last-WARM-success) until a warm feed arrives and nothing is
+  # persisted. `restored?` is left alone for the same reason.
   # The store block rides every owner feed, cold or warm — the picker wants it
   # from the first successful poll, not the first warm one.
   defp apply_result(
          entry,
-         {:ok, {[], etag, %{"state" => "cold"} = cache, stores, _unreadable}},
+         {:ok, {fibers, etag, %{"state" => "cold"} = cache, stores, _unreadable}},
          now
        ) do
+    entry = if fibers == [], do: entry, else: %{entry | fibers: fibers, encoded_fibers: nil}
     %{entry | etag: etag, cache: cache, stores: stores, last_attempt_at: now, last_error: nil}
   end
 

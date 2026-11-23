@@ -248,6 +248,10 @@ defmodule Shuttle.Poller do
       # per-request over the memoized base so live worker status stays
       # request-fresh.
       owner_feed_cache: nil,
+      # The owner feed's base rows as `Shuttle.Poller.LocalFeed` holds them on
+      # disk: read at boot, served (marked cold) to the board while the cache
+      # warms, then rewritten whenever a warm base changes. Never dispatched from.
+      local_feed: [],
       # When the document cache was last rebuilt (nil until the first poll warms
       # it) and how long that rebuild took. Surfaced in the owner-feed envelope's
       # `cache` metadata (state/refreshed_at/entries/last_refresh_ms) so a viewer
@@ -408,6 +412,14 @@ defmodule Shuttle.Poller do
     GenServer.call(server, :cpu_memory_measurements, 1_000)
   end
 
+  @doc """
+  The owner feed from the published document cache: `{:ok, envelope}`, with
+  `cache.state` "cold" until the first poll warms it. Options:
+
+    * `:felt_stores` — the envelope's store list (defaults to the Poller's).
+    * `:last_known` — while cold, serve the rows of the last warm feed
+      (`Shuttle.Poller.LocalFeed`) instead of none. For display surfaces only.
+  """
   @spec cached_fiber_documents(keyword() | GenServer.server()) :: {:ok, map()} | {:error, term()}
   def cached_fiber_documents(opts) when is_list(opts),
     do: cached_fiber_documents(Shuttle.Env.server(__MODULE__), opts)
@@ -422,6 +434,7 @@ defmodule Shuttle.Poller do
 
       %{
         entries: base_entries,
+        last_known: last_known,
         cache: cache,
         felt_stores: default_stores,
         running: running,
@@ -430,6 +443,12 @@ defmodule Shuttle.Poller do
         scheduled_messages: scheduled,
         pulses: pulses
       } = inputs ->
+        # `last_known: true` asks for the persisted feed while the cache is cold
+        # (`last_known` is empty once warm); `cache.state` still reads "cold".
+        base_entries =
+          if Keyword.get(opts, :last_known, false) and last_known != [],
+            do: last_known,
+            else: base_entries
         entries =
           base_entries
           |> Shuttle.Pulse.stamp(pulses)
@@ -1107,6 +1126,7 @@ defmodule Shuttle.Poller do
       auto_discover_felt_stores: auto_discover,
       runner: runner,
       pulses: Shuttle.Pulse.load(),
+      local_feed: Shuttle.Poller.LocalFeed.load(own_host_id),
       full_scan_budget_ms:
         Keyword.get_lazy(opts, :full_scan_budget_ms, fn ->
           Shuttle.Env.app(:full_scan_budget_ms, @default_full_scan_budget_ms)
@@ -1517,6 +1537,7 @@ defmodule Shuttle.Poller do
     {base_entries, state} =
       if state.document_cache_ready, do: owner_feed_base(state), else: {[], state}
 
+    state = persist_local_feed(state, base_entries)
     cache_meta = document_cache_meta(state)
 
     previous_ready = published_lookup(self(), :feed_ready, nil)
@@ -1530,6 +1551,7 @@ defmodule Shuttle.Poller do
 
     feed_inputs = %{
       entries: base_entries,
+      last_known: if(state.document_cache_ready, do: [], else: state.local_feed),
       cache: cache_meta,
       felt_stores: state.felt_stores,
       running: state.running,
@@ -1619,6 +1641,16 @@ defmodule Shuttle.Poller do
 
     state
   end
+
+  # A warm base that differs from what is on disk replaces it. A cold cache
+  # writes nothing, so the file always holds the last warm feed.
+  defp persist_local_feed(%State{document_cache_ready: true} = state, base)
+       when base != state.local_feed do
+    Shuttle.Poller.LocalFeed.persist(state.own_host_id, base)
+    %{state | local_feed: base}
+  end
+
+  defp persist_local_feed(state, _base), do: state
 
   defp published_fiber_stores(state) do
     for {_key, %{entry: %{fiber: %{"uid" => uid}, felt_store: store}}} <- state.document_cache,

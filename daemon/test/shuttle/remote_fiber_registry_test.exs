@@ -935,6 +935,43 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                RemoteFiberRegistry.feeds(second)
     end
 
+    test "a cold 200 carrying the owner's last-known rows shows them, still stale and unwritten",
+         %{dir: dir} do
+      url = Remote.fibers_url(candide())
+
+      # A viewer with nothing remembered meets an owner that has just restarted
+      # and serves its persisted last warm feed, marked cold.
+      MockClient.set(
+        url,
+        {:ok,
+         Jason.encode!(%{
+           "host" => "candide",
+           "fibers" => [sample_fiber("remembered")],
+           "cache" => %{"state" => "cold"}
+         })}
+      )
+
+      first = boot(dir, [])
+      :ok = RemoteFiberRegistry.refresh_now(first)
+
+      assert %{"candide" => entry} = RemoteFiberRegistry.feeds(first)
+      assert [%{"fiber" => %{"id" => "remembered"}}] = entry.fibers
+      assert entry.stale == true
+      assert entry.last_polled_at == nil
+
+      # Remembered rows never reach this viewer's disk.
+      stop_supervised!(first)
+      second = boot(dir, [])
+      assert %{"candide" => %{fibers: []}} = RemoteFiberRegistry.feeds(second)
+
+      # The owner warms: its live rows replace the remembered ones, fresh.
+      MockClient.set(url, {:ok, feed_body([sample_fiber("live")])})
+      :ok = RemoteFiberRegistry.refresh_now(second)
+
+      assert %{"candide" => %{stale: false, fibers: [%{"fiber" => %{"id" => "live"}}]}} =
+               RemoteFiberRegistry.feeds(second)
+    end
+
     test "a cold empty 200 is not written, so a restart keeps the last WARM rows", %{dir: dir} do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})

@@ -95,20 +95,21 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
   # The owner-only kanban feed, served ALWAYS from the poller's in-memory
   # document cache — never a live `felt ls` in the request path. A cold cache
-  # returns an empty feed with `cache.state == "cold"` (200, not an error);
-  # only an unavailable poller (down / call timeout — near-impossible now that
-  # the reply is a pure state read) is a 503.
+  # returns the last warm feed persisted before the restart (or none) with
+  # `cache.state == "cold"` (200, not an error); only an unavailable poller
+  # (down / call timeout — near-impossible now that the reply is a pure state
+  # read) is a 503.
   #
   # Conditional fetch: a WARM response carries a strong `etag` computed from the
   # final stamped entries (any visible change changes it). A matching
   # `If-None-Match` short-circuits to 304 with an empty body, so an unchanged
   # feed costs the tunnel a header exchange instead of the full transfer.
   #
-  # A COLD feed carries NO etag and never 304s: cold and warm-empty stamp
-  # byte-identical entries (both `[]`), so an etag over entries alone would let a
-  # zero-fiber host 304 forever with `cache.state` pinned "cold". Withholding the
-  # etag while cold forces the first post-warm poll to deliver a fresh 200 (and a
-  # fresh cache block). The `cache` metadata rides an `x-shuttle-cache` response
+  # A COLD feed carries NO etag and never 304s: its rows are last-known, and a
+  # cold feed can stamp byte-identical entries to a warm one, so an etag over
+  # entries alone would let a viewer 304 forever with `cache.state` pinned
+  # "cold". Withholding the etag while cold forces the first post-warm poll to
+  # deliver a fresh 200 (and a fresh cache block). The `cache` metadata rides an `x-shuttle-cache` response
   # header on BOTH 200 and 304 so the client's `refreshed_at`/`state` never
   # freeze across a run of 304s (the 304 has no body to carry it).
   defp serve_owner_feed(conn) do
@@ -363,10 +364,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp cache_state(_), do: nil
 
   # The local owner feed: same rows as `GET /api/v1/fibers?shuttle=true`, served
-  # from the poller's document cache. A cold cache yields an empty feed marked
-  # stale (the board shows "warming" rather than dropping the local column); an
-  # unavailable poller is stale too. The cache's own `cache.state` metadata
-  # rides through as the staleness signal.
+  # from the poller's document cache. A cold cache yields the last warm feed
+  # persisted before the restart, marked stale, so the local rows stay on the
+  # board while the cache warms; an unavailable poller is stale and empty. The
+  # cache's own `cache.state` metadata rides through as the staleness signal.
   defp local_feed do
     case cached_owner_feed() do
       {:ok, %{host: host, fibers: entries} = body} ->
@@ -392,8 +393,8 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # poller's in-memory document cache (microseconds), never a LIVE `felt ls` per
   # store (5-12s on an overloaded shared login node, which blows the viewer's 8s
   # timeout and paints a spurious staleness badge). There is no live fallback:
-  # the reply is a pure read of GenServer state, so a cold cache is an empty
-  # feed marked `cache.state == "cold"`, not a filesystem walk.
+  # the reply is a pure read of GenServer state, so a cold cache is the last
+  # warm feed (or none) marked `cache.state == "cold"`, not a filesystem walk.
   #
   # The cached rows are ALREADY owner-filtered and runtime-stamped, but the cache
   # does NOT carry the parked/held overlay, so we map `Snapshot.put_held/2` over
@@ -405,7 +406,8 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # (composite board).
   defp cached_owner_feed do
     case Shuttle.Poller.cached_fiber_documents(
-           felt_stores: Shuttle.FeltStores.configured_stores()
+           felt_stores: Shuttle.FeltStores.configured_stores(),
+           last_known: true
          ) do
       {:ok, %{fibers: entries} = body} ->
         held = Shuttle.Poller.parked_index()

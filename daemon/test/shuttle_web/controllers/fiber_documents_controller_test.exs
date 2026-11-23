@@ -32,6 +32,28 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
+  # DocumentRunner whose poll-cycle store listing (the widened `shuttle ls`
+  # projection, run from the poll's Task rather than the Poller's own boot)
+  # waits for the file named by the scoped `FIBER_DOCUMENTS_LISTING_GATE`,
+  # holding a booted Poller's cache cold.
+  defmodule GatedListingRunner do
+    @behaviour Shuttle.Runner
+
+    def cmd(command, args, opts) do
+      if "--json-field" in args and Process.get(:"$callers", []) != [],
+        do: await_gate(Shuttle.Env.get("FIBER_DOCUMENTS_LISTING_GATE"))
+
+      DocumentRunner.cmd(command, args, opts)
+    end
+
+    defp await_gate(gate) do
+      unless File.exists?(gate) do
+        Process.sleep(10)
+        await_gate(gate)
+      end
+    end
+  end
+
   setup do
     root =
       Path.join(
@@ -562,13 +584,15 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     # true. Post-settle, the next tick is 600s away, so cold sticks.
     wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
 
+    # A cold daemon with no feed persisted from before its boot.
     replace_and_publish!(poller, fn state ->
       %{
         state
         | own_host_id: "test-host",
           document_cache_ready: false,
           document_cache: %{},
-          document_fiber_index: %{}
+          document_fiber_index: %{},
+          local_feed: []
       }
     end)
 
@@ -588,6 +612,67 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert get_resp_header(conn, "etag") == []
     assert [cache_header] = get_resp_header(conn, "x-shuttle-cache")
     assert Jason.decode!(cache_header)["state"] == "cold"
+  end
+
+  test "a restarted daemon serves its last warm local rows, stale, until the cache warms",
+       %{store: store} do
+    write_fiber!(store, "tests/remembered", owned_fiber("Before restart"))
+
+    # A warm daemon writes its owner feed to disk.
+    poller = warm_poller!(store)
+    feed_file = Path.join([Shuttle.data_dir(), "local-fibers", "test-host.json"])
+    wait_until(fn -> File.exists?(feed_file) end)
+    GenServer.stop(poller)
+
+    # While it is down the fiber changes, and the restarted daemon's listing is
+    # held, so its cache stays cold.
+    write_fiber!(store, "tests/remembered", owned_fiber("After restart"))
+    gate = Path.join(Path.dirname(store), "listing-gate")
+    Shuttle.Test.Env.put_env("FIBER_DOCUMENTS_LISTING_GATE", gate)
+
+    {:ok, poller} =
+      Shuttle.Test.PollerHelpers.start_poller!(
+        runner: GatedListingRunner,
+        poll_interval_ms: 600_000,
+        max_concurrent_workers: 0,
+        felt_stores: [store]
+      )
+
+    on_exit(fn -> File.write(gate, "") end)
+
+    # Cold: the board keeps the remembered row, its origin marked stale.
+    cold = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
+    assert names(cold) == ["Before restart"]
+    assert [%{"origin" => "test-host"}] = cold["fibers"]
+
+    assert %{
+             "kind" => "local",
+             "stale" => true,
+             "fiber_count" => 1,
+             "cache" => %{"state" => "cold"}
+           } =
+             cold["origins"]["test-host"]
+
+    # The owner feed carries the same rows, marked cold and without an etag.
+    owner = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    assert get_resp_header(owner, "etag") == []
+    owner_body = Jason.decode!(owner.resp_body)
+    assert owner_body["cache"]["state"] == "cold"
+    assert names(owner_body) == ["Before restart"]
+
+    # Nothing dispatch reads holds them: the document cache is empty, and a
+    # reader that does not ask for last-known rows sees none.
+    assert :sys.get_state(poller).document_cache == %{}
+    assert {:ok, %{fibers: []}} = Shuttle.Poller.cached_fiber_documents([])
+
+    # The cache warms and its fresh rows replace the remembered ones.
+    File.write!(gate, "")
+    wait_until(fn -> :sys.get_state(poller, :infinity).document_cache_ready end)
+
+    warm = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
+    assert names(warm) == ["After restart"]
+    assert %{"stale" => false, "fiber_count" => 1} = warm["origins"]["test-host"]
+    wait_until(fn -> File.read!(feed_file) =~ "After restart" end)
   end
 
   test "GET /api/v1/fibers?shuttle=true sets an etag and answers If-None-Match with 304",
@@ -2045,6 +2130,22 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       end
     end)
   end
+
+  defp owned_fiber(name) do
+    """
+    ---
+    name: #{name}
+    status: active
+    shuttle:
+      kind: oneshot
+      host: test-host
+    ---
+
+    Body.
+    """
+  end
+
+  defp names(body), do: Enum.map(body["fibers"], & &1["fiber"]["name"])
 
   defp write_fiber!(store, fiber_id, content) do
     segments = String.split(fiber_id, "/")
