@@ -53,29 +53,24 @@ func (a *app) ambientSessionContext(input eventHookInput, host string) string {
 	}
 
 	var termFlags []string
-	var termDesc string
 	if a.env.Getenv("TMUX") != "" {
 		if ref, err := a.currentTerminal(); err == nil && ref.NativeSession != "" {
-			termDesc = fmt.Sprintf("tmux session=%s", ref.NativeSession)
 			termFlags = append(termFlags, "--tmux-session", shellQuoteArg(ref.NativeSession))
 			if ref.NativePane != "" {
-				termDesc += fmt.Sprintf(" pane=%s", ref.NativePane)
 				termFlags = append(termFlags, "--tmux-pane", shellQuoteArg(ref.NativePane))
 			}
 		}
 	} else if sid, bid := strings.TrimSpace(a.env.Getenv("REX_SESSION")), strings.TrimSpace(a.env.Getenv("REX_BLOCK")); sid != "" {
-		termDesc = fmt.Sprintf("rex session=%s", sid)
 		termFlags = append(termFlags, "--rex-session", shellQuoteArg(sid))
 		if bid != "" {
-			termDesc += fmt.Sprintf(" block=%s", bid)
 			termFlags = append(termFlags, "--rex-block", shellQuoteArg(bid))
 		}
 	}
 
 	var cmdParts []string
 	cmdParts = append(cmdParts, "shuttle adopt <parent>/<slug> \"<title>\"")
-	if input.SessionID != "" {
-		cmdParts = append(cmdParts, "--session-uuid", shellQuoteArg(input.SessionID))
+	if sid := sanitizeAmbientArg(input.SessionID); sid != "" {
+		cmdParts = append(cmdParts, "--session-uuid", shellQuoteArg(sid))
 	}
 	if projectDir != "" {
 		cmdParts = append(cmdParts, "--project-dir", shellQuoteArg(projectDir))
@@ -87,28 +82,13 @@ func (a *app) ambientSessionContext(input eventHookInput, host string) string {
 
 	var b strings.Builder
 	b.WriteString("[Shuttle ambient mode]\n")
-	b.WriteString("Ambient Shuttle mode is active for this unattached session.\n")
-	fmt.Fprintf(&b, "- session_uuid: %s\n", sanitizeAmbientLine(input.SessionID))
-	if host != "" {
-		fmt.Fprintf(&b, "- host: %s\n", sanitizeAmbientLine(host))
-	}
-	if projectDir != "" {
-		fmt.Fprintf(&b, "- project_dir: %s\n", sanitizeAmbientLine(projectDir))
-	}
-	if storeRoot != "" {
-		fmt.Fprintf(&b, "- store: %s\n", sanitizeAmbientLine(storeRoot))
-	}
-	if termDesc != "" {
-		fmt.Fprintf(&b, "- terminal: %s\n", sanitizeAmbientLine(termDesc))
-	}
-	b.WriteString("Once the user's request turns into substantive work (skip trivial one-off questions or if the user asks not to track), quietly choose a fitting parent/slug in the felt store and run:\n")
-	fmt.Fprintf(&b, "  %s\n", strings.Join(cmdParts, " "))
-	b.WriteString("This adopts the session into a fiber so it appears on Desk and in Rex's sidebar with its tapestry and handoffs.")
+	b.WriteString("Load the `felt` skill. Once the user's request turns into substantive work (skip trivial one-off questions or if asked not to track), also load the `shuttle` skill and adopt this session into a fiber:\n")
+	fmt.Fprintf(&b, "  %s", strings.Join(cmdParts, " "))
 	return b.String()
 }
 
-func sanitizeAmbientLine(s string) string {
-	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+func sanitizeAmbientArg(s string) string {
+	return strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(s))
 }
 
 func (a *app) daemonReachableQuick() bool {

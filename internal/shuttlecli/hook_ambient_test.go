@@ -81,17 +81,21 @@ func TestAmbientSessionStartInjection(t *testing.T) {
 		}
 		ctx := env.HookSpecificOutput.AdditionalContext
 		for _, want := range []string{
-			"Ambient Shuttle mode is active",
-			"sess-ambient",
-			"fir",
-			storeDir,
+			"Load the `felt` skill",
+			"load the `shuttle` skill",
 			"shuttle adopt <parent>/<slug>",
+			"--session-uuid sess-ambient",
+			"--project-dir " + storeDir,
+			"--store " + storeDir,
 			"--rex-session session:human",
 			"--rex-block block:human",
 		} {
 			if !strings.Contains(ctx, want) {
 				t.Fatalf("ambient context missing %q:\n%s", want, ctx)
 			}
+		}
+		if strings.Count(ctx, "sess-ambient") != 1 {
+			t.Fatalf("expected session id to appear once without repetition, got:\n%s", ctx)
 		}
 	})
 
@@ -120,7 +124,7 @@ func TestAmbientSessionStartInjection(t *testing.T) {
 			SessionID:     "sess-codex",
 			CWD:           storeDir,
 		})
-		if !strings.Contains(out, "Ambient Shuttle mode is active") || !strings.Contains(out, "sess-codex") {
+		if !strings.Contains(out, "Load the `felt` skill") || !strings.Contains(out, "sess-codex") {
 			t.Fatalf("expected ambient context for codex, got %q", out)
 		}
 	})
@@ -216,7 +220,7 @@ func TestAmbientSessionStartInjection(t *testing.T) {
 			t.Fatalf("expected single-quote escaping in %q", wantQuoted)
 		}
 		for _, want := range []string{
-			"- session_uuid: sess newline\n",
+			"--session-uuid 'sess newline'",
 			"--project-dir " + wantQuoted,
 			"--store " + wantQuoted,
 			"--rex-session 'session:a b'",
