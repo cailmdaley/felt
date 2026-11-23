@@ -183,7 +183,15 @@ end
 
 local function pick_rest_until(label)
   local today = os.date("*t", local_noon(0))
-  local items = {}
+  local items = {
+    {
+      id = "undated",
+      title = "No date",
+      subtitle = "Rest without a return date",
+      detail = "indefinite",
+      icon = "document",
+    },
+  }
   local seen = {}
 
   local function add_date_preset(title, ts)
@@ -212,13 +220,6 @@ local function pick_rest_until(label)
   add_date_preset("In 2 weeks", local_noon(14))
   add_date_preset("In 1 month", add_months_clamped(today.year, today.month, today.day, 1))
 
-  items[#items + 1] = {
-    id = "undated",
-    title = "Undated",
-    subtitle = "Rest without a return date",
-    detail = "indefinite",
-    icon = "document",
-  }
   items[#items + 1] = {
     id = "pick_date",
     title = "Choose date…",
@@ -321,12 +322,13 @@ function M.setup(opts)
   end
 
   local function active_window_id(ctx)
-    if type(ctx.session_id) ~= "string" or ctx.session_id == "" then return nil end
-    local view = rex.session.view({ session_id = ctx.session_id })
-    if type(view) == "table" and type(view.active_window_id) == "string" then
-      return view.active_window_id
+    if non_empty_string(ctx.session_id) then
+      local view = rex.session.view({ session_id = ctx.session_id })
+      if type(view) == "table" and non_empty_string(view.active_window_id) then
+        return view.active_window_id
+      end
     end
-    return nil
+    return non_empty_string(ctx.window_id)
   end
 
   local function fetch_palette(ctx)
@@ -461,6 +463,12 @@ function M.setup(opts)
         return
       end
     end
+    local label = action_name:gsub("_", " ")
+    if type(data.focused) ~= "table" then
+      error("shuttle: " .. label .. ": no Shuttle thread is focused here", 0)
+    end
+    local title = non_empty_string(data.focused.title) or "the focused thread"
+    error("shuttle: " .. label .. " is not available on " .. title, 0)
   end
 
   rex.action({

@@ -355,6 +355,78 @@ defmodule ShuttleWeb.PaletteControllerTest do
                window_id: "window:other"
              ).focused == nil
     end
+
+    test "resolves a view-only place by window or page block, with or without its session" do
+      place_uid = FiberUid.for("placed-thread")
+      other_uid = FiberUid.for("other-thread")
+
+      entries = [
+        make_entry("placed-thread", uid: place_uid, column: "in_flight"),
+        make_entry("other-thread", uid: other_uid, column: "in_flight")
+      ]
+
+      bindings_doc = %{
+        "places" => %{
+          place_uid => %{
+            "session_id" => "session:fam1",
+            "window_id" => "window:w1",
+            "page_block_id" => "block:p1"
+          },
+          # A place with no page block of its own is no match for an absent block.
+          other_uid => %{"session_id" => "session:fam2", "window_id" => "window:w2"}
+        }
+      }
+
+      focused = fn target ->
+        Palette.build(entries, [bindings: bindings_doc] ++ target).focused
+      end
+
+      for target <- [
+            [session_id: "session:fam1", window_id: "window:w1"],
+            [window_id: "window:w1"],
+            [block_id: "block:p1"],
+            [session_id: "session:fam1", block_id: "block:p1"],
+            # A page block names its place when the window Rex reports is another.
+            [session_id: "session:fam1", window_id: "window:gone", block_id: "block:p1"],
+            [window_id: "window:w1", block_id: "block:terminal"]
+          ] do
+        assert focused.(target).fiber_id == place_uid, inspect(target)
+      end
+
+      assert focused.(window_id: "window:w2").fiber_id == other_uid
+      assert focused.(session_id: "session:fam2", window_id: "window:w1") == nil
+      assert focused.(window_id: "window:gone") == nil
+      assert focused.(block_id: "block:gone") == nil
+      assert focused.([]) == nil
+    end
+
+    test "offers Temper on a standing constitution whose run is active" do
+      uid = FiberUid.for("watch")
+
+      entries = [
+        make_entry("watch",
+          uid: uid,
+          status: "active",
+          kind: "standing",
+          column: "in_flight",
+          turn: "question",
+          ask: %{"text" => "Keep the cut?"}
+        )
+      ]
+
+      result =
+        Palette.build(entries,
+          bindings: %{
+            "places" => %{uid => %{"session_id" => "session:s", "window_id" => "window:w"}}
+          },
+          window_id: "window:w"
+        )
+
+      temper = Enum.find(result.items, &(&1[:action] == "temper"))
+      assert temper.title == "Temper — Watch"
+      assert temper.fiber_id == uid
+      assert temper.standing
+    end
   end
 
   describe "GET /api/v1/palette and POST /api/v1/go desk" do

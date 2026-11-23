@@ -186,7 +186,8 @@ defmodule Shuttle.Palette do
     find_entry(entries, fiber_id)
   end
 
-  defp resolve_focused(entries, doc, nil, sid, wid, bid) when is_binary(sid) do
+  defp resolve_focused(entries, doc, nil, sid, wid, bid)
+       when is_binary(sid) or is_binary(wid) or is_binary(bid) do
     with ident when is_binary(ident) <- lookup_rex_identifier(doc, sid, wid, bid) do
       find_entry(entries, ident)
     end
@@ -222,17 +223,16 @@ defmodule Shuttle.Palette do
     end)
   end
 
+  # A place is matched by whatever Rex knows of it: a window or block names it
+  # alone, within its session when Rex gives one. A session alone matches any of
+  # its places.
   defp matches_rex_target?(entry, sid, wid, bid) when is_map(entry) do
-    entry["session_id"] == sid and
-      cond do
-        is_binary(wid) ->
-          entry["window_id"] == wid
-
-        is_binary(bid) ->
-          entry["block_id"] == bid or entry["page_block_id"] == bid
-
-        true ->
-          true
+    (is_nil(sid) or entry["session_id"] in [nil, sid]) and
+      if is_binary(wid) or is_binary(bid) do
+        (is_binary(wid) and entry["window_id"] == wid) or
+          (is_binary(bid) and bid in [entry["block_id"], entry["page_block_id"]])
+      else
+        entry["session_id"] == sid
       end
   end
 
