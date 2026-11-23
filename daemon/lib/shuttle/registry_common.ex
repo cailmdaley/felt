@@ -204,29 +204,32 @@ defmodule Shuttle.RegistryCommon do
 
   def persist(dir, name, encoded, label) do
     path = Path.join(dir, "#{safe_name(name)}.json")
-    tmp = path <> ".tmp"
+    tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
     data = if is_map(encoded), do: Jason.encode_to_iodata!(encoded), else: encoded
 
-    # No ancestry walk on steady-state writes. Recreate a missing cache
-    # directory on demand, including after an operator deletes it at runtime.
-    case Shuttle.FS.write(tmp, data) do
-      :ok ->
-        :ok
+    try do
+      # No ancestry walk on steady-state writes. Recreate a missing cache
+      # directory on demand, including after an operator deletes it at runtime.
+      case Shuttle.FS.write(tmp, data) do
+        :ok ->
+          :ok
 
-      {:error, :enoent} ->
-        Shuttle.FS.mkdir_p!(dir)
-        Shuttle.FS.write!(tmp, data)
+        {:error, :enoent} ->
+          Shuttle.FS.mkdir_p!(dir)
+          Shuttle.FS.write!(tmp, data)
 
-      {:error, reason} ->
-        raise File.Error, reason: reason, action: "write file", path: tmp
+        {:error, reason} ->
+          raise File.Error, reason: reason, action: "write file", path: tmp
+      end
+
+      Shuttle.FS.rename!(tmp, path)
+      :ok
+    rescue
+      error ->
+        _ = Shuttle.FS.rm(tmp)
+        Logger.debug("#{label}: persist for #{name} failed — #{inspect(error)}")
+        {:error, error}
     end
-
-    Shuttle.FS.rename!(tmp, path)
-    :ok
-  rescue
-    error ->
-      Logger.debug("#{label}: persist for #{name} failed — #{inspect(error)}")
-      {:error, error}
   end
 
   @doc """

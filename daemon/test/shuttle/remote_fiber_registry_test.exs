@@ -1006,6 +1006,29 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       MockClient.set(url, {:ok, feed_body([])})
       :ok = RemoteFiberRegistry.refresh_now(pid)
 
+      assert %{"candide" => %{stale: false, fibers: [], last_polled_at: empty_at}} =
+               RemoteFiberRegistry.feeds(pid)
+
+      # Owner restarts before persisting its empty snapshot and serves obsolete
+      # cold rows: our observed-empty provenance prevents resurrecting them.
+      MockClient.set(
+        url,
+        {:ok,
+         Jason.encode!(%{
+           "host" => "candide",
+           "fibers" => [sample_fiber("zombie")],
+           "cache" => %{"state" => "cold"}
+         })}
+      )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => %{stale: true, fibers: [], last_polled_at: ^empty_at}} =
+               RemoteFiberRegistry.feeds(pid)
+
+      # Warm-empty again restores freshness.
+      MockClient.set(url, {:ok, feed_body([])})
+      :ok = RemoteFiberRegistry.refresh_now(pid)
       assert %{"candide" => %{stale: false, fibers: []}} = RemoteFiberRegistry.feeds(pid)
     end
 

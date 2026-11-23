@@ -549,7 +549,7 @@ defmodule Shuttle.RemoteFiberRegistry do
          now
        ) do
     entry =
-      if entry.fibers == [] and fibers != [],
+      if entry.last_polled_at == nil and entry.fibers == [] and fibers != [],
         do: %{entry | fibers: fibers, encoded_fibers: nil},
         else: entry
 

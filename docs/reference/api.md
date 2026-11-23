@@ -118,10 +118,12 @@ board keeps its existing copy on a 304 and tracks poll time itself.
 The owner feed (`GET /fibers?shuttle=true`) and the fibers composite's local
 origin serve the daemon's last observed owner rows after a restart
 (`$SHUTTLE_DATA_DIR/local-fibers/<host>.json`) until its first successful
-listing replaces them, with `cache.state` `cold` or `partial` and the local
-origin `stale`, and no `ETag` on a cold owner feed. A viewer holding rows for
-a cold remote owner keeps them, takes the owner's only when it holds none, and
-marks them stale until a warm feed arrives. Dispatch never reads them.
+listing replaces them, always with `cache.state` `cold` (even if a failed
+initial listing left the underlying cache `partial`), the local origin `stale`,
+and no `ETag`. A viewer that has already observed a remote owner (including
+warm-empty) keeps its own rows when that owner answers cold; only a viewer with
+no prior observation seeds from the owner's cold rows, and either way the rows
+stay stale until a warm feed arrives. Dispatch never reads them.
 
 Each constitution entry in the owner's Desk feed has `orchestrator`: the wire id of its nearest strict ancestor carrying a `shuttle:` block and no tempered or discarded verdict, or null for a top-level constitution.
 The relation skips intervening ordinary fibers and retains ancestors owned by another host, even though those ancestors do not appear in this owner's rows.

@@ -192,6 +192,7 @@ defmodule Shuttle.Application do
       Supervisor.child_spec(Shuttle.Lock, restart: :temporary, significant: true),
       {Registry, keys: :duplicate, name: Shuttle.Voice.Streams},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
+      Shuttle.Poller.LocalFeed,
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       # Shares one felt read among concurrent board requests for the same
       # fiber, and among concurrent misses for a store's listing.

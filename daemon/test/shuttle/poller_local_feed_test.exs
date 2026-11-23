@@ -104,5 +104,57 @@ defmodule Shuttle.Poller.LocalFeedTest do
       assert {w, [:b]} = LocalFeed.finished(w, :ok)
       assert {%{written: [:b]}, nil} = LocalFeed.finished(w, :ok)
     end
+
+    test "supervised writer serializes across Poller restarts so a delayed write never overwrites newer rows",
+         %{data: data} do
+      parent = self()
+      dir = Path.join(data, "local-fibers")
+      first_entry = put_in(@entry, [:fiber, "name"], "Before restart")
+      second_entry = put_in(@entry, [:fiber, "name"], "After restart")
+
+      {:ok, writer} = start_supervised({LocalFeed, name: :"local_feed_#{System.unique_integer([:positive])}"})
+
+      # First Poller incarnation submits a write that blocks mid-flight.
+      poller1 =
+        spawn(fn ->
+          LocalFeed.submit("test-host", [first_entry],
+            server: writer,
+            dir: dir,
+            persist_fn: fn host, rows ->
+              send(parent, {:first_started, self()})
+
+              receive do
+                :release_first -> LocalFeed.persist_in(dir, host, rows)
+              end
+            end
+          )
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert_receive {:first_started, task1}, 5_000
+      ref = Process.monitor(poller1)
+      Process.exit(poller1, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^poller1, :killed}
+
+      # Replacement Poller submits newer rows while the old write is still blocked.
+      LocalFeed.submit("test-host", [second_entry],
+        server: writer,
+        dir: dir,
+        persist_fn: fn host, rows ->
+          res = LocalFeed.persist_in(dir, host, rows)
+          send(parent, {:second_done, res})
+          res
+        end
+      )
+
+      # Release the old write; the supervised writer runs the newer snapshot after it.
+      send(task1, :release_first)
+      assert_receive {:second_done, :ok}, 5_000
+
+      assert [%{fiber: %{"name" => "After restart"}}] = LocalFeed.load("test-host")
+    end
   end
 end

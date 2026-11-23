@@ -729,7 +729,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     File.write!(blocker, "not a directory")
 
     poller = warm_poller!(store)
-    wait_until(fn -> :sys.get_state(poller, :infinity).local_feed_task == nil end)
+    wait_until(fn -> Shuttle.Poller.LocalFeed.idle?("test-host") end)
     assert File.regular?(blocker)
 
     # The disk recovers; the next poll publishes again and the write lands.

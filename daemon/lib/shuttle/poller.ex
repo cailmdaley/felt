@@ -252,11 +252,6 @@ defmodule Shuttle.Poller do
       # at boot, served to the board until the first successful listing
       # (`document_cache_refreshed_at`) replaces them. Never dispatched from.
       local_feed: [],
-      # The single writer that keeps the disk copy current once listings have
-      # succeeded (`Shuttle.Poller.LocalFeed.writer/1`), and the ref of its
-      # write task, at most one in flight.
-      local_feed_writer: Shuttle.Poller.LocalFeed.writer([]),
-      local_feed_task: nil,
       # When the document cache was last rebuilt (nil until the first poll warms
       # it) and how long that rebuild took. Surfaced in the owner-feed envelope's
       # `cache` metadata (state/refreshed_at/entries/last_refresh_ms) so a viewer
@@ -1136,7 +1131,6 @@ defmodule Shuttle.Poller do
       runner: runner,
       pulses: Shuttle.Pulse.load(),
       local_feed: remembered,
-      local_feed_writer: Shuttle.Poller.LocalFeed.writer(remembered),
       full_scan_budget_ms:
         Keyword.get_lazy(opts, :full_scan_budget_ms, fn ->
           Shuttle.Env.app(:full_scan_budget_ms, @default_full_scan_budget_ms)
@@ -1668,28 +1662,9 @@ defmodule Shuttle.Poller do
 
   defp write_local_feed(%State{document_cache_refreshed_at: nil} = state, _base), do: state
 
-  defp write_local_feed(%State{} = state, base) do
-    {writer, rows} = Shuttle.Poller.LocalFeed.offer(state.local_feed_writer, base)
-    start_local_feed_write(%{state | local_feed: [], local_feed_writer: writer}, rows)
-  end
-
-  defp start_local_feed_write(state, nil), do: state
-
-  defp start_local_feed_write(%State{own_host_id: host} = state, rows) do
-    task =
-      Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
-        {:local_feed_written, Shuttle.Poller.LocalFeed.persist(host, rows)}
-      end)
-
-    %{state | local_feed_task: task.ref}
-  end
-
-  defp finish_local_feed_write(state, result) do
-    if result != :ok,
-      do: Logger.warning("local feed write failed; retrying later: #{inspect(result)}")
-
-    {writer, rows} = Shuttle.Poller.LocalFeed.finished(state.local_feed_writer, result)
-    start_local_feed_write(%{state | local_feed_writer: writer, local_feed_task: nil}, rows)
+  defp write_local_feed(%State{own_host_id: host} = state, base) do
+    Shuttle.Poller.LocalFeed.submit(host, base)
+    %{state | local_feed: []}
   end
 
   defp published_fiber_stores(state) do
@@ -2222,14 +2197,6 @@ defmodule Shuttle.Poller do
        when is_map_key(state.pulse_jobs, ref) do
     {:noreply, %{state | pulse_jobs: Map.delete(state.pulse_jobs, ref)}}
   end
-
-  defp transition_info({ref, {:local_feed_written, result}}, %{local_feed_task: ref} = state) do
-    Process.demonitor(ref, [:flush])
-    {:noreply, finish_local_feed_write(state, result)}
-  end
-
-  defp transition_info({:DOWN, ref, :process, _pid, reason}, %{local_feed_task: ref} = state),
-    do: {:noreply, finish_local_feed_write(state, {:error, reason})}
 
   defp transition_info(msg, state) do
     Logger.debug("Poller ignored message: #{inspect(msg)}")
