@@ -72,13 +72,18 @@ export function threadRow(card: KanbanCard, { waits, now, density = 'line', said
   row.dataset.attention = attentionOf(card, waits)
   row.dataset.fiber = card.uid ?? card.id
   if (hue) row.dataset.hue = hue
-  row.title = card.name
+  if (card.unreadable) {
+    row.classList.add('thread-row-unreadable')
+    row.dataset.unreadable = 'true'
+  }
+  row.title = card.unreadable ? `${card.name} — unreadable: ${card.unreadable}` : card.name
   const name = slug(card), office = officeOf(card.shuttleRole)
   row.append(open ? stateDot(card, waits, open) : stateMark(card, waits), el('span', 'thread-row-slug', name))
   const role = office && office !== name ? office : ''
   if (density === 'line') {
     const { text, at } = doing(card, waits, said)
-    row.title = `${card.name} — ${role ? `${role} · ` : ''}${text}`
+    const suffix = card.unreadable ? ` (unreadable: ${card.unreadable})` : ''
+    row.title = `${card.name} — ${role ? `${role} · ` : ''}${text}${suffix}`
     row.append(el('span', 'thread-row-doing', text), timeEl(at, now, 'thread-row-age', true))
   } else if (role) row.append(el('span', 'thread-row-role', role))
   if (open) row.addEventListener('click', () => open(card))

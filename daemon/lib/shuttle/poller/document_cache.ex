@@ -188,12 +188,14 @@ defmodule Shuttle.Poller.DocumentCache do
     end
   end
 
-  # A cache hit requires matching mtimes, paths and resolved blocks: the agent
-  # record and a standing constitution's `next_due`/`prev_due` move without a
-  # write to the fiber.
+  # A cache hit requires matching mtimes, paths, unreadable marks and resolved
+  # blocks: a carried unreadable row keeps its old mtime, and the agent record
+  # and a standing constitution's `next_due`/`prev_due` move without a write to
+  # the fiber.
   defp reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at, candidate)
        when is_map(entry) and is_map(candidate) do
     get_in(entry, [:fiber, "path"]) == candidate["path"] and
+      get_in(entry, [:fiber, "unreadable"]) == candidate["unreadable"] and
       get_in(entry, [:fiber, "shuttle", "resolved"]) ==
         get_in(candidate, ["shuttle", "resolved"])
   end

@@ -399,6 +399,7 @@ function toCard(
     held,
     heldSince,
     mirroredOrigins: entry.mirroredOrigins,
+    unreadable: f.unreadable,
     ask: f.shuttleAsk,
     reviewMark: f.shuttleReview,
     dispatchedAt: f.shuttleDispatchedAt,
@@ -522,9 +523,10 @@ function buildStaleness(feed: CompositeFeed): Record<string, KanbanOriginStalene
 function originStaleness(name: string, origin: CompositeOrigin): KanbanOriginStaleness {
   const status: KanbanOriginStaleness['status'] =
     origin.kind === 'local' ? 'fresh' : origin.stale ? 'stale' : 'fresh';
-  return status === 'stale'
+  const base: KanbanOriginStaleness = status === 'stale'
     ? { status, hostname: name, staleSince: origin.lastPolledAt }
     : { status, hostname: name };
+  return origin.unreadable?.length ? { ...base, unreadable: origin.unreadable } : base;
 }
 
 // `createdAt` / `closedAt` / `nextLaunchAt` are INSTANTS. Order

@@ -124,7 +124,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
         if cold? do
           json(conn, body)
         else
-          etag = feed_etag({body.fibers, body.stores})
+          etag = feed_etag({body.fibers, body.stores, Map.get(body, :unreadable, [])})
           conn = put_resp_header(conn, "etag", etag)
 
           if if_none_match?(conn, etag),
@@ -319,7 +319,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   to ONE (local) Shuttle and sees local + every configured remote.
   """
   def composite(conn, _params) do
-    {local_origin, local_owner_entries, local_stale, local_cache} = local_feed()
+    {local_origin, local_owner_entries, local_stale, local_cache, local_unreadable} = local_feed()
     remote_feeds = Shuttle.RemoteFiberRegistry.feeds()
 
     fibers =
@@ -339,6 +339,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
            last_polled_at: stale_since(feed.stale, feed.last_polled_at),
            last_error: render_error(feed.last_error),
            fiber_count: length(feed.fibers),
+           unreadable: Map.get(feed, :unreadable, []),
            # The owning host's cache state (cold/partial/fresh), so a reader
            # can tell "warming" from a binary badge. nil until the remote
            # serves it.
@@ -349,6 +350,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
         kind: "local",
         stale: local_stale,
         fiber_count: length(local_owner_entries),
+        unreadable: local_unreadable,
         cache: cache_state(local_cache)
       })
 
@@ -368,10 +370,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp local_feed do
     case cached_owner_feed() do
       {:ok, %{host: host, fibers: entries} = body} ->
-        {host, entries, cold?(body), Map.get(body, :cache)}
+        {host, entries, cold?(body), Map.get(body, :cache), Map.get(body, :unreadable, [])}
 
       :unavailable ->
-        {Shuttle.Poller.own_host_id(), [], true, nil}
+        {Shuttle.Poller.own_host_id(), [], true, nil, []}
     end
   end
 

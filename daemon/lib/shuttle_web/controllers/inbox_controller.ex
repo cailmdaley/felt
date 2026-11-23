@@ -58,11 +58,32 @@ defmodule ShuttleWeb.InboxController do
       end
     else
       _ ->
-        conn
-        |> put_status(404)
-        |> json(%{error: "no owned fiber #{params["fiber_id"]} on #{Poller.own_host_id()}"})
+        case find_unreadable(params["fiber_id"]) do
+          %{error: error} = entry ->
+            conn
+            |> put_status(422)
+            |> json(%{
+              error: "fiber #{entry[:path] || params["fiber_id"]} is unreadable: #{error}"
+            })
+
+          nil ->
+            conn
+            |> put_status(404)
+            |> json(%{error: "no owned fiber #{params["fiber_id"]} on #{Poller.own_host_id()}"})
+        end
     end
   end
+
+  defp find_unreadable(fiber_id) when is_binary(fiber_id) and fiber_id != "" do
+    upper = String.upcase(fiber_id)
+
+    Enum.find(Poller.unreadable_fibers(), fn entry ->
+      entry[:id] == fiber_id or entry[:path] == fiber_id or
+        (is_binary(entry[:uid]) and String.upcase(entry[:uid]) == upper)
+    end)
+  end
+
+  defp find_unreadable(_), do: nil
 
   # Why an overdue entry is still pending.
   defp waiting(entry, publication) do

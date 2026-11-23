@@ -1156,7 +1156,7 @@ export class KanbanModal {
     const focusedRow = this.deskKeyboard?.focusedRow() ?? null
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
-    this.deskEl.append(this.surfaces.renderDesk(order, index))
+    this.deskEl.append(this.surfaces.renderDesk(order, index, data.staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
     // A redraw repaints the selection in place: the Desk scrolls only when the

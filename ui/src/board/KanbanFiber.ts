@@ -104,6 +104,8 @@ export interface Fiber {
   /** Path relative to the owning `.felt/` wire root, carried on a feed row so
    * owner-routed mutations can echo it back. */
   remotePath?: string;
+  /** Parse error when the fiber file on disk no longer parses; the row holds the last-known metadata. */
+  unreadable?: string;
   isRoot?: boolean;  // entry-point fiber: bare `.felt/<slug>.md`
 }
 
@@ -149,6 +151,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
 
   const tags = stringList(f.tags);
   const tempered = typeof f.tempered === 'boolean' ? f.tempered : undefined;
+  const unreadable = typeof f.unreadable === 'string' && f.unreadable.trim() ? f.unreadable.trim() : undefined;
 
   // shuttle: arrives as a native JSON map post felt v1.0.4. Anything else
   // (string, array, missing) means no shuttle block.
@@ -315,6 +318,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleChangePRs,
     shuttleChrome,
     shuttleHost,
+    unreadable,
     parentId,
     isRoot,
   };

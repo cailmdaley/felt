@@ -53,6 +53,24 @@ defmodule Shuttle.Poller.DocumentCacheTest do
     assert cache[original["uid"]].entry.fiber["slug"] == "moved"
   end
 
+  test "marking or clearing unreadable on an unchanged mtime rebuilds the cached entry" do
+    clean = candidate("claude")
+    broken = Map.put(clean, "unreadable", "yaml: line 3: unexpected apostrophe")
+
+    {cache, %{misses: 1}} =
+      DocumentCache.refresh(%{document_cache: %{}}, [clean], %{"hub" => "/store"})
+
+    {cache, %{hits: 0, misses: 1}} =
+      DocumentCache.refresh(%{document_cache: cache}, [broken], %{"hub" => "/store"})
+
+    assert cache["hub"].entry.fiber["unreadable"] == "yaml: line 3: unexpected apostrophe"
+
+    {cache, %{hits: 0, misses: 1}} =
+      DocumentCache.refresh(%{document_cache: cache}, [clean], %{"hub" => "/store"})
+
+    refute Map.has_key?(cache["hub"].entry.fiber, "unreadable")
+  end
+
   defp candidate(cli) do
     resolved_agent = if cli == "unresolved", do: nil, else: %{"id" => "receiver", "cli" => cli}
 

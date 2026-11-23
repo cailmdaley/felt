@@ -4,7 +4,7 @@ import { clearable, quietWord, type Waits } from './attention.js'
 import { dueCivilDay, formatCivilDay } from './civilDay.js'
 import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
-import type { KanbanCard } from './KanbanTypes.js'
+import type { KanbanCard, KanbanOriginStaleness } from './KanbanTypes.js'
 import { isMobileViewport } from './mobile.js'
 import { stateDot } from './stateDot.js'
 import { threadRow } from './elements/threadRow.js'
@@ -54,9 +54,11 @@ export class KanbanSurfaceRenderer {
     this.o = options
   }
 
-  renderDesk(order: DeskOrder, index: ThreadIndex): HTMLElement {
+  renderDesk(order: DeskOrder, index: ThreadIndex, staleness?: Record<string, KanbanOriginStaleness>): HTMLElement {
     const desk = document.createElement('div')
     desk.className = 'kbn-desk-sections'
+    const health = this.unreadableHealth(staleness)
+    if (health) desk.append(health)
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-now'
     section.setAttribute('role', 'region')
@@ -75,6 +77,42 @@ export class KanbanSurfaceRenderer {
     desk.append(section, shelf)
     this.pager(board, folio)
     return desk
+  }
+
+  /** Persistent per-host warning lines naming unreadable fiber files until they parse. */
+  private unreadableHealth(staleness?: Record<string, KanbanOriginStaleness>): HTMLElement | null {
+    if (!staleness) return null
+    const broken = Object.entries(staleness)
+      .filter(([, origin]) => origin.unreadable && origin.unreadable.length > 0)
+      .sort(([a], [b]) => a.localeCompare(b))
+    if (!broken.length) return null
+    const region = document.createElement('div')
+    region.className = 'kbn-desk-health'
+    region.setAttribute('role', 'alert')
+    for (const [host, origin] of broken) {
+      const line = document.createElement('div')
+      line.className = 'kbn-unreadable-line'
+      line.dataset.host = host
+      const hostEl = document.createElement('span')
+      hostEl.className = 'kbn-unreadable-host'
+      hostEl.textContent = `${origin.hostname ?? host}:`
+      line.append(hostEl)
+      const list = document.createElement('span')
+      list.className = 'kbn-unreadable-list'
+      origin.unreadable!.forEach((item, i) => {
+        if (i > 0) list.append(document.createTextNode(' · '))
+        const entry = document.createElement('span')
+        entry.className = 'kbn-unreadable-item'
+        const path = document.createElement('code')
+        path.className = 'kbn-unreadable-path'
+        path.textContent = item.path
+        entry.append(path, document.createTextNode(` — ${item.error}`))
+        list.append(entry)
+      })
+      line.append(list)
+      region.append(line)
+    }
+    return region
   }
 
   /** The `+` (`draft`) and `✶` (`idea`) buttons asked for, those with a handler. */
@@ -144,9 +182,13 @@ export class KanbanSurfaceRenderer {
     card.dataset.attention = family.attention
     card.dataset.section = family.section
     card.setAttribute('role', 'listitem')
-    card.title = root.name
+    card.title = root.unreadable ? `${root.name} — unreadable: ${root.unreadable}` : root.name
+    if (root.unreadable) {
+      card.classList.add('kbn-family-unreadable')
+      card.dataset.unreadable = 'true'
+    }
     identify(card, root)
-    card.setAttribute('aria-label', `${root.name}, ${DESK_SECTION_TITLE[family.section].toLowerCase()}`)
+    card.setAttribute('aria-label', `${root.name}${root.unreadable ? ', unreadable' : ''}, ${DESK_SECTION_TITLE[family.section].toLowerCase()}`)
     card.addEventListener('click', event => {
       if ((event.target as Element).closest('button, a')) return
       const line = (event.target as Element).closest<HTMLElement>('.kbn-family-wait')
@@ -170,7 +212,15 @@ export class KanbanSurfaceRenderer {
       const name = document.createElement('span')
       name.className = 'kbn-family-name'
       name.textContent = rowLabel(index, root)
-      head.append(stateDot(root, waits, this.o.openDetail), name, meta)
+      if (root.unreadable) {
+        const badge = document.createElement('span')
+        badge.className = 'kbn-unreadable-badge'
+        badge.textContent = 'unreadable'
+        badge.title = root.unreadable
+        head.append(stateDot(root, waits, this.o.openDetail), name, badge, meta)
+      } else {
+        head.append(stateDot(root, waits, this.o.openDetail), name, meta)
+      }
       // A verdict given from the keys waits out its undo window on the line it names.
       markVerdictHost(head, root)
       card.append(head)

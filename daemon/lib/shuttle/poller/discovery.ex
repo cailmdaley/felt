@@ -81,6 +81,7 @@ defmodule Shuttle.Poller.Discovery do
         {rows, next_listings, next_fulls, info} =
           case result do
             {:ok, %{rows: listed, foreign_ids: foreign_ids}} ->
+              listed = carry_unreadable(listed, retained)
               merged = if full?, do: listed, else: merge_hot_rows(retained, listed, foreign_ids)
 
               next_info =
@@ -297,6 +298,35 @@ defmodule Shuttle.Poller.Discovery do
     |> Map.reject(fn {_store, ids} -> ids == %{} end)
   end
 
+  @doc """
+  Joins each unreadable row in `listed` onto the row `previous` held for its id.
+
+  `shuttle ls --unreadable` lists a fiber file it cannot parse as a bare row,
+  `%{"id", "path", "unreadable" => parse error}`: no uid, host, status or
+  channel, since those are in the frontmatter that failed. The row the last
+  listing read is kept in its place, marked with the error, so the fiber keeps
+  its owner, its card and the channel its threads speak in, and dispatch
+  refuses it by name. An id never read before keeps its bare row, which names
+  the file on its host's health line and nominates nothing.
+  """
+  def carry_unreadable(listed, previous) do
+    if Enum.any?(listed, &unreadable?/1) do
+      known = Map.new(previous, &{&1["id"], &1})
+
+      Enum.map(listed, fn row ->
+        case {unreadable?(row), Map.get(known, row["id"])} do
+          {true, %{} = last} -> Map.put(last, "unreadable", row["unreadable"])
+          _ -> row
+        end
+      end)
+    else
+      listed
+    end
+  end
+
+  @doc "True for a row standing in for a fiber file the listing could not read."
+  def unreadable?(row), do: is_binary(Map.get(row, "unreadable"))
+
   defp missing_hot_rows?(previous, listed, foreign_ids) do
     seen = MapSet.new(Enum.map(listed, & &1["id"]) ++ foreign_ids)
     Enum.any?(previous, &(not MapSet.member?(seen, &1["id"])))
@@ -418,11 +448,14 @@ defmodule Shuttle.Poller.Discovery do
     # the store's last-known rows; the boot contract probe checks CLI parity.
     # Status scope is explicit: awaiting standing runs must remain visible for
     # conditional scheduled re-arming. Eligibility still requires active.
+    # `--unreadable` lists a file that no longer parses in its fiber's place
+    # (`carry_unreadable/2`), so a broken fiber is never read as a deleted one.
     args = [
       "ls",
       "--status",
       "all",
       "--json",
+      "--unreadable",
       "--any",
       "field:shuttle",
       "--any",

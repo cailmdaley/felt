@@ -429,7 +429,7 @@ defmodule Shuttle.Poller do
         pending_results: pending,
         scheduled_messages: scheduled,
         pulses: pulses
-      } ->
+      } = inputs ->
         entries =
           base_entries
           |> Shuttle.Pulse.stamp(pulses)
@@ -443,7 +443,17 @@ defmodule Shuttle.Poller do
 
         log_cold_feed_once(server, cache)
         stores = Keyword.get(opts, :felt_stores) || default_stores
-        {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache)}
+        unreadable = Map.get(inputs, :unreadable, [])
+        {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache, unreadable)}
+    end
+  end
+
+  @doc "Unreadable fiber files currently observed in this host's configured stores."
+  @spec unreadable_fibers(GenServer.server()) :: [map()]
+  def unreadable_fibers(server \\ Shuttle.Env.server(__MODULE__)) do
+    case published_lookup(server, :feed_inputs, nil) do
+      %{unreadable: list} when is_list(list) -> list
+      _ -> []
     end
   end
 
@@ -1526,7 +1536,8 @@ defmodule Shuttle.Poller do
       dispatch_failures: state.dispatch_failures,
       pending_results: state.pending_results,
       scheduled_messages: state.scheduled_messages,
-      pulses: pulse_rows(state)
+      pulses: pulse_rows(state),
+      unreadable: unreadable_entries(state)
     }
 
     worker_entries =
@@ -1656,7 +1667,8 @@ defmodule Shuttle.Poller do
   end
 
   defp reader_projection_signature(state) do
-    Map.take(state, [
+    state
+    |> Map.take([
       :running,
       :document_cache,
       :document_fiber_index,
@@ -1675,6 +1687,7 @@ defmodule Shuttle.Poller do
       :felt_stores,
       :own_host_id
     ])
+    |> Map.put(:unreadable, unreadable_entries(state))
   end
 
   defp transition_info({:deliver_thread_results, entries, own_host, callers}, state) do
@@ -2230,7 +2243,10 @@ defmodule Shuttle.Poller do
 
     stores = Keyword.get(opts, :felt_stores, state.felt_stores)
     cache_meta = document_cache_meta(state)
-    {:reply, {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache_meta)}, state}
+
+    {:reply,
+     {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache_meta, unreadable_entries(state))},
+     state}
   end
 
   defp transition_call({:refresh_created_document, store, uid}, _from, state) do
@@ -2748,6 +2764,8 @@ defmodule Shuttle.Poller do
     # dead-standing-role pass below.
     sessions = list_shuttle_sessions(state)
 
+    previous_state = state
+
     state = %{
       state
       | felt_stores: felt_stores,
@@ -2762,6 +2780,7 @@ defmodule Shuttle.Poller do
         discovery: discovery
     }
 
+    log_unreadable(previous_state, state)
     state = reconcile(state, sessions, listings_ok?)
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
@@ -3766,6 +3785,11 @@ defmodule Shuttle.Poller do
       not host_owned?(shuttle, state.own_host_id) ->
         false
 
+      # The file no longer parses: this row is the last one read
+      # (`Discovery.carry_unreadable/2`), and a launch would work from it.
+      Discovery.unreadable?(fiber) ->
+        false
+
       # `status: active` is the SOLE dispatch gate. A fiber is shuttle-managed
       # iff it carries a shuttle: block;
       # it dispatches iff status is active. `open` is a draft/paused (not
@@ -3853,7 +3877,7 @@ defmodule Shuttle.Poller do
   # Force-dispatch predicate: only the irreducible requirements. The user
   # explicitly clicked dispatch; honor the intent.
   defp force_dispatch_eligible?(fiber, state) do
-    host_owned?(Map.get(fiber, "shuttle"), state.own_host_id)
+    host_owned?(Map.get(fiber, "shuttle"), state.own_host_id) and not Discovery.unreadable?(fiber)
   end
 
   # Names WHY a dispatch was refused so the kanban can say something true
@@ -3895,6 +3919,10 @@ defmodule Shuttle.Poller do
     remembered = if forced?, do: nil, else: remembered_preflight_refusal(state, fiber)
 
     cond do
+      Discovery.unreadable?(fiber) and
+          (not is_map(shuttle) or host_owned?(shuttle, state.own_host_id)) ->
+        {:not_eligible, {:unreadable, Map.get(fiber, "path"), fiber["unreadable"]}}
+
       not is_map(shuttle) ->
         {:not_eligible, :no_shuttle_block}
 
@@ -4386,7 +4414,7 @@ defmodule Shuttle.Poller do
 
   defp release_launch_reservation(state, fiber_id, opts) do
     if Keyword.get(opts, :release_launch_reservation, false) do
-      with {:ok, fiber} <- fetch_fiber_full(fiber_id, state) do
+      with {:ok, fiber} <- fetch_fiber_for_dispatch(fiber_id, state) do
         if dispatch_eligible?(fiber, state, opts) do
           case Dispatcher.session_name(fiber["id"], fiber["uid"]) do
             nil -> :ok
@@ -4459,7 +4487,7 @@ defmodule Shuttle.Poller do
         {:reply, worker_check, state}
 
       true ->
-        case fetch_fiber_full(fiber_id, state) do
+        case fetch_fiber_for_dispatch(fiber_id, state) do
           {:ok, fiber} ->
             if dispatch_eligible?(fiber, state, opts) do
               {new_state, result} = do_dispatch_fiber(state, fiber, opts)
@@ -4473,6 +4501,33 @@ defmodule Shuttle.Poller do
         end
     end
   end
+
+  defp fetch_fiber_for_dispatch(fiber_id, state) do
+    case fetch_fiber_full(fiber_id, state) do
+      {:ok, fiber} ->
+        {:ok, fiber}
+
+      {:error, reason} ->
+        case find_unreadable_row(state, fiber_id) do
+          %{} = row -> {:ok, row}
+          nil -> {:error, reason}
+        end
+    end
+  end
+
+  defp find_unreadable_row(state, fiber_id) when is_binary(fiber_id) and fiber_id != "" do
+    upper = String.upcase(fiber_id)
+
+    state.felt_stores
+    |> Enum.flat_map(&Map.get(state.last_known_listings, &1, []))
+    |> Enum.find(fn row ->
+      Discovery.unreadable?(row) and
+        (row["id"] == fiber_id or row["path"] == fiber_id or
+           (is_binary(row["uid"]) and String.upcase(row["uid"]) == upper))
+    end)
+  end
+
+  defp find_unreadable_row(_state, _fiber_id), do: nil
 
   # ── A forced start: checked, then armed, before anything else happens ──
   #
@@ -4511,7 +4566,7 @@ defmodule Shuttle.Poller do
            not open_session?(state, fiber_id, runtime_key, uid))
 
     if launches? do
-      case fetch_fiber_full(fiber_id, state) do
+      case fetch_fiber_for_dispatch(fiber_id, state) do
         {:ok, fiber} ->
           result =
             with :ok <- forced_eligibility(fiber, state, opts),
@@ -6447,18 +6502,25 @@ defmodule Shuttle.Poller do
         {:ok, fiber}
 
       {:error, reason} ->
-        case Shuttle.FeltStores.resolve_fiber(fiber_id, state.felt_stores) do
-          {:ok, %{store: store, fiber_id: address}} ->
-            with {:ok, output} <-
-                   Discovery.run_shuttle(store, state.runner, ["show", address, "--json"]),
-                 {:ok, fiber} <- Shuttle.FiberDocuments.decode(output),
-                 do: {:ok, fiber}
+        case find_unreadable_row(state, fiber_id) do
+          %{} = row ->
+            {:ok, row}
 
-          {:error, :not_found} ->
-            {:error, {:fiber_not_found, "fiber not found on #{state.own_host_id}: #{fiber_id}"}}
+          nil ->
+            case Shuttle.FeltStores.resolve_fiber(fiber_id, state.felt_stores) do
+              {:ok, %{store: store, fiber_id: address}} ->
+                with {:ok, output} <-
+                       Discovery.run_shuttle(store, state.runner, ["show", address, "--json"]),
+                     {:ok, fiber} <- Shuttle.FiberDocuments.decode(output),
+                     do: {:ok, fiber}
 
-          _ ->
-            {:error, reason}
+              {:error, :not_found} ->
+                {:error,
+                 {:fiber_not_found, "fiber not found on #{state.own_host_id}: #{fiber_id}"}}
+
+              _ ->
+                {:error, reason}
+            end
         end
     end
   end
@@ -6582,6 +6644,7 @@ defmodule Shuttle.Poller do
           state
         end
 
+      rows = Discovery.carry_unreadable(rows, Map.get(state.last_known_listings, store, []))
       result = %{result | ids: ids, rows: rows}
 
       if result.ids == [] do
@@ -6620,15 +6683,62 @@ defmodule Shuttle.Poller do
 
         Shuttle.FiberAddresses.put_polled(polled_addresses(candidates, stores))
 
-        state
-        |> install_document_cache(cache)
-        |> Map.put(:last_known_listings, listings)
-        |> Map.put(:uid_slug_index, build_uid_slug_index(candidates))
-        |> Map.put(:fiber_store_cache, Map.merge(stores, state.fiber_store_cache))
-        |> Map.put(:document_cache_stats, stats)
-        |> Map.put(:discovery_overrides, overrides)
+        next_state =
+          state
+          |> install_document_cache(cache)
+          |> Map.put(:last_known_listings, listings)
+          |> Map.put(:uid_slug_index, build_uid_slug_index(candidates))
+          |> Map.put(:fiber_store_cache, Map.merge(stores, state.fiber_store_cache))
+          |> Map.put(:document_cache_stats, stats)
+          |> Map.put(:discovery_overrides, overrides)
+
+        log_unreadable(state, next_state)
+        next_state
       end
     end
+  end
+
+  defp unreadable_entries(state) do
+    state.felt_stores
+    |> Enum.flat_map(&Map.get(state.last_known_listings, &1, []))
+    |> Enum.filter(&Discovery.unreadable?/1)
+    |> Enum.map(fn row ->
+      base = %{id: row["id"], path: row["path"], error: row["unreadable"]}
+      if is_binary(row["uid"]) and row["uid"] != "", do: Map.put(base, :uid, row["uid"]), else: base
+    end)
+    |> Enum.uniq_by(&{&1.path, &1.error})
+    |> Enum.sort_by(&{&1.path || "", &1.id || ""})
+  end
+
+  defp log_unreadable(previous_state, state) do
+    previous =
+      previous_state.felt_stores
+      |> Enum.flat_map(&Map.get(previous_state.last_known_listings, &1, []))
+      |> Enum.filter(&Discovery.unreadable?/1)
+      |> MapSet.new(&{&1["path"], &1["unreadable"]})
+
+    state.felt_stores
+    |> Enum.flat_map(&Map.get(state.last_known_listings, &1, []))
+    |> Enum.filter(&Discovery.unreadable?/1)
+    |> Enum.uniq_by(&{&1["path"], &1["unreadable"]})
+    |> Enum.each(fn row ->
+      key = {row["path"], row["unreadable"]}
+
+      if not MapSet.member?(previous, key) do
+        armed_here? =
+          host_owned?(Map.get(row, "shuttle"), state.own_host_id) and
+            Map.get(row, "status") == "active"
+
+        standing =
+          if armed_here?,
+            do: "armed on #{state.own_host_id}; dispatch paused until fixed",
+            else: "not armed on #{state.own_host_id}"
+
+        Logger.warning(
+          "Unreadable fiber #{row["path"] || row["id"]} (#{standing}): #{row["unreadable"]}"
+        )
+      end
+    end)
   end
 
   defp overlay_rows(rows, changes) do

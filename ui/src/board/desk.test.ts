@@ -3,7 +3,10 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { Wait } from './boardFeed.js'
 import { deskOrder } from './deskOrdering.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
-import type { KanbanCard } from './KanbanTypes.js'
+import { parseCompositeFeed } from './KanbanComposite.js'
+import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
+import { dispatchIneligibleReason } from './KanbanModalShared.js'
+import type { KanbanCard, KanbanOriginStaleness } from './KanbanTypes.js'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
 
@@ -78,4 +81,84 @@ it('keeps a lone waiting post\'s ✓ on its one row: the ✓ clears and opens no
   expect([clear.mock.calls, openDetail.mock.calls.length]).toStrictEqual([[[memo]], 0])
   row.querySelector<HTMLElement>('.thread-row-doing')!.click()
   expect(openDetail).toHaveBeenCalledExactlyOnceWith(memo)
+})
+
+it('renders a persistent per-host unreadable health line and marks broken cards', () => {
+  const feed = parseCompositeFeed({
+    host: 'host-a',
+    fibers: [
+      {
+        origin: 'host-a',
+        felt_store: '/store',
+        path: 'chair/chair.md',
+        column: 'drafts',
+        turn: 'none',
+        fiber: {
+          id: 'chair',
+          uid: '01JZZZZZZZZZZZZZZZZZZZZZ99',
+          name: 'Chair',
+          status: 'active',
+          created_at: '2026-11-15T10:00:00Z',
+          shuttle: { host: 'host-a', kind: 'oneshot', channel: 'chair-room' },
+          unreadable: 'yaml: line 3: unexpected apostrophe',
+        },
+      },
+    ],
+    origins: {
+      'host-a': {
+        kind: 'local',
+        stale: false,
+        fiber_count: 1,
+        unreadable: [
+          { id: 'chair', path: '/store/.felt/chair/chair.md', error: 'yaml: line 3: unexpected apostrophe' },
+        ],
+      },
+      'old-peer': {
+        kind: 'remote',
+        stale: false,
+        fiber_count: 0,
+      },
+    },
+  })
+
+  const res = buildKanbanResponseFromComposite(feed, { nowMs: Date.parse('2026-11-16T10:00:00Z') })
+  expect(res.staleness['host-a']?.unreadable).toEqual([
+    { id: 'chair', path: '/store/.felt/chair/chair.md', error: 'yaml: line 3: unexpected apostrophe' },
+  ])
+  expect(res.staleness['old-peer']?.unreadable).toBeUndefined()
+  expect(res.now.drafts[0]?.unreadable).toBe('yaml: line 3: unexpected apostrophe')
+
+  const index = new ThreadIndex(res.now.drafts)
+  const desk = new KanbanSurfaceRenderer({
+    waits: () => new Map(),
+    openDetail: vi.fn(),
+    clear: vi.fn(),
+  }).renderDesk(deskOrder(index, new Map()), index, res.staleness)
+
+  const health = desk.querySelector<HTMLElement>('.kbn-desk-health')
+  expect(health).not.toBeNull()
+  const lines = [...desk.querySelectorAll<HTMLElement>('.kbn-unreadable-line')]
+  expect(lines).toHaveLength(1)
+  expect(lines[0].dataset.host).toBe('host-a')
+  expect(lines[0].textContent).toContain('/store/.felt/chair/chair.md')
+  expect(lines[0].textContent).toContain('yaml: line 3: unexpected apostrophe')
+
+  const brokenCard = desk.querySelector<HTMLElement>('.kbn-family[data-card-uid="01JZZZZZZZZZZZZZZZZZZZZZ99"]')!
+  expect(brokenCard.classList.contains('kbn-family-unreadable')).toBe(true)
+  expect(brokenCard.dataset.unreadable).toBe('true')
+  expect(brokenCard.querySelector('.kbn-unreadable-badge')?.textContent).toBe('unreadable')
+
+  // No health line when every host has zero unreadable fibers.
+  const cleanStaleness: Record<string, KanbanOriginStaleness> = {
+    'host-a': { status: 'fresh', hostname: 'host-a' },
+  }
+  const cleanDesk = new KanbanSurfaceRenderer({
+    waits: () => new Map(),
+    openDetail: vi.fn(),
+    clear: vi.fn(),
+  }).renderDesk(deskOrder(index, new Map()), index, cleanStaleness)
+  expect(cleanDesk.querySelector('.kbn-desk-health')).toBeNull()
+
+  expect(dispatchIneligibleReason({ reason: 'not_eligible', detail: 'unreadable' }))
+    .toContain('no longer parses')
 })

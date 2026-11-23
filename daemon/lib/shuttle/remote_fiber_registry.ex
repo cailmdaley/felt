@@ -458,12 +458,16 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp decode_feed(body, etag) do
     case Jason.decode(body) do
       {:ok, %{"fibers" => fibers} = env} when is_list(fibers) ->
-        {:ok, {fibers, etag, Map.get(env, "cache"), Map.get(env, "stores")}}
+        {:ok,
+         {fibers, etag, Map.get(env, "cache"), Map.get(env, "stores"),
+          list_or_empty(Map.get(env, "unreadable"))}}
 
       # Well-formed envelope without a fibers list (e.g. an error envelope):
       # treat as zero owned fibers rather than a transport failure.
       {:ok, %{} = env} ->
-        {:ok, {[], etag, Map.get(env, "cache"), Map.get(env, "stores")}}
+        {:ok,
+         {[], etag, Map.get(env, "cache"), Map.get(env, "stores"),
+          list_or_empty(Map.get(env, "unreadable"))}}
 
       _ ->
         {:error, :malformed_json}
@@ -493,6 +497,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       # native-folder-picker flag), carried on the same feed so the local
       # `/api/v1/felt-stores` never has to fetch a loaded remote live.
       stores: nil,
+      unreadable: [],
       last_polled_at: nil,
       last_attempt_at: nil,
       last_error: nil,
@@ -536,19 +541,24 @@ defmodule Shuttle.RemoteFiberRegistry do
   # confirmed the rows we restored, so they stay flagged as remembered.
   # The store block rides every owner feed, cold or warm — the picker wants it
   # from the first successful poll, not the first warm one.
-  defp apply_result(entry, {:ok, {[], etag, %{"state" => "cold"} = cache, stores}}, now) do
+  defp apply_result(
+         entry,
+         {:ok, {[], etag, %{"state" => "cold"} = cache, stores, _unreadable}},
+         now
+       ) do
     %{entry | etag: etag, cache: cache, stores: stores, last_attempt_at: now, last_error: nil}
   end
 
   # A warm 200 REPLACES the rows wholesale — restored or not — so nothing on
   # disk can resurrect a fiber the owner has since dropped, closed, or handed to
   # another host.
-  defp apply_result(entry, {:ok, {fibers, etag, cache, stores}}, now) do
+  defp apply_result(entry, {:ok, {fibers, etag, cache, stores, unreadable}}, now) do
     %{
       entry
       | fibers: fibers,
         encoded_fibers: nil,
         stores: stores,
+        unreadable: unreadable,
         etag: etag,
         cache: cache,
         last_polled_at: now,
@@ -579,6 +589,7 @@ defmodule Shuttle.RemoteFiberRegistry do
        %{
          fibers: entry.fibers,
          stores: entry.stores,
+         unreadable: Map.get(entry, :unreadable, []),
          last_polled_at: entry.last_polled_at,
          stale:
            stale?(%{entry | remote: RegistryCommon.polling_remote(state, entry.remote)}, now),
@@ -644,6 +655,7 @@ defmodule Shuttle.RemoteFiberRegistry do
     metadata =
       Jason.encode!(%{
         "stores" => entry.stores,
+        "unreadable" => Map.get(entry, :unreadable, []),
         "etag" => entry.etag,
         "cache" => entry.cache,
         "last_polled_at" => RegistryCommon.encode_dt(entry.last_polled_at)
@@ -681,6 +693,7 @@ defmodule Shuttle.RemoteFiberRegistry do
           initial_entry(remote)
           | fibers: fibers,
             stores: map_or_nil(persisted["stores"]),
+            unreadable: list_or_empty(persisted["unreadable"]),
             etag: string_or_nil(persisted["etag"]),
             cache: map_or_nil(persisted["cache"]),
             last_polled_at: RegistryCommon.decode_dt(persisted["last_polled_at"]),
@@ -688,6 +701,9 @@ defmodule Shuttle.RemoteFiberRegistry do
         }
     end
   end
+
+  defp list_or_empty(value) when is_list(value), do: value
+  defp list_or_empty(_), do: []
 
   defp list_or_nil(value) when is_list(value), do: value
   defp list_or_nil(_), do: nil

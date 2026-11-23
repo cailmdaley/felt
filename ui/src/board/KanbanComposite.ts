@@ -41,7 +41,7 @@
 //   }
 
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
-import type { DeskColumn, ScheduledMessage } from './KanbanTypes.js';
+import type { DeskColumn, ScheduledMessage, UnreadableFiber } from './KanbanTypes.js';
 import { TURN_WORD, type Turn } from './turn.js';
 
 /** The owner's `column`, in the board's names. */
@@ -156,6 +156,8 @@ export interface CompositeOrigin {
   lastPolledAt?: string;
   lastError?: string;
   fiberCount: number;
+  /** Unreadable fiber files currently reported by this origin. */
+  unreadable?: UnreadableFiber[];
 }
 
 export interface CompositeFeed {
@@ -203,17 +205,33 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
   if (isRecord(root.origins)) {
     for (const [name, raw] of Object.entries(root.origins)) {
       if (!isRecord(raw)) continue;
+      const unreadable = parseUnreadable(raw.unreadable);
       origins[name] = {
         kind: raw.kind === 'local' ? 'local' : 'remote',
         stale: raw.stale === true,
         lastPolledAt: typeof raw.last_polled_at === 'string' ? raw.last_polled_at : undefined,
         lastError: typeof raw.last_error === 'string' ? raw.last_error : undefined,
         fiberCount: typeof raw.fiber_count === 'number' ? raw.fiber_count : 0,
+        ...(unreadable.length ? { unreadable } : {}),
       };
     }
   }
 
   return { host, entries, origins };
+}
+
+function parseUnreadable(value: unknown): UnreadableFiber[] {
+  const out: UnreadableFiber[] = [];
+  for (const item of arrayOfRecords(value)) {
+    const path = typeof item.path === 'string' && item.path ? item.path : undefined;
+    const error = typeof item.error === 'string' && item.error ? item.error : undefined;
+    if (!path || !error) continue;
+    const entry: UnreadableFiber = { path, error };
+    if (typeof item.id === 'string' && item.id) entry.id = item.id;
+    if (typeof item.uid === 'string' && item.uid) entry.uid = item.uid;
+    out.push(entry);
+  }
+  return out;
 }
 
 function parsePulseRuntime(value: unknown): PulseRuntime | undefined {

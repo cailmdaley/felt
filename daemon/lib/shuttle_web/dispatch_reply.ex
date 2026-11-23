@@ -204,6 +204,14 @@ defmodule ShuttleWeb.DispatchReply do
     }
   end
 
+  defp ineligible_detail({:unreadable, path, error}) do
+    %{
+      detail: "unreadable",
+      message:
+        "#{describe_host(path)} no longer parses (#{error}); fix its frontmatter before dispatching."
+    }
+  end
+
   defp ineligible_detail(:disabled),
     do: %{detail: "disabled", message: "Draft — set status: active to allow dispatch."}
 

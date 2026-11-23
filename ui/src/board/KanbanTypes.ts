@@ -262,6 +262,11 @@ export interface KanbanCard {
    */
   mirroredOrigins?: string[]
   /**
+   * Parse error when the fiber file on disk no longer parses; the card keeps
+   * its last-known metadata so its channel and threads stay intact.
+   */
+  unreadable?: string
+  /**
    * Set when the owning daemon is unreachable: its runtime fields are frozen
    * at the last poll (`since`), so they say nothing about the worker now.
    * `turnOf` reads such a worker's turn as unknown.
@@ -316,12 +321,22 @@ export function hasWorkerToStop(
  *   • 'stale'   — agent disconnected or the document fetch failed; cards may
  *     be last-known-good until the feed recovers.
  */
+/** A fiber file on a host that failed to parse on the latest listing. */
+export interface UnreadableFiber {
+  id?: string
+  uid?: string
+  path: string
+  error: string
+}
+
 export interface KanbanOriginStaleness {
   status: 'fresh' | 'stale'
   /** Hostname for human-readable badging (e.g. "waiting on cluster-a"). */
   hostname?: string
   /** ISO timestamp; only set when status === 'stale'. */
   staleSince?: string
+  /** Unreadable fiber files currently reported by this host, when any. */
+  unreadable?: UnreadableFiber[]
 }
 
 export interface KanbanResponse {

@@ -52,6 +52,35 @@
   line-height: var(--leading-initial);
 }
 .kbn-desk-sections { display: contents; }
+.kbn-desk-health {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--kbn-you) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kbn-you) 45%, transparent);
+  border-radius: 2px;
+  color: color-mix(in srgb, var(--kbn-you) 88%, var(--kbn-ink));
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+}
+.kbn-unreadable-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.kbn-unreadable-host { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; }
+.kbn-unreadable-path { font-family: var(--font-mono); }
+.kbn-family-unreadable {
+  border-left: 2px solid var(--kbn-you);
+  padding-left: 4px;
+  background: color-mix(in srgb, var(--kbn-you) 6%, transparent);
+}
+.kbn-unreadable-badge {
+  font: var(--type-meta)/var(--leading-tight) var(--font-mono);
+  color: var(--kbn-you);
+  border: 1px solid color-mix(in srgb, var(--kbn-you) 45%, transparent);
+  border-radius: 2px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+.thread-row-unreadable {
+  border-left: 2px solid var(--kbn-you);
+  padding-left: 4px;
+}
 .kbn-desk-head { display: none; align-items: center; justify-content: flex-end; gap: 8px; min-height: 28px; }
 .kbn-desk-head > .kbn-folio { flex: 1 1 auto; min-width: 0; }
 .kbn-col-list { gap: 6px; padding: 6px; }
@@ -63,6 +92,7 @@
 .kbn-family + .kbn-family { padding-top: 5px; border-top: 1px solid var(--kbn-rule); }
 .kbn-family:hover { background: color-mix(in srgb, var(--kbn-paper-bright) 70%, transparent); }
 .kbn-family-head { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; column-gap: 6px; min-height: var(--kbn-desk-row); }
+.kbn-family-unreadable > .kbn-family-head { grid-template-columns: 14px minmax(0, 1fr) auto auto; }
 .kbn-family-head > .constitution-state-dot { width: 14px; height: var(--kbn-desk-row); }
 .kbn-family-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--kbn-ink); }
 .kbn-family[data-attention='quiet'] .kbn-family-name { font-weight: 400; color: var(--kbn-ink-soft); }

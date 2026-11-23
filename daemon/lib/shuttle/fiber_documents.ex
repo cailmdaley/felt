@@ -162,8 +162,8 @@ defmodule Shuttle.FiberDocuments do
   Every served row carries its `column` and `turn` (`Shuttle.Lifecycle.stamp/2`),
   read against whatever runtime the caller stamped on it.
   """
-  @spec envelope([String.t()], [entry()], map() | nil) :: map()
-  def envelope(stores, entries, cache \\ nil) do
+  @spec envelope([String.t()], [entry()], map() | nil, [map()] | nil) :: map()
+  def envelope(stores, entries, cache \\ nil, unreadable \\ nil) do
     now = DateTime.utc_now()
 
     base = %{
@@ -173,7 +173,8 @@ defmodule Shuttle.FiberDocuments do
       fibers: Shuttle.Lifecycle.stamp(entries, now)
     }
 
-    if cache, do: Map.put(base, :cache, cache), else: base
+    base = if cache, do: Map.put(base, :cache, cache), else: base
+    if is_list(unreadable), do: Map.put(base, :unreadable, unreadable), else: base
   end
 
   @doc """

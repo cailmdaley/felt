@@ -22,7 +22,7 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  @expected_level 54
+  @expected_level 55
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -84,7 +84,8 @@ defmodule Shuttle.Contract do
     53 =>
       "resolved agent records carry their harness's facts (ls/show resolved.agent.harness, agents resolve)",
     54 =>
-      "ask --clear --reply-to (remote orchestrator fiber identity for cross-host answers)"
+      "ask --clear --reply-to (remote orchestrator fiber identity for cross-host answers)",
+    55 => "ls --unreadable (a fiber file the walk cannot read, listed in its place)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."
