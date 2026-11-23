@@ -1,4 +1,4 @@
-import { mediaTime } from '../civilDay.js'
+import { mediaTime } from '../../sdk/civilDay.js'
 import './mediaPoster.css'
 
 export interface MediaPoster {

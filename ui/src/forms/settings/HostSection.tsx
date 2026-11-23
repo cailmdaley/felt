@@ -29,7 +29,7 @@
 import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 
-import { ago } from '../../board/civilDay.js'
+import { ago } from '../../sdk/civilDay.js'
 import { useQuietPoll } from './live'
 
 import {

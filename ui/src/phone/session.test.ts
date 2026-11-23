@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MicHandlers } from './mic'
-import { clockSeconds } from '../board/civilDay.js'
+import { clockSeconds } from '../sdk/civilDay.js'
 import { type AudioHealth, type LinkState } from './phoneState'
 import { AudioSession, type LockLike, type MicLike, type RelayEvents, type RelayLike } from './session'
 

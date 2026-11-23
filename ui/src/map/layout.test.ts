@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localHour, zone } from '../board/civilDay.js'
+import { localHour, zone } from '../sdk/civilDay.js'
 import {
   BIOME_IDS,
   biomeOf,

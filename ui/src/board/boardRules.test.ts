@@ -19,7 +19,7 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { boardFrom, type FeedOf, type FeedRow } from './testFixtures.js'
 import { isSleepingOnSchedule } from './KanbanReadModel.js'
 import { sessionWindow, stripFacts } from './workspace/Dock.js'
-import { civilDayAt, isoDayLocal, shiftCivilDay } from './civilDay.js'
+import { civilDayAt, isoDayLocal, shiftCivilDay } from '../sdk/civilDay.js'
 
 const NOW = Date.parse('2026-08-08T15:30:00Z')
 const DAY = 86_400_000

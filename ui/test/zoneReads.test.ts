@@ -15,7 +15,7 @@ import { expect, it } from 'vitest'
 const SRC = resolve('src')
 
 /** The one module allowed to read local time. */
-const OWNER = 'board/civilDay.ts'
+const OWNER = 'sdk/civilDay.ts'
 
 /** `Date` methods that read or write the local zone's wall clock. A bare
  *  `toString` is too common a name to flag on its own; it is caught on a

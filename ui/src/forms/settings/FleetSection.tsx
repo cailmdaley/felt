@@ -41,7 +41,7 @@ import { useEffect, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
 import { useSettingsDraft } from './SettingsDraftContext'
-import { ago as agoMs } from '../../board/civilDay.js'
+import { ago as agoMs } from '../../sdk/civilDay.js'
 import { useQuietPoll } from './live'
 import {
   loadFleet,

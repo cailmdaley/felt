@@ -1,6 +1,6 @@
 import type { DocKey, WorkspaceDocument } from './documents.js'
 import { fileBytesUrl } from '../utils.js'
-import { mediaTime } from '../civilDay.js'
+import { mediaTime } from '../../sdk/civilDay.js'
 import { loadDuration, loadWaveform } from './audioWaveform.js'
 import './audio.css'
 

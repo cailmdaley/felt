@@ -194,17 +194,18 @@ export function ago(ms: number, now = Date.now(), options: { seconds?: boolean }
 }
 
 /**
- * How long ago an instant was, in the elements' one grammar
- * (elements/time.ts): `now` under a minute, then `12m ago`, `5h ago` under a
- * day, then `3d ago`. A future instant reads `now`; an unknown one, nothing.
+ * How long ago an instant was, in the elements' one grammar: `now` under a
+ * minute, then `12m ago`, `5h ago` under a day, then `3d ago`; `short` drops
+ * the "ago" where a column of them reads as ages already (`12m`, `5h`, `3d`).
+ * A future instant reads `now`; an unknown one, nothing. Pure arithmetic: no
+ * zone is read.
  */
-export function relativeAge(ms: number, now: number): string {
+export function relativeAge(ms: number, now: number, options: { short?: boolean } = {}): string {
   if (!Number.isFinite(ms) || ms <= 0) return ''
   const span = Math.max(0, now - ms)
   if (span < 60_000) return 'now'
-  if (span < HOUR_MS) return `${Math.floor(span / 60_000)}m ago`
-  if (span < DAY_MS) return `${Math.floor(span / HOUR_MS)}h ago`
-  return `${Math.floor(span / DAY_MS)}d ago`
+  const unit = span < HOUR_MS ? `${Math.floor(span / 60_000)}m` : span < DAY_MS ? `${Math.floor(span / HOUR_MS)}h` : `${Math.floor(span / DAY_MS)}d`
+  return options.short ? unit : `${unit} ago`
 }
 
 /** An instant's wall clock in a zone, as a Date read with its UTC getters. */

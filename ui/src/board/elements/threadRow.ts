@@ -1,6 +1,6 @@
 import { attentionOf, lastActive, quietWord, wantOf, type Waits } from '../attention.js'
 import { officeOf } from '../channels.js'
-import { instantMs } from '../civilDay.js'
+import { instantMs } from '../../sdk/civilDay.js'
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { stateDot, stateMark } from '../stateDot.js'
 import { TURN_WORD, turnOf } from '../turn.js'

@@ -1,6 +1,6 @@
 import { bindAvoidKeyboard } from '@ui-sdk/core'
 import { clearLineKey, clearedLines, composeStream, fiberOf, lineIds, runningIn, type Channel, type Item } from '../board/channels.js'
-import { clockTime } from '../board/civilDay.js'
+import { clockTime } from '../sdk/civilDay.js'
 import { attachConversationPicker } from '../board/conversationMenu.js'
 import { conversationDestinations, conversationDevice, conversationOpening, CONVERSATION_OPENING_CHANGED, linkDestination, openDestination, resolveDestination, type ConversationDestination, type WorkerOpener } from '../board/conversationOpening.js'
 import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'

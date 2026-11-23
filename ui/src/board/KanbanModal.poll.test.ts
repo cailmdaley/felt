@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
-import { civilDayAt, isoDayLocal } from './civilDay.js'
+import { civilDayAt, isoDayLocal } from '../sdk/civilDay.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import type { KanbanResponse } from './KanbanTypes.js'

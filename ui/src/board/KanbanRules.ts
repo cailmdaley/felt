@@ -1,5 +1,5 @@
 import type { Fiber } from './KanbanFiber.js';
-import { dueCivilDay, isoDayLocal } from './civilDay.js';
+import { dueCivilDay, isoDayLocal } from '../sdk/civilDay.js';
 
 // The board's rules over time: cycles and the planning horizon. Where a card
 // stands on its lifecycle is its owning daemon's to say (`column` on its feed

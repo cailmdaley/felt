@@ -4,7 +4,7 @@
  * and the family map all draw from this one store; none reads the feed itself.
  */
 import { latestSends, normalizeSentFiles, type SentFile } from './sentFiles.js'
-import { DAY_MS } from './civilDay.js'
+import { DAY_MS } from '../sdk/civilDay.js'
 import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
 import { readComposite, windowStart } from './daemonApi.js'
 import { ThrottledRead } from './throttledRead.js'

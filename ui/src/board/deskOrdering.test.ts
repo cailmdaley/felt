@@ -11,7 +11,7 @@ import {
 import { deskOrder } from './deskOrdering.js'
 import { ThreadIndex } from './threads.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { dueCivilDay, instantMs } from './civilDay.js'
+import { dueCivilDay, instantMs } from '../sdk/civilDay.js'
 import { boardFrom, card, served, type FeedOf, type FeedRow } from './testFixtures.js'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')

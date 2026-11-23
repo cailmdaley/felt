@@ -22,7 +22,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
 import { Dock } from './workspace/Dock.js'
-import { dueCivilDay, isoDayLocal } from './civilDay.js'
+import { dueCivilDay, isoDayLocal } from '../sdk/civilDay.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { card as baseCard, response } from './testFixtures.js'
 

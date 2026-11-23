@@ -1,5 +1,5 @@
 import '@ui-sdk/web/segmented-control'
-import { dueCivilDay } from '../board/civilDay.js'
+import { dueCivilDay } from '../sdk/civilDay.js'
 import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'
 import type { KanbanCard, ShuttleKind } from '../board/KanbanTypes.js'
 import { headerIcon } from '../board/workspace/headerIcon.js'

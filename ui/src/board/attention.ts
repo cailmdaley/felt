@@ -1,5 +1,5 @@
 import type { Wait } from './boardFeed.js'
-import { dueCivilDay, formatCivilDay, formatInstant, instantMs } from './civilDay.js'
+import { dueCivilDay, formatCivilDay, formatInstant, instantMs } from '../sdk/civilDay.js'
 import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
 import { threadState } from './threads.js'
 import { turnOf } from './turn.js'

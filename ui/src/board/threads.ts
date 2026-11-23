@@ -1,5 +1,5 @@
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { ascByKey, instantMs } from './civilDay.js'
+import { ascByKey, instantMs } from '../sdk/civilDay.js'
 
 export type ThreadState = 'in-flight' | 'to-review' | 'with-orchestrator' | 'drafts' | 'roles' | 'resting' | 'archived'
 

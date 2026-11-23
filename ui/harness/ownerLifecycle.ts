@@ -9,7 +9,7 @@
  * Nothing in the board itself imports this: the board renders what its owner
  * serves.
  */
-import { isoDayLocal } from '../src/board/civilDay.js'
+import { isoDayLocal } from '../src/sdk/civilDay.js'
 
 type Row = Record<string, unknown>
 const record = (value: unknown): Row | undefined =>

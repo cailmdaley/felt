@@ -16,7 +16,7 @@
  * host's answers swapped in as they arrive. A host the composite reports stale
  * is not asked.
  */
-import { clockTime, formatInstant, instantStamp, hostZone, isoDayLocal, type Zone } from './civilDay.js'
+import { clockTime, formatInstant, instantStamp, hostZone, isoDayLocal, type Zone } from '../sdk/civilDay.js'
 import { conversationDestinations, resolveDestination, CONVERSATION_OPENING_CHANGED, type ConversationOpening, type WorkerOpener } from './conversationOpening.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 import { daemonErrorMessage, daemonFetch, getDaemonJson, isDaemonBooting, postDaemonJson, readComposite } from './daemonApi.js'

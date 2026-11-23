@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { restPopover } from './RestPopover.js'
-import { isoDayLocal } from './civilDay.js'
-import { shiftCivilDay } from './civilDay.js'
+import { isoDayLocal } from '../sdk/civilDay.js'
+import { shiftCivilDay } from '../sdk/civilDay.js'
 import { card, settle } from './testFixtures.js'
 
 let close: (() => void) | undefined

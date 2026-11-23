@@ -14,7 +14,7 @@
 
 import './FileViewerPanel.css'
 import './prose.css'
-import { mediaTime } from './civilDay.js'
+import { mediaTime } from '../sdk/civilDay.js'
 import { thumbnailPreviews } from './workspace/thumbnailPreview.js'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'

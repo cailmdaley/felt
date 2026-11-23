@@ -1,4 +1,4 @@
-import { clockTime } from '../civilDay.js'
+import { clockTime } from '../../sdk/civilDay.js'
 import { getDaemonJson } from '../daemonApi.js'
 
 /** A session's latest usage, from `GET /api/v1/transcript/usage`. Times are epoch milliseconds. */

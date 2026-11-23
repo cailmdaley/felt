@@ -1,7 +1,7 @@
 import '@ui-sdk/web/dialog'
 import type { KanbanCard } from './KanbanTypes.js'
 import { onScrimPress } from './dismissGesture.js'
-import { civilWeekday, daysBetween, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
+import { civilWeekday, daysBetween, formatCivilDay, isoDayLocal, shiftCivilDay } from '../sdk/civilDay.js'
 
 /**
  * "Rest until": a centered dialog with a month grid and a vim-shaped cursor.

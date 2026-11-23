@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { age, ago, clockTime, zone } from './civilDay.js'
+import { age, ago, clockTime, zone } from '../sdk/civilDay.js'
 
 describe('board clocks', () => {
   it('formats wall time in the requested zone', () => {

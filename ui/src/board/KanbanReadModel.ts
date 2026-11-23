@@ -30,7 +30,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js';
 import { hasLiveWorker } from './KanbanTypes.js';
-import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
+import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from '../sdk/civilDay.js';
 import { adoptThreadIndex, ThreadIndex, threadKey } from './threads.js';
 
 export interface BuildKanbanResponseOptions {

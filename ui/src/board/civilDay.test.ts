@@ -11,7 +11,7 @@ import {
   shiftCivilDay,
   wallClock,
   zone,
-} from './civilDay.js';
+} from '../sdk/civilDay.js';
 import { effectiveHorizon } from './KanbanRules.js';
 import { formatDue } from './KanbanSurfaces.js';
 import {

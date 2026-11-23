@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error Node types are excluded from the browser UI's tsconfig.
 import { readFileSync } from 'node:fs'
-import { instantStamp } from '../civilDay.js'
+import { instantStamp } from '../../sdk/civilDay.js'
 import { relative, retime, timeEl } from './time.js'
 
 const now = 1_800_000_000_000, minute = 60_000, hour = 60 * minute, day = 24 * hour

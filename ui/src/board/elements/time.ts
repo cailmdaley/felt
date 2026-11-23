@@ -1,11 +1,11 @@
-import { instantStamp, relativeAge } from '../civilDay.js'
+import { instantStamp, relativeAge } from '../../sdk/civilDay.js'
 import './time.css'
 
-/** How long ago an instant was: `now`, `12m ago`, `5h ago` under a day, then `3d ago` (its arithmetic lives with every other clock, in civilDay.ts). */
-export const relative = relativeAge
+/** How long ago an instant was: `now`, `12m ago`, `5h ago` under a day, then `3d ago` (its arithmetic lives with every other clock, in sdk/civilDay.ts). */
+export const relative = (at: number, now: number): string => relativeAge(at, now)
 
 /** An age without its "ago", where a row of them reads as ages already: `now`, `24m`, `4h`, `4d`. */
-export const brief = (at: number, now: number): string => relative(at, now).replace(/ ago$/, '')
+export const brief = (at: number, now: number): string => relativeAge(at, now, { short: true })
 
 /** A time as every element draws one: relative (`short`, without its "ago"), mono and muted, the instant in full on hover. */
 export function timeEl(at: number, now: number, className = '', short = false): HTMLElement {

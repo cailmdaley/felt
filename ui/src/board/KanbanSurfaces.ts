@@ -1,7 +1,7 @@
 import '@ui-sdk/web/tabs'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { clearable, quietWord, type Waits } from './attention.js'
-import { dueCivilDay, formatCivilDay } from './civilDay.js'
+import { dueCivilDay, formatCivilDay } from '../sdk/civilDay.js'
 import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
 import type { KanbanCard, KanbanOriginStaleness } from './KanbanTypes.js'

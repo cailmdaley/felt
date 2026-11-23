@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { alreadyRunningMessage, bandFacts, Dock, stripFacts } from './Dock.js'
 import { consoleActs, offeredVerbs, pressConsoleAct, pressVerb } from './testActs.js'
-import { clockTime } from '../civilDay.js'
+import { clockTime } from '../../sdk/civilDay.js'
 import { CLAUDE_OPENING_KEY } from '../conversationOpening.js'
 import { card, settle } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'

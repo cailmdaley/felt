@@ -4,7 +4,7 @@
  * so late audio would count twice.
  */
 
-import { clockSeconds } from '../board/civilDay.js'
+import { clockSeconds } from '../sdk/civilDay.js'
 
 /** The relay socket's state. */
 export type LinkState =

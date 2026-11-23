@@ -32,7 +32,8 @@ felt/
 ├── bin/                     tracked operator and deploy helpers
 │   └── rel/                 built daemon release (gitignored)
 ├── ui/                      TypeScript board; npm run build produces ui/dist
-│   ├── src/board/views/     temporal and artifact views
+│   ├── src/sdk/             the Shuttle primitives, served as /sdk/shuttle-sdk.js
+│   ├── src/board/views/     the board's registered views (BoardViewPlugin)
 │   ├── src/pages/           the pages: one view per address (/thread), no workspace
 │   ├── src/phone/           browser microphone, PCM worklet, relay, and audio session
 │   ├── harness/             offline visual-verification harnesses
@@ -93,7 +94,7 @@ bash scripts/test-bootstrap.sh     # bootstrap.sh's login PATH and fail-fast che
 TZ=America/Los_Angeles, a negative-offset DST zone, so view code that defaults
 to the host zone renders deterministically and away from UTC. Zone coverage
 does not come from the pin: every zone-dependent computation lives in
-`ui/src/board/civilDay.ts` and takes its zone as a parameter,
+`ui/src/sdk/civilDay.ts` and takes its zone as a parameter,
 `civilDay.properties.test.ts` checks its laws across the IANA zone database,
 and `ui/test/zoneReads.test.ts` fails on a local-zone `Date` read anywhere
 else.

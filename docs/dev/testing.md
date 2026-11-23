@@ -150,7 +150,7 @@ value. This is what lets the suites run concurrently:
 |---|---|---|---|
 | env, app env, `PATH` | `Shuttle.Test.Env` (`daemon/test/support/env.ex`); lib reads only through `Shuttle.Env` | the injected `sysenv.Env`; tests build one with `sysenvtest` | n/a |
 | named singletons | `Shuttle.Test.Env.start_scoped!/server!`; lib reaches them through `Shuttle.Env.server/1` | per-invocation app value; no package-level seams | inject the instance at the owning controller |
-| time zone | n/a | n/a | the `Zone` parameter in `ui/src/board/civilDay.ts` |
+| time zone | n/a | n/a | the `Zone` parameter in `ui/src/sdk/civilDay.ts` |
 | the clock | pass `now` | pass `now` | pass `now` or a clock; fake timers only in `stateful` tests |
 
 Guards hold these seams. In the daemon, `env_guard_test.exs` fails on a
@@ -248,7 +248,7 @@ and add your test to its file.
 
 **Board** (`ui/`):
 
-- **Civil days and instants:** `src/board/civilDay.test.ts`, `civilDay.properties.test.ts`, `test/zoneReads.test.ts`.
+- **Civil days and instants:** `src/board/civilDay.test.ts`, `src/sdk/civilDay.properties.test.ts`, `test/zoneReads.test.ts`.
 - **Desk classification and ordering:** `boardRules.test.ts`, `KanbanComposite.test.ts`, `deskBands.integration.test.ts`, `deskOrdering.test.ts`, `moveDestinations.test.ts`.
 - **Desk input:** `keymap.test.ts`, `deskKeyboard.integration.test.ts`, `longPress`, `dismissGesture`, `mobile`.
 - **Dispatch actions:** `boardWire.test.ts`, `daemonApi`, `startPrompt`, `KanbanModal.verdict`.

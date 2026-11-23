@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { localHour } from '../board/civilDay.js'
+import { localHour } from '../sdk/civilDay.js'
 import { daemonErrorMessage, daemonFetch, isDaemonBooting, responseError } from '../board/daemonApi.js'
 import {
   buildCitadel,

@@ -31,7 +31,7 @@
  * A bare count ("3", "12 steps" as a tally) is mono meta; a number inside a
  * phrase ("2 working") reads in the phrase's family.
  *
- * Times are formatted only by board/civilDay.ts: a clock time is 24h HH:MM, a
+ * Times are formatted only by sdk/civilDay.ts: a clock time is 24h HH:MM, a
  * relative one "4m ago"; both are set as mono meta.
  *
  * Case and tracking. Text is set in the case it was written; text-transform is

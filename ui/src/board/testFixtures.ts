@@ -14,7 +14,7 @@ import { ownerRow, type LifeState } from '../../harness/lifecycleModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { cardFromCompositeEntry } from './KanbanReadModel.js'
 import { buildKanbanResponseFromComposite, surfaceTotals, type BuildKanbanResponseOptions } from './KanbanReadModel.js'
-import { civilDayAt, hostZone } from './civilDay.js'
+import { civilDayAt, hostZone } from '../sdk/civilDay.js'
 import type { VoiceStatus } from './voice.js'
 import type { Conversations } from './conversationOpening.js'
 

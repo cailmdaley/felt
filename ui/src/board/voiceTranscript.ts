@@ -1,4 +1,4 @@
-import { clockSeconds } from './civilDay.js'
+import { clockSeconds } from '../sdk/civilDay.js'
 import { getDaemonJson } from './daemonApi.js'
 import type { FiberSlug } from './workspace/voiceStrip.js'
 import './voiceTranscript.css'

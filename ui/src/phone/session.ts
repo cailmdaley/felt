@@ -9,7 +9,7 @@
  */
 
 import type { MicHandlers } from './mic'
-import { clockSeconds } from '../board/civilDay.js'
+import { clockSeconds } from '../sdk/civilDay.js'
 import { TERMINAL_LINKS, type AudioHealth, type LinkState } from './phoneState'
 
 export interface MicLike {
