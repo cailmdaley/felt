@@ -311,9 +311,13 @@ export class Unfold {
   unfold(key: DocKey, focus = true): void {
     const file = this.files.find(each => each.key === key), parsed = parseDocKey(key)
     if (!file || !parsed) return
+    const kind = documentKind(parsed.path)
+    if (focus && kind === 'change' && this.opts.full) {
+      this.opts.full(key)
+      return
+    }
     if (this.open?.key === key) return
     this.drop()
-    const kind = documentKind(parsed.path)
     const viewer = buildFileViewer(this.opts.shuttleBase, parsed.path, parsed.owner, undefined, undefined, {
       kind: kind === 'fiber' ? undefined : kind, fit: true, active: true,
       onNavigate: href => this.opts.link?.(key, href),

@@ -5,18 +5,21 @@ import { attachConversationPicker } from '../board/conversationMenu.js'
 import { conversationDestinations, conversationDevice, conversationOpening, linkDestination, openDestination, resolveDestination, type ConversationDestination, type WorkerOpener } from '../board/conversationOpening.js'
 import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'
 import type { MapFile } from '../board/family/model.js'
-import { isAgentCard } from '../board/KanbanModalShared.js'
+import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../board/FileViewerPanel.js'
+import { HumanMessageIds, repeatNotice } from '../board/humanMessageId.js'
+import { dispatchFailureMessage, isAgentCard, postForceDispatch, type DispatchFailureBody } from '../board/KanbanModalShared.js'
 import { hasLiveWorker, type KanbanCard } from '../board/KanbanTypes.js'
 import { lastSaid } from '../board/said.js'
 import { attachConversation, workerOpener } from '../board/sessionHistory.js'
 import { slug } from '../board/threadOutline.js'
-import { fileBytesUrl } from '../board/utils.js'
+import { basename, fileBytesUrl } from '../board/utils.js'
 import { ChannelStream, withdraws } from '../board/views/ChannelStream.js'
 import { Voice } from '../board/voice.js'
 import { createWorkerStarter } from '../board/workerStart.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
+import { changeReviewTarget } from '../board/workspace/changeReviewTarget.js'
 import { markSeen, unseenSince } from '../board/workspace/DocumentSeen.js'
-import { docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
+import { changeKey, docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
 import type { FiberActs } from '../board/workspace/Dock.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
 import { headerIcon } from '../board/workspace/headerIcon.js'
@@ -38,7 +41,7 @@ export interface ThreadPageOptions {
   navigate(href: string): void
 }
 
-export type ThreadMode = 'posts' | 'files'
+export type ThreadMode = 'posts' | 'files' | 'changes'
 
 /** How long the page must be untouched before a new `show` file auto-advances. */
 export const AUTO_ADVANCE_IDLE_MS = 60_000
@@ -51,6 +54,15 @@ const INTERACTION_EVENTS = ['pointerdown', 'keydown', 'wheel', 'scroll'] as cons
 const owned = (card: KanbanCard): { uid: string; host: string } => ({ uid: card.uid ?? card.id, host: card.originId })
 
 const archived = (card: KanbanCard): boolean => card.column === 'tempered' || card.column === 'composted'
+
+const isChangeFile = (path: string): boolean => /\.change\.json$/i.test(path)
+
+const canBakeChanges = (card: KanbanCard): boolean => Boolean(card.shuttleProjectDir || card.shuttleChangePRs?.length)
+
+const fiberPath = (card: KanbanCard): string => {
+  if (card.fiberDir) return `${card.fiberDir}/${card.path.endsWith('.md') ? card.path.split('/').at(-1) : `${card.id.split('/').at(-1)}.md`}`
+  return card.path.startsWith('/') ? card.path : `${card.feltStore ?? ''}/${card.path}`
+}
 
 /** Opens a file in a 3/4-screen floating window (RexWeb Popup on Mac, normal window/tab in browsers). */
 const openFloating = (url: string): void => {
@@ -81,7 +93,13 @@ export class ThreadPage {
   private readonly modes = document.createElement('div')
   private readonly postsBtn = document.createElement('button')
   private readonly filesBtn = document.createElement('button')
+  private readonly changesBtn = document.createElement('button')
   private readonly postsPane = document.createElement('section')
+  private readonly changesPane = document.createElement('section')
+  private readonly changesBar = document.createElement('div')
+  private readonly changesBack = document.createElement('button')
+  private readonly changesName = document.createElement('span')
+  private readonly changesSlot = document.createElement('div')
   private readonly stream: ChannelStream
   private readonly dockBand = document.createElement('div')
   private readonly dock = document.createElement('div')
@@ -97,6 +115,7 @@ export class ThreadPage {
   private readonly unsubscribe: () => void
   private readonly startWorker: StartWorker
   private readonly openWorker: WorkerOpener
+  private readonly reviewMessageIds = new HumanMessageIds()
   private workerActions: WorkerActions | null = null
   private voice: Voice | null = null
   private listen: ListenControl | null = null
@@ -106,6 +125,9 @@ export class ThreadPage {
   private unbindKeyboard: (() => void) | null = null
   private mode: ThreadMode = 'files'
   private modeCardUid: string | null = null
+  private selectedChangeFile: { path: string; owner: string } | null = null
+  private changesViewer: HTMLElement | null = null
+  private changesKey: string | null = null
   private usage: TranscriptUsage | null = null
   private usageSession: string | undefined
   private usageReadAt = -Infinity
@@ -152,17 +174,41 @@ export class ThreadPage {
     this.filesBtn.setAttribute('role', 'tab')
     this.filesBtn.textContent = 'Tapestry / Files'
     this.filesBtn.addEventListener('click', () => this.setMode('files'))
-    this.modes.append(this.postsBtn, this.filesBtn)
+    this.changesBtn.type = 'button'
+    this.changesBtn.className = 'pg-mode-pill'
+    this.changesBtn.dataset.mode = 'changes'
+    this.changesBtn.setAttribute('role', 'tab')
+    this.changesBtn.textContent = 'Changes'
+    this.changesBtn.addEventListener('click', () => this.openChangesTab())
+    this.modes.append(this.postsBtn, this.filesBtn, this.changesBtn)
 
     this.postsPane.className = 'pg-posts'
     this.postsPane.hidden = true
+    this.changesPane.className = 'pg-changes'
+    this.changesPane.hidden = true
+    this.changesBar.className = 'pg-changes-bar'
+    this.changesBar.hidden = true
+    this.changesBack.type = 'button'
+    this.changesBack.className = 'pg-changes-back'
+    this.changesBack.addEventListener('click', () => {
+      const card = this.feed.card()
+      this.selectedChangeFile = null
+      if (!card || !canBakeChanges(card)) this.mode = 'files'
+      this.render()
+    })
+    this.changesName.className = 'pg-changes-name'
+    this.changesBar.append(this.changesBack, this.changesName)
+    this.changesSlot.className = 'pg-changes-slot'
+    this.changesPane.append(this.changesBar, this.changesSlot)
     this.stream = new ChannelStream({
       shuttleBase: opts.base,
       awake: () => !this.postsPane.hidden,
       openCard: card => this.goTo(owned(card), slug(card)),
       openFile: (_from, _card, key) => {
         const file = parseDocKey(key)
-        if (file) openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
+        if (!file) return
+        if (isChangeFile(file.path)) { this.openChangeFile(file); return }
+        openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
       },
       lead: card => this.leads.of(card),
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
@@ -200,7 +246,7 @@ export class ThreadPage {
     this.family.pulls = false
     this.family.unfoldLead = true
     this.family.pinLead = true
-    this.el.append(this.status, this.modes, this.postsPane, this.family.el, this.dockBand, this.said)
+    this.el.append(this.status, this.modes, this.postsPane, this.family.el, this.changesPane, this.dockBand, this.said)
     for (const event of INTERACTION_EVENTS) document.addEventListener(event, this.onInteract, { capture: true, passive: true })
     this.unsubscribe = feed.subscribe(() => this.render())
     this.render()
@@ -215,26 +261,42 @@ export class ThreadPage {
       const hasPostsMode = !archived(card) && isRoot
       if (this.modeCardUid !== uid) {
         this.modeCardUid = uid
+        this.selectedChangeFile = null
+        this.disposeChanges()
         this.mode = hasPostsMode ? 'posts' : 'files'
         this.stream.reset()
       }
-      if (!hasPostsMode) this.mode = 'files'
+      const hasChangeFile = this.feed.sends.sends(card).some(send => isChangeFile(send.fullPath))
+      const hasChangesMode = canBakeChanges(card) || hasChangeFile || this.selectedChangeFile !== null
+      if (this.mode === 'posts' && !hasPostsMode) this.mode = 'files'
+      if (this.mode === 'changes' && !hasChangesMode) this.mode = hasPostsMode ? 'posts' : 'files'
 
-      this.modes.hidden = !hasPostsMode
+      this.postsBtn.hidden = !hasPostsMode
+      this.changesBtn.hidden = !hasChangesMode
+      this.modes.hidden = !hasPostsMode && !hasChangesMode
       this.postsBtn.setAttribute('aria-selected', String(this.mode === 'posts'))
       this.filesBtn.setAttribute('aria-selected', String(this.mode === 'files'))
+      this.changesBtn.setAttribute('aria-selected', String(this.mode === 'changes'))
       this.postsBtn.toggleAttribute('data-active', this.mode === 'posts')
       this.filesBtn.toggleAttribute('data-active', this.mode === 'files')
+      this.changesBtn.toggleAttribute('data-active', this.mode === 'changes')
 
       this.family.update(card, this.feed.index)
       document.title = card.name
       this.checkAutoAdvance(card)
 
       const showPosts = hasPostsMode && this.mode === 'posts'
+      const showChanges = hasChangesMode && this.mode === 'changes'
       this.postsPane.hidden = !showPosts
-      this.family.el.hidden = showPosts
+      this.family.el.hidden = showPosts || showChanges
+      this.changesPane.hidden = !showChanges
       if (showPosts) {
         this.renderPosts(card)
+      }
+      if (showChanges) {
+        this.renderChanges(card)
+      } else {
+        suspendFileViewer(this.changesViewer)
       }
 
       const showDock = isAgentCard(card)
@@ -248,6 +310,8 @@ export class ThreadPage {
       this.modes.hidden = true
       this.postsPane.hidden = true
       this.family.el.hidden = true
+      this.changesPane.hidden = true
+      this.disposeChanges()
       this.dockBand.hidden = true
       this.el.removeAttribute('data-dock')
       this.status.textContent = this.feed.failure ?? (this.feed.loaded ? 'This thread is not on the board.' : 'Reading the board…')
@@ -260,6 +324,7 @@ export class ThreadPage {
     clearInterval(this.usageTimer)
     for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
     this.unsubscribe()
+    this.disposeChanges()
     this.stream.dispose()
     this.listen?.dispose()
     this.voiceUnsub?.()
@@ -274,6 +339,130 @@ export class ThreadPage {
     if (this.mode === mode) return
     this.mode = mode
     this.render()
+  }
+
+  private openChangesTab(): void {
+    const card = this.feed.card()
+    if (this.selectedChangeFile && card && canBakeChanges(card)) {
+      this.selectedChangeFile = null
+      this.mode = 'changes'
+      this.render()
+      return
+    }
+    this.setMode('changes')
+  }
+
+  private openChangeFile(file: { path: string; owner: string }): void {
+    this.selectedChangeFile = { path: file.path, owner: file.owner }
+    this.mode = 'changes'
+    this.render()
+  }
+
+  private renderChanges(card: KanbanCard): void {
+    const bakeable = canBakeChanges(card)
+    const sentChange = !this.selectedChangeFile && !bakeable
+      ? this.feed.sends.sends(card).find(send => isChangeFile(send.fullPath))
+      : undefined
+    const targetFile = this.selectedChangeFile ?? (sentChange ? parseDocKey(sentChange.key) : null)
+
+    if (this.selectedChangeFile) {
+      this.changesBar.hidden = false
+      this.changesBack.textContent = bakeable ? '← All changes' : '← Tapestry / Files'
+      this.changesName.textContent = basename(this.selectedChangeFile.path)
+      this.changesName.title = this.selectedChangeFile.path
+    } else {
+      this.changesBar.hidden = true
+    }
+
+    const resolveReviewCard = (): KanbanCard | undefined => {
+      if (targetFile) {
+        const matched = changeReviewTarget(targetFile, this.feed.cards)
+        if (matched) return matched.card
+      }
+      return this.feed.card()
+    }
+    const reviewOpts = {
+      canReview: () => {
+        const target = resolveReviewCard()
+        return !!target && hasLiveWorker(target)
+      },
+      reviewTarget: () => {
+        const target = resolveReviewCard()
+        return target ? `${target.id} on ${target.originId}` : 'this fiber'
+      },
+      onReview: async (message: string) => {
+        const target = resolveReviewCard()
+        if (!target) throw new Error('The fiber holding this bundle is no longer available. Your draft is saved.')
+        await this.sendReview(target, message)
+      },
+    }
+
+    if (targetFile) {
+      const key = `file:${targetFile.owner}:${targetFile.path}`
+      if (this.changesKey === key && this.changesViewer) {
+        resumeFileViewer(this.changesViewer)
+        return
+      }
+      this.disposeChanges()
+      this.changesKey = key
+      this.changesViewer = buildFileViewer(this.opts.base, targetFile.path, targetFile.owner, undefined, undefined, {
+        kind: 'change',
+        active: true,
+        ...reviewOpts,
+      })
+      this.changesSlot.replaceChildren(this.changesViewer)
+      return
+    }
+
+    if (!bakeable) {
+      this.disposeChanges()
+      return
+    }
+    const uid = card.uid ?? card.id
+    const prs = card.shuttleChangePRs ?? []
+    const key = `bake:${card.originId}:${uid}:${prs.join(',')}`
+    if (this.changesKey === key && this.changesViewer) {
+      resumeFileViewer(this.changesViewer)
+      return
+    }
+    this.disposeChanges()
+    this.changesKey = key
+    this.changesViewer = buildFileViewer(this.opts.base, fiberPath(card), card.originId, undefined, undefined, {
+      bake: { uid, prs },
+      active: true,
+      ...reviewOpts,
+    })
+    this.changesSlot.replaceChildren(this.changesViewer)
+  }
+
+  private disposeChanges(): void {
+    disposeFileViewer(this.changesViewer)
+    this.changesViewer = null
+    this.changesKey = null
+    this.changesSlot.replaceChildren()
+  }
+
+  private async sendReview(card: KanbanCard, message: string): Promise<void> {
+    if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one before sending a review.')
+    let res: Response
+    try {
+      res = await postForceDispatch(this.opts.base, card, {
+        user_message: message,
+        message_id: this.reviewMessageIds.for(['review', card.originId, card.id, message].join('\0')),
+        resume_mode: 'previous',
+        existing_only: true,
+      })
+    } catch (err: unknown) {
+      throw new Error(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}), so this may still arrive. Check the worker's conversation before sending again.`)
+    }
+    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { duplicate?: boolean; disposition?: string }
+    if (res.ok) {
+      this.reviewMessageIds.sent()
+      const notice = repeatNotice(body)
+      if (notice) throw new Error(notice)
+      return
+    }
+    throw new Error(res.status === 409 ? 'A worker is already running for this fiber.' : dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
   }
 
   private followUsage(card: KanbanCard): void {
@@ -476,9 +665,12 @@ export class ThreadPage {
       view: card => this.goTo(owned(card), slug(card)),
       link: (_card, source, href) => this.link(source, href),
       page: (card, doc) => this.constitution(card, doc),
-      open: (_card, doc) => {
+      open: (card, doc) => {
+        if (doc === changeKey(card.originId, card.uid ?? card.id)) { this.openChangesTab(); return }
         const file = parseDocKey(doc)
-        if (file) openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
+        if (!file) return
+        if (isChangeFile(file.path)) { this.openChangeFile(file); return }
+        openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
       },
       edits: false,
     }
@@ -574,7 +766,9 @@ export class ThreadPage {
     if (route || href.startsWith('#')) return
     const from = parseDocKey(source)
     const file = from && linkedFile(from, href, window.location.href)
-    if (file) window.open(fileBytesUrl(this.opts.base, file.path, file.owner) + file.hash, '_blank', 'noopener')
-    else if (isExternalHref(href)) window.open(href, '_blank', 'noopener')
+    if (file) {
+      if (isChangeFile(file.path)) { this.openChangeFile(file); return }
+      window.open(fileBytesUrl(this.opts.base, file.path, file.owner) + file.hash, '_blank', 'noopener')
+    } else if (isExternalHref(href)) window.open(href, '_blank', 'noopener')
   }
 }

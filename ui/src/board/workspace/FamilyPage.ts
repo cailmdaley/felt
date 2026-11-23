@@ -10,7 +10,7 @@ import { renderMarkdown } from '../utils.js'
 import type { ThreadIndex } from '../threads.js'
 import type { FiberActs } from './Dock.js'
 import { docButtons, type DocButtons, type DocFeeds } from './docButtons.js'
-import { parseDocKey, type DocKey } from './documents.js'
+import { documentKind, parseDocKey, type DocKey } from './documents.js'
 import { Unfold } from '../elements/filePreview.js'
 import { doing, threadRow } from '../elements/threadRow.js'
 import { relative, timeEl } from '../elements/time.js'
@@ -224,8 +224,10 @@ export class FamilyPage {
    * unfolded; any other page (its constitution, its edits) opens in the reader.
    */
   private show(card: KanbanCard, doc: DocKey): void {
+    const parsed = parseDocKey(doc)
+    if (parsed && documentKind(parsed.path) === 'change') { this.feeds.open(card, doc); return }
     // Its files not yet read, a file waits for them.
-    if (this.shown?.card !== (card.uid ?? card.id) && parseDocKey(doc)) { this.wanted = doc; return }
+    if (this.shown?.card !== (card.uid ?? card.id) && parsed) { this.wanted = doc; return }
     if (!this.shown?.files.has(doc)) {
       const page = this.feeds.page?.(card, doc)
       if (!page) { this.feeds.open(card, doc); return }

@@ -374,18 +374,22 @@ describe('the thread page', () => {
     expect(liveNew.resume_mode).toBe('fresh')
     expect(liveNew.user_message).toBe('Start fresh with new seed')
 
-    // Tempered and discarded threads also show the docked footer so a fresh session can be started, while staying in Tapestry / Files mode.
+    // Tempered and discarded threads also show the docked footer so a fresh session can be started, while staying in Tapestry / Files mode (Posts hidden; Changes visible when project_dir is set).
     const { page: temperedPage } = await open(`?f=thread-archive@${WORKSPACE_HOST}`)
     const temperedDock = temperedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
     expect(temperedDock.hidden).toBe(false)
     expect(temperedPage.el.hasAttribute('data-dock')).toBe(true)
-    expect(temperedPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
+    expect(temperedPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="posts"]')!.hidden).toBe(true)
+    expect(temperedPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="changes"]')!.hidden).toBe(false)
+    expect(temperedPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
 
     const { page: discardedPage } = await open(`?f=thread-discard@${WORKSPACE_HOST}`)
     const discardedDock = discardedPage.el.querySelector<HTMLElement>('[data-part="thread-dock"]')!
     expect(discardedDock.hidden).toBe(false)
     expect(discardedPage.el.hasAttribute('data-dock')).toBe(true)
-    expect(discardedPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
+    expect(discardedPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="posts"]')!.hidden).toBe(true)
+    expect(discardedPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="changes"]')!.hidden).toBe(false)
+    expect(discardedPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
 
     // Quiet thread (awaiting review, no live worker): docked footer offers Resume and New session.
     const { page: quietPage } = await open(`?f=thread-review@${WORKSPACE_HOST}&in=rex`)
@@ -552,17 +556,19 @@ describe('the thread page', () => {
     browserAnalysis.querySelector<HTMLButtonElement>('[data-item]')!.click()
     expect(browserNav).toHaveBeenCalledWith(`${window.location.origin}/thread?f=thread-analysis%40${WORKSPACE_HOST}`)
 
-    // A non-root thread (even one with sub-threads) hides the mode bar and stays on Tapestry / Files.
+    // A non-root thread with project_dir hides Posts, keeps Changes beside Tapestry / Files, and stays on Tapestry / Files.
     const { page: subPage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
-    expect(subPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
+    expect(subPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(false)
+    expect(subPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="posts"]')!.hidden).toBe(true)
+    expect(subPage.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="changes"]')!.hidden).toBe(false)
     expect(subPage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(true)
     expect(subPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
 
-    // A leaf thread (not a family root, no descendants) hides the mode bar and Posts pane.
-    const { page: leafPage } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
-    expect(leafPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
-    expect(leafPage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(true)
-    expect(leafPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
+    // A non-root thread without project_dir (and no .change.json sends) hides the mode bar and Posts pane.
+    const { page: draftPage } = await open(`?f=thread-draft@${WORKSPACE_HOST}`)
+    expect(draftPage.el.querySelector<HTMLElement>('.pg-modes')!.hidden).toBe(true)
+    expect(draftPage.el.querySelector<HTMLElement>('.pg-posts')!.hidden).toBe(true)
+    expect(draftPage.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(false)
   })
 
   it('opens thread settings popover lazily from the docked footer, fetches /api/v1/agents on click, and commits agent, effort, chrome, and due edits', async () => {
@@ -666,6 +672,175 @@ describe('the thread page', () => {
     const draftConsole = draftPage.el.querySelector<HTMLAnchorElement>('.ov-tools [data-part="console"]')!
     expect(draftConsole).not.toBeNull()
     expect(draftConsole.hidden).toBe(true)
+  })
+
+  it('mounts the baked Changes view lazily on non-root threads with projectDir, sends reviews to the live worker, and disposes cleanly', async () => {
+    vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} unobserve() {} })
+    const waitUntil = async (fn: () => boolean): Promise<void> => {
+      for (let i = 0; i < 100 && !fn(); i++) await settle()
+    }
+    const bundle = {
+      version: 2,
+      title: 'Response fit update',
+      repo: { name: 'spectra', dir: '/fixture-project', forge_url: null },
+      base: 'a'.repeat(40),
+      head: 'b'.repeat(40),
+      base_ref: 'main',
+      head_ref: 'fit-update',
+      commits: [{ sha: 'b'.repeat(40), subject: 'Update response fit' }],
+      files: [{
+        path: 'src/fit.py',
+        status: 'modified',
+        additions: 1,
+        deletions: 1,
+        role: 'implementation',
+        header: '--- a/src/fit.py\n+++ b/src/fit.py\n',
+        lines: [
+          { kind: 'deletion', old: 1, new: 0, text: 'x = 1' },
+          { kind: 'addition', old: 0, new: 1, text: 'x = 2' },
+        ],
+        hunks: [{
+          file: 'src/fit.py',
+          old_from: 1,
+          old_lines: 1,
+          new_from: 1,
+          new_lines: 1,
+          windows: [{ old_from: 1, old_lines: 1, new_from: 1, new_lines: 1, start: 0, rows: 2 }],
+        }],
+        remaining: [],
+      }],
+      story: null,
+    }
+    const bakedPath = '/cache/changes/thread-analysis/baked.change.json'
+    const baseFetch = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url === '/api/v1/fibers/thread-analysis/change' && init.method === 'POST') {
+        requests.push({ url, method: 'POST', body: init.body as string | undefined, headers: new Headers(init.headers) })
+        return new Response(JSON.stringify({ path: bakedPath }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.startsWith('/api/v1/file') && decodeURIComponent(url).includes(bakedPath)) {
+        requests.push({ url, method: init.method ?? 'GET', headers: new Headers(init.headers) })
+        return new Response(JSON.stringify(bundle), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return baseFetch(url, init)
+    }))
+
+    const { page } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+    const modes = page.el.querySelector<HTMLElement>('.pg-modes')!
+    const postsTab = page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="posts"]')!
+    const changesTab = page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="changes"]')!
+    const changesPane = page.el.querySelector<HTMLElement>('.pg-changes')!
+
+    expect(modes.hidden).toBe(false)
+    expect(postsTab.hidden).toBe(true)
+    expect(changesTab.hidden).toBe(false)
+    expect(changesPane.hidden).toBe(true)
+    // Lazy: no bake request until the user switches to Changes.
+    expect(posts().filter(each => each.url === '/api/v1/fibers/thread-analysis/change')).toHaveLength(0)
+
+    changesTab.click()
+    await waitUntil(() => changesPane.querySelector('.change-reader') !== null)
+    expect(changesTab.getAttribute('aria-selected')).toBe('true')
+    expect(changesPane.hidden).toBe(false)
+    expect(page.el.querySelector<HTMLElement>('.ws-family-page')!.hidden).toBe(true)
+    expect(posts().filter(each => each.url === '/api/v1/fibers/thread-analysis/change')).toHaveLength(1)
+    expect(changesPane.querySelector('.change-reader')).not.toBeNull()
+    expect(changesPane.querySelector('.change-heading h1')!.textContent).toBe('Response fit update')
+
+    // Submitting a review note from ChangeReader's dock dispatches to the live worker.
+    const overall = changesPane.querySelector<HTMLTextAreaElement>('.change-overall')!
+    overall.value = 'Looks clean; ship after checking edge case.'
+    overall.dispatchEvent(new Event('input', { bubbles: true }))
+    const sendReviewBtn = [...changesPane.querySelectorAll<HTMLButtonElement>('.change-send > button')][0]!
+    expect(sendReviewBtn.disabled).toBe(false)
+    sendReviewBtn.click()
+    for (let i = 0; i < 4; i++) await settle()
+    const reviewDispatch = posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!
+    expect(reviewDispatch).toBeDefined()
+    const reviewBody = JSON.parse(reviewDispatch.body!) as Record<string, unknown>
+    expect(reviewBody.resume_mode).toBe('previous')
+    expect(reviewBody.existing_only).toBe(true)
+    expect(String(reviewBody.user_message)).toContain('Looks clean; ship after checking edge case.')
+
+    page.dispose()
+    expect(changesPane.querySelector('.change-reader')).toBeNull()
+  })
+
+  it('opens a clicked .change.json sent file or tapestry link in Changes mode instead of opening raw JSON via window.open', async () => {
+    vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} unobserve() {} })
+    const waitUntil = async (fn: () => boolean): Promise<void> => {
+      for (let i = 0; i < 100 && !fn(); i++) await settle()
+    }
+    const windowOpen = vi.spyOn(window, 'open').mockReturnValue(null)
+    const makeBundle = (title: string) => JSON.stringify({
+      version: 2,
+      title,
+      repo: { name: 'spectra', dir: '/fixture-project', forge_url: null },
+      base: 'c'.repeat(40),
+      head: 'd'.repeat(40),
+      base_ref: 'main',
+      head_ref: 'pr-branch',
+      commits: [],
+      files: [],
+      story: null,
+    })
+    const sentChangePath = '/tmp/pr-42.change.json'
+    const tapestryHtml = '<!doctype html><a href="pr-7.change.json">PR 7</a>'
+    sentFiles = [
+      { fullPath: sentChangePath, basename: 'pr-42.change.json', timestamp: now - 1_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST },
+    ]
+    serveFiles = url => {
+      const decoded = decodeURIComponent(url)
+      if (decoded.includes('tapestry.html')) {
+        if (url.startsWith('/api/v1/file-info')) return new Response(JSON.stringify({ exists: true, size: tapestryHtml.length, modified_at: Math.floor(now / 1000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        return new Response(tapestryHtml, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+      }
+      if (decoded.includes('pr-42.change.json')) return new Response(makeBundle('PR 42 Sent Bundle'), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (decoded.includes('pr-7.change.json')) return new Response(makeBundle('PR 7 Tapestry Link'), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response('{}', { status: 404 })
+    }
+
+    const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const filesTab = page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="files"]')!
+    const changesTab = page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="changes"]')!
+    const changesPane = page.el.querySelector<HTMLElement>('.pg-changes')!
+
+    // 1. Clicking a .change.json sent file from Sent Files opens it in Changes mode without window.open.
+    filesTab.click()
+    for (let i = 0; i < 4; i++) await settle()
+    page.el.querySelector<HTMLButtonElement>('.ov-tools [data-part="sends"]')!.click()
+    await settle()
+    const sentItem = [...document.querySelectorAll<HTMLElement>('.uf-file-row')].find(el => el.textContent?.includes('pr-42.change.json'))!
+    expect(sentItem).toBeDefined()
+    sentItem.closest<HTMLElement>('button, [role="menuitem"]')!.click()
+    await waitUntil(() => (changesPane.textContent ?? '').includes('No changes:'))
+    expect(windowOpen).not.toHaveBeenCalled()
+    expect(changesTab.getAttribute('aria-selected')).toBe('true')
+    expect(changesPane.hidden).toBe(false)
+    expect(changesPane.querySelector<HTMLElement>('.pg-changes-bar')!.hidden).toBe(false)
+    expect(changesPane.querySelector('.pg-changes-name')!.textContent).toBe('pr-42.change.json')
+    expect(changesPane.querySelector('.kbn-fileview-change')).not.toBeNull()
+    expect(changesPane.textContent).toContain('No changes:')
+
+    // 2. Clicking a relative .change.json link inside the unfolded tapestry iframe opens it in Changes mode without window.open.
+    filesTab.click()
+    for (let i = 0; i < 4; i++) await settle()
+    const iframe = page.el.querySelector<HTMLIFrameElement>('.ov-unfold .kbn-fileview-frame')!
+    expect(iframe).not.toBeNull()
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { protocol: 'shuttle-document', version: 1, type: 'ready', payload: {} },
+      source: iframe.contentWindow,
+    }))
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { protocol: 'shuttle-document', version: 1, type: 'navigate', payload: { href: 'pr-7.change.json' } },
+      source: iframe.contentWindow,
+    }))
+    await waitUntil(() => requests.some(req => decodeURIComponent(req.url).includes('/pr-7.change.json')))
+    expect(windowOpen).not.toHaveBeenCalled()
+    expect(changesTab.getAttribute('aria-selected')).toBe('true')
+    expect(changesPane.hidden).toBe(false)
+    expect(changesPane.querySelector('.pg-changes-name')!.textContent).toBe('pr-7.change.json')
+    expect(requests.some(req => decodeURIComponent(req.url).includes('/pr-7.change.json'))).toBe(true)
   })
 })
 
