@@ -223,6 +223,27 @@ func TestClaudeSessionsOutsideWorkersAreNotNudged(t *testing.T) {
 	}
 }
 
+// A Codex session inside a Shuttle worker keeps Codex's defaults and wording.
+func TestCodexWorkerKeepsCodexDefaults(t *testing.T) {
+	env, _ := envWithHome(t)
+	clearHandoffEnv(env)
+	env.Set("SHUTTLE_FIBER_PATH", "/fibers/project/fiber.md")
+	env.Set("SHUTTLE_HANDOFF_STATE_DIR", t.TempDir())
+	transcript := filepath.Join(t.TempDir(), "rollout.jsonl")
+	for _, step := range []struct {
+		tokens int
+		want   string
+	}{{412_000, ""}, {600_000, "Context is at 600,000 tokens (window unknown)."}, {700_000, ""}, {760_000, "HARD CONTEXT LIMIT"}} {
+		if err := os.WriteFile(transcript, []byte(codexTokenRow(step.tokens, 0)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got := runHandoff(t, env, transcript)
+		if (step.want == "") != (got == "") || !strings.Contains(got, step.want) {
+			t.Fatalf("at %d tokens: got %q, want %q", step.tokens, got, step.want)
+		}
+	}
+}
+
 // The latest main-thread turn's prompt counts; subagent and synthetic records
 // do not, and a compaction since that turn leaves the size unknown.
 func TestReadClaudeUsage(t *testing.T) {
@@ -237,7 +258,12 @@ func TestReadClaudeUsage(t *testing.T) {
 		{claudeUsageRow(100_000) + claudeUsageRow(362_000) + sidechain + synthetic + `{"type":"user"}` + "\nbad json\n" + `{"partial":`, 362_000},
 		{claudeUsageRow(362_000) + compact, -1},
 		{claudeUsageRow(362_000) + compact + claudeUsageRow(40_000), 40_000},
-		{claudeUsageRow(362_000) + strings.Repeat("x", handoffTailBytes) + "\n", -1},
+		// A tool result longer than the first 256 KiB tail widens the read.
+		{claudeUsageRow(362_000) + `{"type":"user","toolUseResult":"` + strings.Repeat("x", 3*handoffTailBytes) + `"}` + "\n", 362_000},
+		// A compaction found in the first tail stops the widening.
+		{claudeUsageRow(362_000) + strings.Repeat("x", handoffTailBytes) + "\n" + compact, -1},
+		// Beyond 16 MiB, the reading is given up rather than scanned for.
+		{claudeUsageRow(362_000) + strings.Repeat("x", handoffMaxTailBytes) + "\n", -1},
 	} {
 		if err := os.WriteFile(file, []byte(tc.body), 0600); err != nil {
 			t.Fatal(err)

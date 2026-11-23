@@ -39,9 +39,9 @@ and `hooks.json`, the `agy.sh` shim and `shuttle-bin.sh`, and the skills.
 ## Context handoff nudges
 
 Pi and Codex get a first nudge at `min(window × 75%, 500000)` context tokens and a firmer one at `min(window × 88%, 750000)`.
-A Claude Code session running as a Shuttle worker (`SHUTTLE_FIBER_PATH` set) gets a first nudge at 350000 tokens and a firmer one at 400000; Claude transcripts record no window, so only the token limits apply.
+A Claude Code session running as a Shuttle worker gets a first nudge at 350000 tokens and a firmer one at 400000; Claude transcripts record no window, so only the token limits apply.
 Its notices state the context and threshold, then the next step: at the first, update `## Status` and run `shuttle handoff` at a natural point; at the second, finish the current step, update `## Status`, commit, and run `shuttle handoff`.
-Other Claude Code sessions are never nudged.
+A worker is a session the daemon dispatched or resumed, whose terminal exports `SHUTTLE_FIBER_PATH`; a session that adopted a fiber without that variable is not nudged, nor is any other Claude Code session.
 Each level fires once per session, even after resuming or compacting.
 If a turn crosses both thresholds, Pi sends the first nudge and escalates on the next turn if work continues.
 The integration advises a durable handoff; it neither terminates the session nor changes interactive Pi's compaction settings.
@@ -63,7 +63,7 @@ Pi uses `getContextUsage()` and records `shuttle-handoff` entries in the session
 
 The Claude/Codex shim calls `shuttle hook handoff`; a missing or old binary fails open.
 It does not start Node, and it reads a transcript in Claude Code's tree only for a Shuttle worker.
-It reads at most the last 256 KiB of the transcript and skips malformed, partial, or oversized records.
+It reads the last 256 KiB of the transcript and skips malformed, partial, or oversized records; for Claude, a tail holding neither a turn nor a compaction widens fourfold up to 16 MiB, as the daemon's usage reader does.
 For Claude the context is the newest main-thread assistant turn's `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`; a compaction newer than any turn leaves it unknown until the next turn.
 If that suffix contains no usage record, it emits nothing and tries again at the next hook.
 The hook stores private atomic per-level claims under `~/.shuttle/handoff/`, keyed by a hash of harness and session ID; `SHUTTLE_HANDOFF_STATE_DIR` overrides this location.

@@ -16,7 +16,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const handoffTailBytes = 256 * 1024
+const (
+	handoffTailBytes    = 256 * 1024
+	handoffMaxTailBytes = 16 * 1024 * 1024
+)
 
 // handoffUsage is the latest request's context, and the claim file's contents.
 type handoffUsage struct {
@@ -125,23 +128,23 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	return nil
 }
 
-// transcriptTail is the complete lines in the last 256 KiB of file, newest
-// last; a cut first line is dropped.
-func transcriptTail(file string) ([][]byte, error) {
+// transcriptTail is the complete lines in the last window bytes of file,
+// newest last, and whether that is the whole file; a cut first line is dropped.
+func transcriptTail(file string, window int64) ([][]byte, bool, error) {
 	f, err := os.Open(file)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	start := max(int64(0), info.Size()-handoffTailBytes)
+	start := max(int64(0), info.Size()-window)
 	tail := make([]byte, info.Size()-start)
 	n, err := f.ReadAt(tail, start)
 	if err != nil && err != io.EOF {
-		return nil, err
+		return nil, false, err
 	}
 	tail = tail[:n]
 	if start > 0 {
@@ -149,14 +152,14 @@ func transcriptTail(file string) ([][]byte, error) {
 			tail = tail[i+1:]
 		}
 	}
-	return bytes.Split(tail, []byte{'\n'}), nil
+	return bytes.Split(tail, []byte{'\n'}), start == 0, nil
 }
 
 // readCodexUsage is the newest `token_count` event in a Codex rollout's tail:
 // the latest request's own tokens, not the cumulative total. A tail without
 // one is nil, never a whole-history scan.
 func readCodexUsage(file string) (*handoffUsage, error) {
-	lines, err := transcriptTail(file)
+	lines, _, err := transcriptTail(file, handoffTailBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -185,12 +188,25 @@ func readCodexUsage(file string) (*handoffUsage, error) {
 // in a Claude Code transcript's tail: input plus cache reads plus cache writes.
 // Sidechain and `<synthetic>` records carry no prompt of the main thread; a
 // compaction newer than any turn leaves the size unknown until the next turn.
-// Claude transcripts record no window, so only the token thresholds apply.
+// Claude transcripts record no window, so only the token thresholds apply. As
+// in the daemon's Shuttle.TranscriptUsage, a 256 KiB tail that holds neither
+// widens fourfold up to 16 MiB, so one large tool result does not hide the turn.
 func readClaudeUsage(file string) (*handoffUsage, error) {
-	lines, err := transcriptTail(file)
-	if err != nil {
-		return nil, err
+	for window := int64(handoffTailBytes); ; window *= 4 {
+		lines, whole, err := transcriptTail(file, window)
+		if err != nil {
+			return nil, err
+		}
+		usage, found := claudeUsageIn(lines)
+		if found || whole || window >= handoffMaxTailBytes {
+			return usage, nil
+		}
 	}
+}
+
+// claudeUsageIn is the newest reading in lines, and whether lines held a
+// reading or a compaction.
+func claudeUsageIn(lines [][]byte) (*handoffUsage, bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		var row struct {
 			Type      string `json:"type"`
@@ -209,14 +225,14 @@ func readClaudeUsage(file string) (*handoffUsage, error) {
 			continue
 		}
 		if row.Type == "system" && row.Subtype == "compact_boundary" {
-			return nil, nil
+			return nil, true
 		}
 		if row.Type == "assistant" && row.Message.Model != "<synthetic>" && row.Message.Usage != nil {
 			u := row.Message.Usage
-			return &handoffUsage{u.Input + u.CacheRead + u.CacheWrite, 0, "claude"}, nil
+			return &handoffUsage{u.Input + u.CacheRead + u.CacheWrite, 0, "claude"}, true
 		}
 	}
-	return nil, nil
+	return nil, false
 }
 
 // claudeHandoffNotice states a Claude worker's context and threshold, then the
