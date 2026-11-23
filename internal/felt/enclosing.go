@@ -5,9 +5,9 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 // EnclosingConfigKey is the git config key by which a repository whose store
@@ -17,14 +17,15 @@ const EnclosingConfigKey = "felt.enclosing"
 
 // configuredEnclosingStore finds the enclosing store of storeRoot, a store no
 // link leads out of, from felt.enclosing in the repository that holds it. A
-// configured store counts only if a symlink inside it resolves to this store;
-// the first that does is the enclosing store and the link's position in it is
-// the prefix. A configured path that mounts nothing is reported and skipped,
-// so a stale entry never makes an unrelated store this one's namespace.
-func configuredEnclosingStore(storeRoot string) (root, prefix string, ok bool) {
+// configured store counts only if a symlink inside it (directly or through
+// nested mounted repositories) resolves to this store; the first that does is
+// the enclosing store and the link's logical position in it is the prefix.
+// Configured paths that do not mount this store are skipped and returned as
+// warnings for CLI callers to surface on stderr.
+func configuredEnclosingStore(storeRoot string) (root, prefix string, ok bool, warnings []string) {
 	real, err := filepath.EvalSymlinks(storeRoot)
 	if err != nil {
-		return "", "", false
+		return "", "", false, nil
 	}
 	out, _ := exec.Command("git", "-C", real, "config", "--get-all", "--path", EnclosingConfigKey).Output()
 	for _, value := range strings.Split(string(out), "\n") {
@@ -35,19 +36,20 @@ func configuredEnclosingStore(storeRoot string) (root, prefix string, ok bool) {
 		if !filepath.IsAbs(value) {
 			value = filepath.Join(filepath.Dir(real), value)
 		}
-		if root, prefix, ok := mountIn(value, real); ok {
-			return root, prefix, true
+		if root, prefix, found := mountIn(value, real); found {
+			return root, prefix, true, warnings
 		}
-		warnUnmounted(value, storeRoot)
+		warnings = append(warnings, fmt.Sprintf("%s %s does not mount %s by a symlink; ignoring it", EnclosingConfigKey, value, storeRoot))
 	}
-	return "", "", false
+	return "", "", false, warnings
 }
 
 // mountIn looks inside the store at enclosing, a project directory or its
-// `.felt`, for a symlink that resolves to storeReal, the resolved root of the
-// mounted store. The walk follows no links and skips `.git`; the enclosing
-// store itself is never its own mount. root is reported as enclosingStore
-// reports it, with its parent directory resolved.
+// `.felt`, for a symlink (directly or inside a nested mounted store) that
+// resolves to storeReal, the resolved root of the mounted store. The walk
+// tracks visited physical directories to prevent symlink cycles and skips
+// `.git`; the enclosing store itself is never its own mount. root is reported
+// as enclosingStore reports it, with its parent directory resolved.
 func mountIn(enclosing, storeReal string) (root, prefix string, ok bool) {
 	dir := filepath.Clean(enclosing)
 	if filepath.Base(dir) != DirName {
@@ -62,33 +64,44 @@ func mountIn(enclosing, storeReal string) (root, prefix string, ok bool) {
 	if err != nil || walked == storeReal || !looksLikeStore(walked) {
 		return "", "", false
 	}
-	_ = filepath.WalkDir(walked, func(p string, d fs.DirEntry, err error) error {
+	visited := map[string]bool{walked: true}
+	var walk func(dir, logicalPrefix string) (string, bool)
+	walk = func(dir, logicalPrefix string) (string, bool) {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil
+			return "", false
 		}
-		if d.IsDir() && d.Name() == ".git" {
-			return filepath.SkipDir
+		for _, entry := range entries {
+			name := entry.Name()
+			if name == ".git" {
+				continue
+			}
+			child := filepath.Join(dir, name)
+			logical := path.Join(logicalPrefix, name)
+			if entry.Type()&fs.ModeSymlink != 0 {
+				target, err := filepath.EvalSymlinks(child)
+				if err != nil {
+					continue
+				}
+				if target == storeReal {
+					return logical, true
+				}
+				if info, err := os.Stat(target); err == nil && info.IsDir() && !visited[target] {
+					visited[target] = true
+					if found, ok := walk(target, logical); ok {
+						return found, true
+					}
+				}
+				continue
+			}
+			if entry.IsDir() {
+				if found, ok := walk(child, logical); ok {
+					return found, true
+				}
+			}
 		}
-		if d.Type()&fs.ModeSymlink == 0 {
-			return nil
-		}
-		if target, err := filepath.EvalSymlinks(p); err == nil && target == storeReal {
-			rel, _ := filepath.Rel(walked, p)
-			prefix = filepath.ToSlash(rel)
-			return fs.SkipAll
-		}
-		return nil
-	})
-	return root, prefix, prefix != ""
-}
-
-// unmountedWarned keeps each stale felt.enclosing warning to once a process,
-// however many Storage values open the store.
-var unmountedWarned sync.Map
-
-func warnUnmounted(enclosing, storeRoot string) {
-	if _, seen := unmountedWarned.LoadOrStore(enclosing+"\x00"+storeRoot, true); seen {
-		return
+		return "", false
 	}
-	fmt.Fprintf(os.Stderr, "warning: %s %s does not mount %s by a symlink; ignoring it\n", EnclosingConfigKey, enclosing, storeRoot)
+	prefix, ok = walk(walked, "")
+	return root, prefix, ok
 }

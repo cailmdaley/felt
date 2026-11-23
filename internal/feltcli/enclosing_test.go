@@ -94,10 +94,46 @@ func TestMoveFromLinkedRepositoryRewritesTheEnclosingStore(t *testing.T) {
 				if !strings.Contains(stdout, "Rewrote references in outside") {
 					t.Fatalf("the enclosing store's rewrite is not reported:\n%s", stdout)
 				}
+				if !strings.Contains(stderr, "warning: felt.enclosing") {
+					t.Fatalf("stale felt.enclosing warning not reported on stderr:\n%s", stderr)
+				}
+				if _, showErr, err := executeCLI(t, pandoDir, "show", moved, "--json"); err != nil || showErr != "" {
+					t.Fatalf("show --json polluted stderr or failed: err=%v stderr=%q", err, showErr)
+				}
 				if out, err := runCommand(t, loomDir, "check"); err != nil || strings.Contains(out, "WARNING") {
 					t.Fatalf("check in the enclosing store: %v\n%s", err, out)
 				}
 			})
 		}
+	}
+}
+
+func TestRenameThroughNestedMountedRepositories(t *testing.T) {
+	t.Parallel()
+	outerDir, outer := newStore(t)
+	_, science := newStore(t)
+	projDir, proj := newStore(t)
+	if out, err := exec.Command("git", "-C", projDir, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	writeFixtureFelt(t, proj, "old-note", "Old Note")
+	if err := os.Symlink(science.Root(), filepath.Join(outer.Root(), "science")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(proj.Root(), filepath.Join(science.Root(), "proj")); err != nil {
+		t.Fatal(err)
+	}
+	if err := outer.Write(&felt.Felt{ID: "hub", Name: "Hub", Body: "[[science/proj/old-note]]"}); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", projDir, "config", felt.EnclosingConfigKey, outerDir).CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v\n%s", err, out)
+	}
+	stdout, stderr, err := executeCLI(t, projDir, "rename", "old-note", "new-note")
+	if err != nil {
+		t.Fatalf("rename failed: %v\n%s%s", err, stdout, stderr)
+	}
+	if got := mustRead(t, outer, "hub").Body; got != "[[science/proj/new-note]]" {
+		t.Fatalf("outer body = %q, want [[science/proj/new-note]]", got)
 	}
 }

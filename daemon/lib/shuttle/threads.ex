@@ -329,7 +329,7 @@ defmodule Shuttle.Threads do
                Shuttle.CLI.run_in_store(
                  opts[:felt_store],
                  ["show", path, "--json"],
-                 Keyword.take(opts, [:runner])
+                 Keyword.merge([stderr_to_stdout: false], Keyword.take(opts, [:runner]))
                ),
              {:ok, %{"shuttle" => block} = fiber} when is_map(block) <- Jason.decode(output) do
           %{fiber: fiber}

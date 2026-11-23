@@ -38,11 +38,36 @@ func TestConfiguredEnclosingStore(t *testing.T) {
 	gitIn(t, filepath.Dir(linked.Root()), "config", "--add", EnclosingConfigKey, filepath.Dir(stale.Root()))
 	gitIn(t, filepath.Dir(linked.Root()), "config", "--add", EnclosingConfigKey, outer.Root())
 
-	root, prefix, ok := NewStorage(filepath.Dir(linked.Root())).EnclosingStore()
+	s := NewStorage(filepath.Dir(linked.Root()))
+	root, prefix, ok := s.EnclosingStore()
 	want, _ := filepath.EvalSymlinks(outer.Root())
 	if !ok || root != want || prefix != "projects/linked" {
 		t.Fatalf("EnclosingStore = %q %q %v, want %q projects/linked", root, prefix, ok, want)
 	}
+	if warnings := s.EnclosingWarnings(); len(warnings) != 1 {
+		t.Fatalf("EnclosingWarnings = %v, want 1 stale warning", warnings)
+	}
+
+	// Nested mounted repositories: outer/.felt/science -> science/.felt and
+	// science/.felt/project -> project/.felt yields logical prefix science/project.
+	science, project := newStore("science"), newStore("project")
+	gitIn(t, filepath.Dir(project.Root()), "init", "-q")
+	if err := os.Symlink(science.Root(), filepath.Join(outer.Root(), "science")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(project.Root(), filepath.Join(science.Root(), "project")); err != nil {
+		t.Fatal(err)
+	}
+	// Add a cyclic symlink inside outer/.felt to prove traversal terminates cleanly.
+	if err := os.Symlink(outer.Root(), filepath.Join(outer.Root(), "cycle")); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, filepath.Dir(project.Root()), "config", EnclosingConfigKey, outer.Root())
+	pRoot, pPrefix, pOK := NewStorage(filepath.Dir(project.Root())).EnclosingStore()
+	if !pOK || pRoot != want || pPrefix != "science/project" {
+		t.Fatalf("nested EnclosingStore = %q %q %v, want %q science/project", pRoot, pPrefix, pOK, want)
+	}
+
 	// The enclosing store does not count itself as mounted by its own config.
 	gitIn(t, filepath.Dir(linked.Root()), "config", "--unset-all", EnclosingConfigKey)
 	gitIn(t, filepath.Dir(linked.Root()), "config", EnclosingConfigKey, filepath.Dir(linked.Root()))

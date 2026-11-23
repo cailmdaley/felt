@@ -115,8 +115,11 @@ warning, so a stale entry never makes an unrelated store this one's namespace.
 The key may be given several times (`git config --add`); the first store that
 links the project in is the enclosing one.
 
-It is a setting of one checkout, so a collaborator's clone of the same
-repository, without it, stays an ordinary top-level store. Without the setting,
+It is repository-local git config by default, so a collaborator's clone of the
+same repository, without it, stays an ordinary top-level store. Linked
+worktrees of the same clone inherit repository-local config; to scope the
+setting to one worktree, enable `git config extensions.worktreeConfig true`
+and set `git config --worktree felt.enclosing ~/store`. Without the setting,
 use `felt -C ~/store` for anything cross-project.
 
 The store's own git history records the symlink, not the fibers behind it; the

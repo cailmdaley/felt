@@ -291,6 +291,7 @@ Use felt rename <id> <new-slug> to change the basename instead.`,
 			}
 
 			fmt.Fprintf(a.env.Stdout, "Nested %s under %s as %s%s\n", childID, parentID, targetID, where.Location())
+			a.printEnclosingWarnings(storage)
 			a.printRewrittenRefs(where.Storage, result)
 			return nil
 		},
@@ -359,6 +360,7 @@ store's top level.`,
 			}
 
 			fmt.Fprintf(a.env.Stdout, "Promoted %s to %s%s\n", child.ID, targetID, child.Location())
+			a.printEnclosingWarnings(storage)
 			a.printRewrittenRefs(child.Storage, result)
 			return nil
 		},
@@ -376,6 +378,15 @@ func (a *app) printReferenceChanges(changes []felt.ReferenceChange) {
 // printRewrittenRefs names each fiber whose references a move rewrote: those
 // in the store that moved by their ids there, those elsewhere in its
 // enclosing store by their ids in it.
+func (a *app) printEnclosingWarnings(storage *felt.Storage) {
+	if storage == nil {
+		return
+	}
+	for _, w := range storage.EnclosingWarnings() {
+		fmt.Fprintf(a.env.Stderr, "warning: %s\n", w)
+	}
+}
+
 func (a *app) printRewrittenRefs(storage *felt.Storage, result *felt.MoveResult) {
 	for _, id := range result.Rewritten {
 		fmt.Fprintf(a.env.Stdout, "Rewrote references in %s\n", id)

@@ -63,6 +63,7 @@ Remaining occurrences of the old path are listed for manual review, not changed.
 				return err
 			}
 			fmt.Fprintf(a.env.Stdout, "Renamed %s to %s%s\n", oldID, target, where.Location())
+			a.printEnclosingWarnings(storage)
 			a.printRewrittenRefs(where.Storage, result)
 			return a.printRemainingPaths(where.Storage, oldID)
 		},

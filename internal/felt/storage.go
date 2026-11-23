@@ -91,8 +91,9 @@ type Storage struct {
 	walkMu   sync.Mutex
 	walk     *storeWalk
 
-	enclosingOnce sync.Once
-	external      *ExternalRefs
+	enclosingOnce     sync.Once
+	external          *ExternalRefs
+	enclosingWarnings []string
 
 	// skipped is what the most recent listing found on disk and could not
 	// read (see Unreadable).
@@ -226,13 +227,23 @@ func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 	s.enclosingOnce.Do(func() {
 		root, prefix, ok := enclosingStore(s.root)
 		if !ok {
-			root, prefix, ok = configuredEnclosingStore(s.root)
+			var warnings []string
+			root, prefix, ok, warnings = configuredEnclosingStore(s.root)
+			s.enclosingWarnings = warnings
 		}
 		if ok {
 			s.external = &ExternalRefs{root: root, prefix: prefix, cache: map[string]string{}, via: map[string]resolution{}}
 		}
 	})
 	return s.external.Root(), s.external.Prefix(), s.external != nil
+}
+
+// EnclosingWarnings returns any stale felt.enclosing diagnostics observed
+// while resolving EnclosingStore. Callers decide when to surface them on
+// stderr so machine-readable JSON commands stay clean.
+func (s *Storage) EnclosingWarnings() []string {
+	s.EnclosingStore()
+	return append([]string(nil), s.enclosingWarnings...)
 }
 
 // enclosingStore walks from storeRoot, an absolute unresolved `.felt` path,
