@@ -13,8 +13,8 @@ export interface ConversationAction {
 
 let dismissOpenMenu: (() => void) | undefined
 
-/** An open menu: its close, and its items drawn anew while it stays open, the focused one keeping the focus; once closed, an update does nothing. */
-export interface ActionMenu { close(): void; update(actions: readonly ConversationAction[]): void }
+/** An open menu: its close, and its items drawn anew while it stays open, the focused one keeping the focus; once closed, an update does nothing. `closed` resolves once it is gone and the chosen action has run. */
+export interface ActionMenu { close(): void; update(actions: readonly ConversationAction[]): void; closed: Promise<void> }
 
 /**
  * Mount a temporary SDK menu outside the board's clickable rows. An outside
@@ -40,6 +40,8 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     if (next.left !== anchorBounds.left || next.top !== anchorBounds.top) close()
   }
   let selectedAction: ConversationAction | undefined, closed = false
+  let gone!: () => void
+  const whenClosed = new Promise<void>(resolve => { gone = resolve })
   root.addEventListener('openchange', event => {
     if (!event.detail.value && event.detail.reason === 'item-press') {
       const target = event.detail.event?.target as HTMLElement | undefined
@@ -62,6 +64,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     queueMicrotask(() => queueMicrotask(() => {
       root.remove()
       selectedAction?.run?.()
+      gone()
     }))
   })
   // Menu keys and pointer presses belong to the popup, not the board below it.
@@ -139,7 +142,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     const at = actions.findIndex(action => action.label === was)
     menu.querySelector<HTMLElement>(`[data-action-index="${at >= 0 ? at : Math.max(0, Math.min(index, actions.length - 1))}"]`)?.focus({ preventScroll: true })
   }
-  return { close, update }
+  return { close, update, closed: whenClosed }
 }
 
 /** Touch and mouse share the same picker. Activating the anchor opens its destination. */

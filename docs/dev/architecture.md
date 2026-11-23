@@ -48,13 +48,15 @@ path, so the bundle's relative asset base holds:
   visible, and lists no tempered or discarded fiber but its own. Its
   top bar holds the thread's lifecycle acts beside the Console, whether or not
   a worker is live: the verb that fits its state, and a `⋯` menu of every act
-  it offers, Clear question and New session among them. `t`, `s`, `a` and `x`
-  (outside a text field) and `⌥⌘T`, `⌥⌘S`, `⌥⌘A`, `⌥⌘X` and `⌥⌘N` (anywhere)
-  perform them. They write at once, with no undo window, after asking about a
-  worker they would stop (`pages/pageActions.ts`).
+  it offers, Clear question and New session among them. `⌥⌘T`, `⌥⌘S`, `⌥⌘A`, `⌥⌘X` and
+  `⌥⌘N` perform them, wherever the caret is; a bare letter does nothing, since
+  the acts write at once, with no undo window (`pages/pageActions.ts`). One
+  that would stop a live worker asks first, in a dialog of the page's own
+  (`board/ConfirmDialog.ts`): a Rex pane's web view answers `window.confirm`
+  false unasked.
 - **`/desk`** shows the host's Desk page in Rex when `pages.desk` is enabled.
-  The same keys act on its selected row, and a right-click on a row opens the
-  same menu.
+  The same chords, and bare `t`, `s`, `a` and `x`, act on its selected row, and
+  a right-click on a row opens the same menu.
 - **`/map`** shows the Fleet Map terrain view over `GET /api/v1/map/terrain`
   and opens threads through `POST /api/v1/go`. In Rex with `pages.desk`
   enabled, `RexLayout` opens a `Fleet Map` tab beside `Desk` on first creation

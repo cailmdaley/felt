@@ -65,6 +65,8 @@ export class DeskPage {
   private paletteInFlight: Promise<void> | null = null
   private saidTimer: number | undefined
   private disposed = false
+  /** A render held back by an open menu or dialog, due once it closes. */
+  private held = false
 
   constructor(feed: PageFeed, opts: DeskPageOptions) {
     this.feed = feed
@@ -91,7 +93,7 @@ export class DeskPage {
       if (card) this.openCard(card)
     })
 
-    this.acts = new PageActions({ base: opts.base, target: () => this.selectedCard(), say: text => this.say(text), changed: () => this.feed.refresh() })
+    this.acts = new PageActions({ base: opts.base, target: () => this.selectedCard(), say: text => this.say(text), changed: () => this.feed.refresh(), bareKeys: true, closed: () => { if (this.held) this.render() } })
     this.deskEl.addEventListener('contextmenu', this.onContextMenu)
 
     if (!this.opts.route.inRex) {
@@ -109,6 +111,7 @@ export class DeskPage {
   }
 
   render(): void {
+    if (this.disposed) return
     document.title = 'Desk'
     if (!this.feed.loaded) {
       this.deskEl.hidden = true
@@ -121,7 +124,8 @@ export class DeskPage {
     if (this.feed.failure) this.status.textContent = this.feed.failure
 
     // A menu or dialog over the Desk holds its rows: one is its anchor, and where focus returns.
-    if (this.deskEl.firstChild && blockingDialogOpen()) return
+    this.held = !!this.deskEl.firstChild && blockingDialogOpen()
+    if (this.held) return
 
     const scroll = this.captureScroll()
     const focused = this.keyboard.focusedRow()
@@ -144,6 +148,7 @@ export class DeskPage {
   }
 
   private readonly onKeydown = (event: KeyboardEvent): void => {
+    if (blockingDialogOpen()) return
     if (this.searchEl && (this.searchEl.contains(document.activeElement) || (event.target instanceof Node && this.searchEl.contains(event.target)))) {
       return
     }
@@ -162,7 +167,8 @@ export class DeskPage {
   }
 
   private readonly onContextMenu = (event: MouseEvent): void => {
-    const row = (event.target as Element).closest<HTMLElement>('[data-card-uid]')
+    if (!(event.target instanceof Element)) return
+    const row = event.target.closest<HTMLElement>('[data-card-uid]')
     const card = this.cardOf(row)
     if (!row || !card || !pageActsFor(card).length) return
     event.preventDefault()

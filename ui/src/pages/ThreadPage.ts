@@ -23,7 +23,7 @@ import { changeKey, docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, t
 import type { FiberActs } from '../board/workspace/Dock.js'
 import { FamilyPage, type ViewFeeds } from '../board/workspace/FamilyPage.js'
 import { headerIcon } from '../board/workspace/headerIcon.js'
-import { labelVerb, leadVerb, lifecycleVerbsFor, verbSpec } from '../board/workspace/lifecycleVerbs.js'
+import { leadVerb, lifecycleVerbsFor, verbSpec } from '../board/workspace/lifecycleVerbs.js'
 import { Leads } from '../board/workspace/leads.js'
 import { ListenControl } from '../board/workspace/ListenControl.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from '../board/workspace/transcriptUsage.js'
@@ -32,7 +32,7 @@ import { WorkerActions, type StartWorker } from '../board/workspace/workerAction
 import '../board/workspace/dock.css'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
-import { PageActions, pageActKeys, pageActLabel, pageActsFor } from './pageActions.js'
+import { PageActions, pageActLabel, pageActsFor } from './pageActions.js'
 import { deskHref, threadHref, type PageRoute } from './route.js'
 import { ThreadSettings } from './ThreadSettings.js'
 
@@ -89,7 +89,7 @@ const openFloating = (url: string): void => {
  * and {@link WorkerActions} (message box, Send/Resume, and New session). Beside
  * the Console in its top bar stand its lifecycle acts ({@link PageActions}),
  * with a live worker or none: the verb that fits its state, a menu of them
- * all, and their keys. It moves no history or swipe.
+ * all, and their ⌥⌘ chords. It moves no history or swipe.
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
@@ -158,6 +158,7 @@ export class ThreadPage {
     this.opts = opts
     this.leads = new Leads(opts.base)
     this.startWorker = createWorkerStarter(opts.base, {
+      confirmCut: card => this.acts.confirmCut(card),
       onStarted: () => {
         if (this.mode === 'posts') {
           this.stream.following = true
@@ -171,7 +172,7 @@ export class ThreadPage {
     this.status.className = 'pg-status'
 
     this.consoleAct = this.buildConsole(() => this.feed.card())
-    this.acts = new PageActions({ base: opts.base, target: () => this.feed.card(), say: text => this.say(text), changed: () => this.feed.refresh() })
+    this.acts = new PageActions({ base: opts.base, target: () => this.feed.card(), say: text => this.say(text), changed: () => this.feed.refresh(), bareKeys: false })
     this.verbs = this.buildVerbs(() => this.feed.card())
 
     this.nav.className = 'pg-nav'
@@ -374,6 +375,7 @@ export class ThreadPage {
     window.removeEventListener(CONVERSATION_OPENING_CHANGED, this.onOpeningChanged)
     this.unsubscribe()
     this.consoleAct.dispose()
+    this.verbs.dispose()
     this.acts.dispose()
     this.disposeChanges()
     this.stream.dispose()
@@ -775,15 +777,16 @@ export class ThreadPage {
       if (!card || !offered.length) return
       const who = slug(card), verb = lead(card)
       el.setAttribute('aria-label', `${who}'s actions`)
-      const words = offered.map(act => `${pageActLabel(card, act)}${pageActKeys(act) ? ` (${pageActKeys(act)})` : ''}`).join(', ')
+      const words = offered.map(act => `${pageActLabel(card, act)}${this.acts.keys(act) ? ` (${this.acts.keys(act)})` : ''}`).join(', ')
       more.title = `Actions: ${words}`
       more.setAttribute('aria-label', `Actions for ${who}: ${words}`)
       face.hidden = !verb
       if (!verb) return
       const spec = verbSpec(verb, card)
       face.className = `ws-verb-face ${spec.cls}`
-      labelVerb(face, verb, card, who)
-      face.title = `${spec.label} ${who} (${pageActKeys(verb)})`
+      face.dataset.verb = spec.label
+      face.title = `${spec.label} ${who} (${this.acts.keys(verb)})`
+      face.setAttribute('aria-label', face.title)
       if (drawn === `${spec.icon}:${spec.label}`) return
       drawn = `${spec.icon}:${spec.label}`
       face.innerHTML = headerIcon(spec.icon)
@@ -863,6 +866,7 @@ export class ThreadPage {
 
   /** A passing word at the foot of the page, over it: what `go` could not do. */
   private say(text: string): void {
+    if (this.disposed) return
     clearTimeout(this.saidTimer)
     this.said.textContent = text
     this.said.hidden = false

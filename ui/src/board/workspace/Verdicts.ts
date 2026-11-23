@@ -19,12 +19,18 @@ const verdictWords = (card: KanbanCard, verdict: Verdict): readonly [string, str
 const VERDICT_KIND = { tempered: 'tempered', composted: 'discarded', awaitingReview: 'review' } as const
 
 /** A verdict, or a move to review, stops any worker the card owns, so it asks
- * first, as "New session" does; on a finished run it stays a single gesture. */
-export function confirmWorkerStop(card: KanbanCard, verdict: Verdict): boolean {
+ * first, as "New session" does; on a finished run there is nothing to ask. */
+export function workerStopQuestion(card: KanbanCard, verdict: Verdict): string | null {
   // Ending a standing run's worker is what Temper run is for.
-  if (verdict === 'tempered' && card.shuttleKind === 'standing') return true
-  return !hasWorkerToStop(card) ||
-    window.confirm(`“${card.name}” has a live worker. This stops it — ${verdictWords(card, verdict)[1]} anyway?`)
+  if (verdict === 'tempered' && card.shuttleKind === 'standing') return null
+  if (!hasWorkerToStop(card)) return null
+  return `“${card.name}” has a live worker. This stops it — ${verdictWords(card, verdict)[1]} anyway?`
+}
+
+/** {@link workerStopQuestion}, asked in the browser's own dialog. */
+export function confirmWorkerStop(card: KanbanCard, verdict: Verdict): boolean {
+  const question = workerStopQuestion(card, verdict)
+  return question === null || window.confirm(question)
 }
 
 /** A fiber's identity across hosts and renames: the undo queue's key. */

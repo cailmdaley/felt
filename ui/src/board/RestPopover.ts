@@ -18,10 +18,12 @@ import { civilWeekday, daysBetween, formatCivilDay, isoDayLocal, shiftCivilDay }
  *
  * `submit` receives an ISO day, or '' for an undated rest. The earliest
  * choosable day is tomorrow: a day that has arrived would wake the card at once.
+ * `closed` is told once the dialog is gone, however it went.
  */
 export function restPopover(
   card: KanbanCard,
   submit: (until: string) => Promise<void>,
+  closed?: () => void,
 ): () => void {
   const today = isoDayLocal(Date.now())
   const earliest = shiftCivilDay(today, 1)
@@ -66,8 +68,9 @@ export function restPopover(
     chip.append(el('span', '', jump.label), el('kbd', '', jump.key))
     chip.addEventListener('click', () => {
       const day = jump.day()
+      // The panel takes the keyboard back, so Enter rests until the day just chosen.
       if (day === undefined) finish('')
-      else { choose(clamp(day)); paint() }
+      else { choose(clamp(day)); paint(); panel.focus({ preventScroll: true }) }
     })
     presets.append(chip)
   }
@@ -179,7 +182,7 @@ export function restPopover(
   onScrimPress(scrim, close)
   panel.addEventListener('keydown', onKey)
   paint()
-  void dialog.api.open().then(() => queueMicrotask(() => dialog.remove()))
+  void dialog.api.open().then(() => queueMicrotask(() => { dialog.remove(); closed?.() }))
   return close
 }
 

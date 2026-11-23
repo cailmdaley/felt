@@ -24,14 +24,18 @@ export function alreadyRunningMessage(body: { tmux_session?: string; terminal?: 
  * whatever in-flight context that worker held. A dormant card cuts nothing, so
  * it is silent; Resume never cuts.
  */
-export function confirmCut(card: KanbanCard): boolean {
-  if (!hasWorkerToStop(card)) return true
+export function cutQuestion(card: KanbanCard): string | null {
+  if (!hasWorkerToStop(card)) return null
   const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
-  return window.confirm(
-    `A worker is still running for “${card.name}”${working}.\n\n` +
-      `Start a new session? This cuts the open session and discards its ` +
-      `in-flight context.`,
-  )
+  return `A worker is still running for “${card.name}”${working}.\n\n` +
+    `Start a new session? This cuts the open session and discards its ` +
+    `in-flight context.`
+}
+
+/** {@link cutQuestion}, asked in the browser's own dialog. */
+export function confirmCut(card: KanbanCard): boolean {
+  const question = cutQuestion(card)
+  return question === null || window.confirm(question)
 }
 
 /**
@@ -77,21 +81,22 @@ export async function dispatchWorkerStart(
 
 /**
  * Standalone `StartWorker` callback for a page that has no Dock: runs
- * {@link dispatchWorkerStart} with its own {@link HumanMessageIds} and reports
- * success or refusal to the caller.
+ * {@link dispatchWorkerStart} with its own {@link HumanMessageIds}, asks the
+ * caller before a cut, and reports success or refusal to it.
  */
 export function createWorkerStarter(
   shuttleBase: string,
-  callbacks: { onStarted?: () => void; onError?: (message: string) => void } = {},
+  callbacks: { confirmCut: (card: KanbanCard) => Promise<boolean>; onStarted?: () => void; onError?: (message: string) => void },
 ): StartWorker {
   const messageIds = new HumanMessageIds()
   let busy = false
   return async (card, mode, message, word, images) => {
-    if (busy || (mode === 'fresh' && !confirmCut(card))) return false
-    const original = word.textContent ?? ''
-    word.textContent = message || images.length ? 'Sending…' : mode === 'previous' ? 'Resuming…' : 'Starting…'
+    if (busy) return false
     busy = true
+    const original = word.textContent ?? ''
     try {
+      if (mode === 'fresh' && !await callbacks.confirmCut(card)) return false
+      word.textContent = message || images.length ? 'Sending…' : mode === 'previous' ? 'Resuming…' : 'Starting…'
       const result = await dispatchWorkerStart(shuttleBase, messageIds, card, mode, { message, images })
       if (result.ok) {
         callbacks.onStarted?.()

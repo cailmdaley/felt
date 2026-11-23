@@ -10,6 +10,13 @@ import { mountPage } from './mount.js'
 import { deskHref, parsePageRoute, threadHref } from './route.js'
 import { AUTO_ADVANCE_IDLE_MS, ThreadPage } from './ThreadPage.js'
 
+const dialogIn = (): HTMLElement | null => document.querySelector<HTMLElement>('.kbn-confirm')
+/** Presses the confirmation's Cancel or its own word. */
+const answerConfirm = async (yes: boolean): Promise<void> => {
+  document.querySelector<HTMLButtonElement>(yes ? '.kbn-confirm-yes' : '.kbn-confirm-no')!.click()
+  for (let i = 0; i < 6; i++) await settle()
+}
+
 /** Waits in real time: a viewer's first dynamic import takes as long as the machine is loaded. */
 const waitUntil = async (fn: () => boolean): Promise<void> => {
   const until = performance.now() + 4_000
@@ -353,7 +360,7 @@ describe('the thread page', () => {
   })
 
   it('shows the docked footer on live, quiet, and archived threads, and dispatches send/resume and new session', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockClear().mockReturnValue(false)
 
     // Live worker: docked footer is visible; sending a message uses continue, and New session with a message uses fresh.
     const { page: livePage } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
@@ -381,7 +388,9 @@ describe('the thread page', () => {
     expect(liveFresh.hidden).toBe(false)
     liveFresh.click()
     await settle(); await settle()
-    expect(confirmSpy).toHaveBeenCalled()
+    expect(dialogIn()!.textContent).toContain('This cuts the open session')
+    await answerConfirm(true)
+    expect(confirmSpy).not.toHaveBeenCalled()
     const liveNew = JSON.parse(posts().filter(each => each.url === '/api/v1/dispatch').at(-1)!.body!) as Record<string, unknown>
     expect(liveNew.resume_mode).toBe('fresh')
     expect(liveNew.user_message).toBe('Start fresh with new seed')
@@ -926,18 +935,18 @@ describe('the thread page', () => {
       const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
       expect(page.el.querySelector('.pg-nav > .pg-actions')).not.toBeNull()
       expect(await menu(page)).toStrictEqual([
-        ['Temper run', '⌥⌘T t'], ['Pause schedule', '⌥⌘S s'], ['Retire', '⌥⌘X x'], ['Clear question', null], ['New session', '⌥⌘N'],
+        ['Temper run', '⌥⌘T'], ['Pause schedule', '⌥⌘S'], ['Retire', '⌥⌘X'], ['Clear question', null], ['New session', '⌥⌘N'],
       ])
       document.querySelectorAll<HTMLElement>('.kbn-verb-menu [data-action-index]')[3].click()
       for (let i = 0; i < 6; i++) await settle()
       expect(sent()).toStrictEqual([['/api/v1/lifecycle', { action: 'ask-clear', fiber: raw('thread-review').fiber.id, origin: WORKSPACE_HOST }]])
     })
 
-    it.each([['active', 'rest'], ['open', 'resume']])('s on an %s schedule writes %s at once, with no popover', async (status, action) => {
+    it.each([['active', 'rest'], ['open', 'resume']])('⌥⌘S on an %s schedule writes %s at once, with no popover', async (status, action) => {
       standingAsk()
       raw('thread-review').fiber.status = status
       await open(`?f=thread-review@${WORKSPACE_HOST}`)
-      bare('s')
+      chord('KeyS')
       await settle()
       expect(document.querySelector('.kbn-rest-popover')).toBeNull()
       expect(sent()).toStrictEqual([['/api/v1/lifecycle', { action, fiber: raw('thread-review').fiber.id, origin: WORKSPACE_HOST, actor: 'board' }]])
@@ -957,40 +966,84 @@ describe('the thread page', () => {
       expect(sent()).toStrictEqual([['/api/v1/lifecycle', { action: 'rest', fiber: raw('thread-review').fiber.id, origin: WORKSPACE_HOST, until: '', actor: 'board' }]])
     })
 
-    it('bare keys act outside the message box only, and only where the verb is offered', async () => {
+    it('no bare letter acts, in the message box or out of it, and its button names the chord alone', async () => {
       const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
       const box = page.el.querySelector<HTMLElement>('.ws-worker-message')!
-      for (const key of ['t', 's', 'a', 'x']) bare(key, box)
-      // Work already awaiting review is not closed for review again: a key is nothing, a chord says so.
-      bare('a')
+      for (const target of [document, page.el, box]) for (const key of ['t', 's', 'a', 'x']) bare(key, target)
       await settle()
-      expect([sent(), document.querySelector('.kbn-rest-popover')]).toStrictEqual([[], null])
+      expect([sent(), document.querySelector('.kbn-rest-popover'), dialogIn()]).toStrictEqual([[], null, null])
+      expect([face(page).title, face(page).getAttribute('aria-label')]).toStrictEqual(['Temper review (⌥⌘T)', 'Temper review (⌥⌘T)'])
+      // A chord the card does not offer says so: work awaiting review is not closed for review again.
       chord('KeyA')
       expect(said(page)).toBe('review does not offer that now.')
-      bare('x')
-      for (let i = 0; i < 4; i++) await settle()
-      expect(sent().map(([, body]) => body.target)).toStrictEqual(['composted'])
     })
 
-    it('asks before stopping a live worker, and ⌥⌘N before cutting one', async () => {
+    it('asks before stopping a live worker in a dialog of its own, never the browser\'s, which a Rex pane answers false', async () => {
       const confirm = vi.spyOn(window, 'confirm').mockClear().mockReturnValue(false)
-      await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
-      chord('KeyA'); chord('KeyN')
-      await settle()
-      expect([confirm.mock.calls.length, sent()]).toStrictEqual([2, []])
-      confirm.mockReturnValue(true)
-      chord('KeyN')
-      for (let i = 0; i < 4; i++) await settle()
-      expect(sent()).toMatchObject([['/api/v1/dispatch', { fiber_id: raw('thread-analysis').fiber.id, origin: WORKSPACE_HOST, force: true, resume_mode: 'fresh' }]])
+      const { page } = await open(`?f=thread-analysis@${WORKSPACE_HOST}&in=rex`)
+      const back = face(page)
+      back.focus()
       chord('KeyA')
+      // A second ask for the same card while the first stands opens nothing more.
+      chord('KeyX')
+      face(page).click()
+      for (let i = 0; i < 3; i++) await settle()
+      expect(document.querySelectorAll('.kbn-confirm')).toHaveLength(1)
+      expect(dialogIn()!.textContent).toContain('has a live worker. This stops it — move to review anyway?')
+      expect(document.activeElement).toBe(document.querySelector('.kbn-confirm-yes'))
+      // Escape and Cancel leave the worker running.
+      bare('Escape', document.activeElement!)
+      for (let i = 0; i < 6; i++) await settle()
+      expect([dialogIn(), sent()]).toStrictEqual([null, []])
+      expect(document.activeElement).toBe(back)
+      chord('KeyX')
+      await settle()
+      await answerConfirm(false)
+      expect([dialogIn(), sent()]).toStrictEqual([null, []])
+      // Enter confirms; the Enter that asked, still held, does not.
+      chord('KeyA')
+      for (let i = 0; i < 3; i++) await settle()
+      const yes = document.querySelector<HTMLElement>('.kbn-confirm-yes')!
+      yes.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }))
+      for (let i = 0; i < 3; i++) await settle()
+      expect(sent()).toStrictEqual([])
+      bare('Enter', yes)
+      for (let i = 0; i < 6; i++) await settle()
+      expect(sent().map(([, body]) => body.target)).toStrictEqual(['awaitingReview'])
+      chord('KeyN')
+      for (let i = 0; i < 3; i++) await settle()
+      expect(dialogIn()!.textContent).toContain('This cuts the open session')
+      await answerConfirm(true)
+      expect(sent().at(-1)).toMatchObject(['/api/v1/dispatch', { fiber_id: raw('thread-analysis').fiber.id, origin: WORKSPACE_HOST, force: true, resume_mode: 'fresh' }])
+      expect(confirm).not.toHaveBeenCalled()
+    })
+
+    it('an act answered after the page is gone says nothing on it, and its open question goes with it', async () => {
+      const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
+      chord('KeyT')
+      page.dispose()
       for (let i = 0; i < 4; i++) await settle()
-      expect(sent().at(-1)![1]).toMatchObject({ target: 'awaitingReview' })
+      expect([sent().length, page.el.querySelector<HTMLElement>('.pg-said')!.hidden]).toStrictEqual([1, true])
+      const { page: live } = await open(`?f=thread-analysis@${WORKSPACE_HOST}`)
+      chord('KeyA')
+      for (let i = 0; i < 3; i++) await settle()
+      live.dispose()
+      for (let i = 0; i < 6; i++) await settle()
+      expect([dialogIn(), sent().length]).toStrictEqual([null, 1])
+    })
+
+    it('a card with a write under way opens neither the calendar nor a question', async () => {
+      await open(`?f=thread-review@${WORKSPACE_HOST}`)
+      chord('KeyT'); chord('KeyS')
+      expect(document.querySelector('.kbn-rest-popover')).toBeNull()
+      for (let i = 0; i < 4; i++) await settle()
+      expect(sent()).toHaveLength(1)
     })
 
     it('says why the daemon refused, and writes one act at a time', async () => {
       transitionError = 'the store is wedged'
       const { page } = await open(`?f=thread-review@${WORKSPACE_HOST}`)
-      bare('t'); bare('t')
+      chord('KeyT'); chord('KeyT')
       for (let i = 0; i < 4; i++) await settle()
       expect(sent()).toHaveLength(1)
       expect(said(page)).toContain('Temper failed on review')
@@ -1139,6 +1192,47 @@ describe('the desk page', () => {
     expect(JSON.parse(posts().at(-1)!.body!)).toMatchObject({ action: 'rest', until: '', origin: WORKSPACE_HOST })
   })
 
+  it('Escape closes the calendar and keeps the selection, and no row key reaches the Desk beneath it', async () => {
+    const { page, navigate } = await openDesk()
+    const row = (): HTMLElement => page.el.querySelector<HTMLElement>('[data-card-uid="thread-review"]')!
+    row().tabIndex = -1
+    row().focus()
+    const press = (key: string): void => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    press('s')
+    for (let i = 0; i < 3; i++) await settle()
+    expect(document.querySelector('.kbn-rest-popover')!.contains(document.activeElement)).toBe(true)
+    press('o'); press('G')
+    expect(navigate).not.toHaveBeenCalled()
+    expect(row().classList.contains('kbn-key-selected')).toBe(true)
+    press('Escape')
+    for (let i = 0; i < 4; i++) await settle()
+    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
+    expect(row().classList.contains('kbn-key-selected')).toBe(true)
+    expect(posts()).toStrictEqual([])
+    // The Desk has its keys back.
+    press('o')
+    expect(navigate).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([['menu', '.kbn-verb-menu'], ['calendar', '.kbn-rest-popover']])('a read that lands under an open %s is drawn when it closes', async (kind, open) => {
+    const { page, feed } = await openDesk()
+    const row = page.el.querySelector<HTMLElement>('[data-card-uid="thread-review"]')!
+    row.tabIndex = -1
+    row.focus()
+    if (kind === 'menu') row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
+    else row.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
+    for (let i = 0; i < 3; i++) await settle()
+    expect(document.querySelector(open)).not.toBeNull()
+    feed.refresh()
+    for (let i = 0; i < 4; i++) await settle()
+    expect(row.isConnected).toBe(true)
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    for (let i = 0; i < 8; i++) await settle()
+    expect(document.querySelector(open)).toBeNull()
+    expect(row.isConnected).toBe(false)
+    expect(page.el.querySelector('[data-card-uid="thread-review"]')).not.toBeNull()
+  })
+
   it('a right-click on a row opens its acts and leaves the page where it is', async () => {
     const { page, navigate } = await openDesk()
     const line = page.el.querySelector<HTMLElement>('[data-card-uid="thread-review"]')!
@@ -1148,6 +1242,8 @@ describe('the desk page', () => {
     expect(event.defaultPrevented).toBe(true)
     const items = [...document.querySelectorAll<HTMLElement>('.kbn-verb-menu [data-action-index]')]
     expect(items.map(item => item.getAttribute('aria-label'))).toStrictEqual(['Rest', 'Temper', 'Discard', 'New session'])
+    // One that names no element is no row's.
+    line.querySelector('span')!.firstChild?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
     // A read that lands while the menu is open leaves the row it hangs from.
     page.render()
     expect(line.isConnected).toBe(true)

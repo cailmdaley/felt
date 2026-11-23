@@ -54,6 +54,17 @@ describe('rest date dialog', () => {
     key('Enter')
     expect(submit).toHaveBeenCalledWith(shiftCivilDay(today(), 1))
   })
+  it.each([['Tomorrow', () => shiftCivilDay(today(), 1)], ['In a month', null]] as const)('after a press on %s, Enter rests until that day', async (label, day) => {
+    const { submit } = await open()
+    const chip = [...document.querySelectorAll<HTMLButtonElement>('.kbn-rest-chip')].find(each => each.textContent!.startsWith(label))!
+    chip.focus()
+    chip.click()
+    expect(document.activeElement).toBe(document.querySelector('.kbn-rest-popover'))
+    key('Enter')
+    expect(submit).toHaveBeenCalledTimes(1)
+    if (day) expect(submit).toHaveBeenCalledWith(day())
+    else expect(submit.mock.calls[0]![0] > shiftCivilDay(today(), 26)).toBe(true)
+  })
   it('a click on a day chooses it', async () => {
     const { submit } = await open()
     const cell = document.querySelector<HTMLButtonElement>('.kbn-rest-day:not([disabled])')!

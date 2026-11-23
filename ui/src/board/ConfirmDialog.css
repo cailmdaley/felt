@@ -1,0 +1,30 @@
+/* A question asked before an act, on the Rest dialog's scrim. */
+.kbn-confirm {
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 32px));
+  padding: 20px 22px 18px;
+  display: grid;
+  gap: 18px;
+  background: var(--kbn-parchment);
+  color: var(--kbn-ink);
+  font-family: var(--font-serif);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
+  outline: none;
+}
+.kbn-confirm-question { margin: 0; font-size: var(--type-row); line-height: var(--leading-prose); white-space: pre-line; overflow-wrap: anywhere; }
+.kbn-confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.kbn-confirm-buttons > button {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: var(--type-row)/var(--leading-ui) var(--font-serif);
+  cursor: pointer;
+}
+.kbn-confirm-buttons > .kbn-confirm-yes { background: var(--kbn-ink); border-color: var(--kbn-ink); color: var(--kbn-parchment); }
+.kbn-confirm-buttons > button:focus-visible { outline: 2px solid var(--kbn-you); outline-offset: 2px; }
+@media (pointer: coarse) { .kbn-confirm-buttons > button { min-height: 44px; } }

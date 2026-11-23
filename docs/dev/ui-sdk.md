@@ -16,7 +16,7 @@ The board owns actions, presentation, the gestures that ask for a popup, and its
 | Channels' icon controls (rail, channel menu, back, close), each named by its tooltip | `views/ChannelsView.ts` | `@ui-sdk/web/tooltip` |
 | Channels rail reordering (mouse drag, touch hold-then-drag, Alt+↑/↓) | `board/channelRail.ts` | core `createReorder` on a `definePrimitive` instance |
 | Move menu | `board/MoveMenu.ts` | `@ui-sdk/web/menu` |
-| Keyboard help, role picker, rest calendar shell | `board/KeymapHelp.ts`, `RolePopover.ts`, `RestPopover.ts` | `@ui-sdk/web/dialog` |
+| Keyboard help, role picker, rest calendar shell, the pages' confirmation | `board/KeymapHelp.ts`, `RolePopover.ts`, `RestPopover.ts`, `ConfirmDialog.ts` | `@ui-sdk/web/dialog` |
 | Settings dropdown, Reader document menu | `board/workspace/SettingsMenu.ts`, `Reader.ts` | `@ui-sdk/web/popover` |
 | View tabs, phone folio strip | `board/KanbanModal.ts`, `KanbanSurfaces.ts` | `@ui-sdk/web/tabs` |
 | Dock Kind | `board/workspace/Dock.ts` | `@ui-sdk/web/segmented-control` |
