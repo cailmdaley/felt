@@ -1,16 +1,18 @@
 import '@ui-sdk/web/dialog'
+import './RestPopover.css'
 import type { KanbanCard } from './KanbanTypes.js'
 import { onScrimPress } from './dismissGesture.js'
 import { civilWeekday, daysBetween, formatCivilDay, isoDayLocal, shiftCivilDay } from '../sdk/civilDay.js'
 
 /**
  * "Rest until": a centered dialog with a month grid and a vim-shaped cursor.
- * Everything is reachable without the pointer.
+ * Everything is reachable without the pointer. It opens on no date; any motion
+ * or click on the calendar chooses one.
  *
  *   h l / j k      a day / a week earlier–later (a count prefix repeats: 3j)
  *   H L            a month earlier–later
  *   t · w · m      tomorrow · next Monday · a month from today
- *   Enter          rest until the cursor day
+ *   Enter          rest until the chosen day, or undated while none is chosen
  *   n              rest with no return day
  *   Esc            cancel
  *
@@ -24,6 +26,7 @@ export function restPopover(
   const today = isoDayLocal(Date.now())
   const earliest = shiftCivilDay(today, 1)
   let cursor = earliest
+  let selectedDay: string | null = null
   let count = ''
 
   const dialog = document.createElement('ui-dialog')
@@ -48,7 +51,7 @@ export function restPopover(
   const keys = el(
     'p',
     'kbn-rest-keys',
-    'h l day · j k week · H L month · t w m jump · enter rest · n undated · esc cancel',
+    'h l day · j k week · H L month · t w m jump · enter rest · n no date · esc cancel',
   )
 
   const jumps: Array<{ key: string; label: string; day: () => string | undefined }> = [
@@ -64,7 +67,7 @@ export function restPopover(
     chip.addEventListener('click', () => {
       const day = jump.day()
       if (day === undefined) finish('')
-      else { cursor = clamp(day); paint() }
+      else { choose(clamp(day)); paint() }
     })
     presets.append(chip)
   }
@@ -72,7 +75,7 @@ export function restPopover(
 
   const rest = el('button', 'kbn-rest-confirm', 'Rest')
   rest.type = 'button'
-  rest.addEventListener('click', () => finish(cursor))
+  rest.addEventListener('click', () => finish(selectedDay ?? ''))
 
   panel.append(title, subject, headline, monthLabel, grid, presets, keys, rest)
   scrim.append(panel)
@@ -85,11 +88,17 @@ export function restPopover(
     return day < earliest ? earliest : day
   }
 
+  function choose(day: string): void { cursor = selectedDay = day }
+
   function paint(): void {
-    const long = formatCivilDay(cursor, { weekday: 'long', day: 'numeric', month: 'long' }) ?? cursor
-    const days = daysBetween(today, cursor)
-    headline.textContent = long
-    relative.textContent = days === 1 ? 'tomorrow' : `in ${days} days`
+    if (selectedDay === null) {
+      headline.textContent = 'No date'
+      relative.textContent = 'press Enter to rest, or pick a day'
+    } else {
+      const days = daysBetween(today, selectedDay)
+      headline.textContent = formatCivilDay(selectedDay, { weekday: 'long', day: 'numeric', month: 'long' }) ?? selectedDay
+      relative.textContent = days === 1 ? 'tomorrow' : `in ${days} days`
+    }
     headline.append(' ', relative)
     monthLabel.textContent = formatCivilDay(cursor, { month: 'long', year: 'numeric' }) ?? ''
     countEl.textContent = count
@@ -116,9 +125,9 @@ export function restPopover(
       if (day.slice(0, 7) !== cursor.slice(0, 7)) cell.classList.add('kbn-rest-day-outside')
       if (day === today) cell.classList.add('kbn-rest-day-today')
       if (day < earliest) { cell.disabled = true; cell.classList.add('kbn-rest-day-past') }
-      if (day === cursor) { cell.classList.add('kbn-rest-day-cursor'); cell.setAttribute('aria-selected', 'true') }
+      if (day === selectedDay) { cell.classList.add('kbn-rest-day-cursor'); cell.setAttribute('aria-selected', 'true') }
       // Repainting replaces the clicked cell, so the panel keeps the keyboard.
-      cell.addEventListener('click', () => { cursor = day; paint(); panel.focus({ preventScroll: true }) })
+      cell.addEventListener('click', () => { choose(day); paint(); panel.focus({ preventScroll: true }) })
       cell.addEventListener('dblclick', () => finish(day))
       cells.push(cell)
     }
@@ -128,16 +137,16 @@ export function restPopover(
   function move(key: string): boolean {
     const n = count === '' ? 1 : Number(count)
     switch (key) {
-      case 'h': case 'ArrowLeft': cursor = clamp(shiftCivilDay(cursor, -n)); break
-      case 'l': case 'ArrowRight': cursor = shiftCivilDay(cursor, n); break
-      case 'k': case 'ArrowUp': cursor = clamp(shiftCivilDay(cursor, -7 * n)); break
-      case 'j': case 'ArrowDown': cursor = shiftCivilDay(cursor, 7 * n); break
-      case 'H': cursor = clamp(addMonths(cursor, -n)); break
-      case 'L': cursor = addMonths(cursor, n); break
-      case 't': cursor = earliest; break
-      case 'w': cursor = nextMonday(today); break
-      case 'm': cursor = addMonths(today, 1); break
-      case '0': case 'g': cursor = earliest; break
+      case 'h': case 'ArrowLeft': choose(clamp(shiftCivilDay(cursor, -n))); break
+      case 'l': case 'ArrowRight': choose(shiftCivilDay(cursor, n)); break
+      case 'k': case 'ArrowUp': choose(clamp(shiftCivilDay(cursor, -7 * n))); break
+      case 'j': case 'ArrowDown': choose(shiftCivilDay(cursor, 7 * n)); break
+      case 'H': choose(clamp(addMonths(cursor, -n))); break
+      case 'L': choose(addMonths(cursor, n)); break
+      case 't': choose(earliest); break
+      case 'w': choose(nextMonday(today)); break
+      case 'm': choose(addMonths(today, 1)); break
+      case '0': case 'g': choose(earliest); break
       default: return false
     }
     count = ''
@@ -155,7 +164,7 @@ export function restPopover(
     if (event.key === 'Enter') {
       const target = event.target as HTMLElement | null
       if (target instanceof HTMLButtonElement && target !== rest && !target.classList.contains('kbn-rest-day')) return
-      own(); finish(cursor); return
+      own(); finish(selectedDay ?? ''); return
     }
     if (event.key === 'n') { own(); finish(''); return }
     if (/^[1-9]$/.test(event.key) || (event.key === '0' && count !== '')) {

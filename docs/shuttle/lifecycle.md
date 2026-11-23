@@ -63,7 +63,7 @@ any verdict, concludes the run and stops the worker: the constitution rests,
 in the Desk's Resting section (a seat or a standing one under Roles & standing), its outcome the session's report, and starts again by hand. This is
 how a hub or a seat — a constitution with no finish line — ends a session.
 In a constitution's view, press **s** (or choose Rest) to open a small date popover.
-Enter with an empty date rests undated; choosing a date rests until that day.
+It opens on no date: Enter rests undated, and choosing a day first rests until that day.
 The same operation is `shuttle rest <fiber> --until YYYY-MM-DD` (or `--until ''` for no date).
 It works in any state and stops a live worker through the owning daemon's serialized rest lifecycle.
 

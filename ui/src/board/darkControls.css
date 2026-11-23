@@ -65,14 +65,6 @@
   color: var(--kbn-ink);
 }
 
-/* Verdict plates. */
-:root[data-ws-appearance='dark'] :is(.kbn-ctl-temper, .kbn-ctl-discard, .ws-verdict-word[data-verdict='tempered'], .ws-verdict-word[data-verdict='discarded']) {
-  --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 82%, var(--ws-ink, var(--kbn-ink)));
-  --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 16%, var(--ws-paper, var(--kbn-paper)));
-  --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 28%, var(--ws-paper, var(--kbn-paper)));
-  --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 62%, var(--ws-paper, var(--kbn-paper)));
-}
-
 /* A chosen row in the settings sheet: gold thinned over dark stock turns
    olive, so the choice is the lifted plate and the gold stays a line. */
 :root[data-ws-appearance='dark'] :is(.set-railbtn-active, .set-opening-selected) {

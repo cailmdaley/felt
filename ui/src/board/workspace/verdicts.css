@@ -1,3 +1,21 @@
+/* THE VERDICT PLATE — only Temper and Discard carry pigment. Their ink, tint
+   and border are mixed against the paper and ink in force, so the fiber page
+   stays legible in every theme. */
+:is(.kbn-ctl-temper, .ws-verdict-word[data-verdict='tempered']) { --verdict-pigment: var(--kbn-tempered); }
+:is(.kbn-ctl-discard, .ws-verdict-word[data-verdict='discarded']) { --verdict-pigment: var(--kbn-discarded); }
+:is(.kbn-ctl-temper, .kbn-ctl-discard, .ws-verdict-word[data-verdict='tempered'], .ws-verdict-word[data-verdict='discarded']) {
+  --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 72%, var(--ws-ink, var(--kbn-ink)));
+  --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 12%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 24%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 55%, var(--ws-paper, var(--kbn-paper)));
+}
+:root[data-ws-appearance='dark'] :is(.kbn-ctl-temper, .kbn-ctl-discard, .ws-verdict-word[data-verdict='tempered'], .ws-verdict-word[data-verdict='discarded']) {
+  --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 82%, var(--ws-ink, var(--kbn-ink)));
+  --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 16%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 28%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 62%, var(--ws-paper, var(--kbn-paper)));
+}
+
 /* A verdict's undo window is drawn where the verdict was given: the
    controls that gave it keep their footprint but give way to one quiet
    line, the verdict in its pigment and "undo z", in the status line's mono

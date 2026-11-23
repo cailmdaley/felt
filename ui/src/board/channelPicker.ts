@@ -1,5 +1,6 @@
 import '@ui-sdk/web/dialog'
 import { onScrimPress } from './dismissGesture.js'
+import './RestPopover.css'
 import './channelPicker.css'
 
 /** A channel a family can be moved to: how it is written in the rail, and how its constitutions spell it. */

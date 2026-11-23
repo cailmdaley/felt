@@ -20,6 +20,7 @@ const open = async (): Promise<{ submit: ReturnType<typeof vi.fn>; anchor: HTMLE
   await settle()
   return { submit, anchor }
 }
+const headline = (): string => document.querySelector('.kbn-rest-headline')!.textContent!
 const today = (): string => isoDayLocal(Date.now())
 
 describe('rest date dialog', () => {
@@ -30,14 +31,37 @@ describe('rest date dialog', () => {
     expect(anchor.inert).toBe(false)
     expect(document.activeElement).toBe(anchor)
   })
-  it('Enter rests until tomorrow by default and restores focus', async () => {
+  it('opens on no date: Enter rests undated and restores focus', async () => {
     const { submit, anchor } = await open()
     expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(headline()).toBe('No date press Enter to rest, or pick a day')
+    expect(document.querySelector('[role="gridcell"][aria-selected="true"]')).toBeNull()
     key('Enter')
-    expect(submit).toHaveBeenCalledWith(shiftCivilDay(today(), 1))
+    expect(submit).toHaveBeenCalledWith('')
     await settle()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(document.activeElement).toBe(anchor)
+  })
+  it('the Rest button rests undated until a day is chosen', async () => {
+    const { submit } = await open()
+    document.querySelector<HTMLButtonElement>('.kbn-rest-confirm')!.click()
+    expect(submit).toHaveBeenCalledWith('')
+  })
+  it('t chooses tomorrow', async () => {
+    const { submit } = await open()
+    key('t')
+    expect(headline()).toContain('tomorrow')
+    key('Enter')
+    expect(submit).toHaveBeenCalledWith(shiftCivilDay(today(), 1))
+  })
+  it('a click on a day chooses it', async () => {
+    const { submit } = await open()
+    const cell = document.querySelector<HTMLButtonElement>('.kbn-rest-day:not([disabled])')!
+    const label = cell.getAttribute('aria-label')!
+    cell.click()
+    expect(headline()).toContain(label)
+    document.querySelector<HTMLButtonElement>('.kbn-rest-confirm')!.click()
+    expect(submit).toHaveBeenCalledWith(shiftCivilDay(today(), 1))
   })
   it('moves by vim motions with a count prefix', async () => {
     const { submit } = await open()

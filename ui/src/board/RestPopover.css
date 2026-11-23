@@ -1,0 +1,101 @@
+/* The Rest dialog: a scrim over the board or a page, and a calendar to choose a return day. */
+.kbn-rest-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10600;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--kbn-shade) 45%, transparent);
+  backdrop-filter: blur(2px);
+}
+.kbn-rest-popover {
+  box-sizing: border-box;
+  width: min(410px, calc(100vw - 32px));
+  padding: 22px 24px 18px;
+  display: grid;
+  gap: 12px;
+  background: var(--kbn-parchment);
+  color: var(--kbn-ink);
+  font-family: var(--font-serif);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
+  outline: none;
+}
+.kbn-rest-title { margin: 0; font-size: var(--type-title); font-weight: 400; }
+.kbn-rest-subject {
+  margin: -8px 0 0;
+  font-size: var(--type-note);
+  color: var(--kbn-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kbn-rest-headline { margin: 4px 0 0; font-size: var(--type-prose); }
+.kbn-rest-relative { font-size: var(--type-note); color: var(--kbn-ink-muted); }
+.kbn-rest-month {
+  font-variant: all-small-caps;
+  letter-spacing: var(--track-kicker);
+  color: var(--kbn-ink-muted);
+}
+.kbn-rest-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  text-align: center;
+}
+.kbn-rest-dow { font-size: var(--type-meta); color: var(--kbn-ink-muted); padding-bottom: 2px; }
+.kbn-rest-day {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.kbn-rest-day:hover:not(:disabled) { background: color-mix(in srgb, var(--kbn-ink) 10%, transparent); }
+.kbn-rest-day-outside { opacity: .4; }
+.kbn-rest-day-past { opacity: .2; cursor: default; }
+.kbn-rest-day-today { border-color: color-mix(in srgb, var(--kbn-ink) 35%, transparent); }
+.kbn-rest-day-cursor {
+  background: var(--kbn-ink);
+  color: var(--kbn-parchment);
+  opacity: 1;
+}
+.kbn-rest-presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.kbn-rest-chip {
+  font: inherit;
+  font-size: var(--type-note);
+  color: inherit;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 22%, transparent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  cursor: pointer;
+}
+.kbn-rest-chip:hover { background: color-mix(in srgb, var(--kbn-ink) 10%, transparent); }
+.kbn-rest-chip kbd {
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
+  color: var(--kbn-ink-muted);
+}
+.kbn-rest-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  color: var(--kbn-ink-muted);
+}
+.kbn-rest-keys { margin: 0; font-size: var(--type-meta); color: var(--kbn-ink-muted); line-height: var(--leading-ui); }
+.kbn-rest-confirm {
+  font: inherit;
+  color: var(--kbn-parchment);
+  background: var(--kbn-ink);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 0;
+  cursor: pointer;
+}

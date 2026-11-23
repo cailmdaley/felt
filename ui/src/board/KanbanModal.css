@@ -272,106 +272,6 @@
   outline-offset: 2px;
 }
 
-/* The Rest dialog: a scrim over the board, and a calendar to choose a return day. */
-.kbn-rest-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 10600;
-  display: grid;
-  place-items: center;
-  background: color-mix(in srgb, var(--kbn-shade) 45%, transparent);
-  backdrop-filter: blur(2px);
-}
-.kbn-rest-popover {
-  width: min(360px, calc(100vw - 32px));
-  padding: 22px 24px 18px;
-  display: grid;
-  gap: 12px;
-  background: var(--kbn-parchment);
-  color: var(--kbn-ink);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
-  border-radius: 12px;
-  box-shadow: 0 18px 60px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
-  outline: none;
-}
-.kbn-rest-title { margin: 0; font-size: var(--type-title); font-weight: 400; }
-.kbn-rest-subject {
-  margin: -8px 0 0;
-  font-size: var(--type-note);
-  color: var(--kbn-ink-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.kbn-rest-headline { margin: 4px 0 0; font-size: var(--type-prose); }
-.kbn-rest-relative { font-size: var(--type-note); color: var(--kbn-ink-muted); }
-.kbn-rest-month {
-  font-variant: all-small-caps;
-  letter-spacing: var(--track-kicker);
-  color: var(--kbn-ink-muted);
-}
-.kbn-rest-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
-  text-align: center;
-}
-.kbn-rest-dow { font-size: var(--type-meta); color: var(--kbn-ink-muted); padding-bottom: 2px; }
-.kbn-rest-day {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 6px 0;
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-}
-.kbn-rest-day:hover:not(:disabled) { background: color-mix(in srgb, var(--kbn-ink) 10%, transparent); }
-.kbn-rest-day-outside { opacity: .4; }
-.kbn-rest-day-past { opacity: .2; cursor: default; }
-.kbn-rest-day-today { border-color: color-mix(in srgb, var(--kbn-ink) 35%, transparent); }
-.kbn-rest-day-cursor {
-  background: var(--kbn-ink);
-  color: var(--kbn-parchment);
-  opacity: 1;
-}
-.kbn-rest-presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.kbn-rest-chip {
-  font: inherit;
-  font-size: var(--type-note);
-  color: inherit;
-  background: none;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 22%, transparent);
-  border-radius: 999px;
-  padding: 3px 10px;
-  display: inline-flex;
-  gap: 6px;
-  align-items: baseline;
-  cursor: pointer;
-}
-.kbn-rest-chip:hover { background: color-mix(in srgb, var(--kbn-ink) 10%, transparent); }
-.kbn-rest-chip kbd {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: var(--kbn-ink-muted);
-}
-.kbn-rest-count {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  color: var(--kbn-ink-muted);
-}
-.kbn-rest-keys { margin: 0; font-size: var(--type-meta); color: var(--kbn-ink-muted); line-height: var(--leading-ui); }
-.kbn-rest-confirm {
-  font: inherit;
-  color: var(--kbn-parchment);
-  background: var(--kbn-ink);
-  border: 0;
-  border-radius: 8px;
-  padding: 8px 0;
-  cursor: pointer;
-}
-
 .kbn-col {
   display: flex;
   flex-direction: column;
@@ -525,17 +425,6 @@
     user-select: none;
     -webkit-touch-callout: none;
   }
-}
-/* THE VERDICT PLATE — only Temper and Discard carry pigment. Their ink, tint
-   and border are mixed against the paper and ink in force, so the fiber page
-   stays legible in every theme. */
-:is(.kbn-ctl-temper, .ws-verdict-word[data-verdict='tempered']) { --verdict-pigment: var(--kbn-tempered); }
-:is(.kbn-ctl-discard, .ws-verdict-word[data-verdict='discarded']) { --verdict-pigment: var(--kbn-discarded); }
-:is(.kbn-ctl-temper, .kbn-ctl-discard, .ws-verdict-word[data-verdict='tempered'], .ws-verdict-word[data-verdict='discarded']) {
-  --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 72%, var(--ws-ink, var(--kbn-ink)));
-  --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 12%, var(--ws-paper, var(--kbn-paper)));
-  --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 24%, var(--ws-paper, var(--kbn-paper)));
-  --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 55%, var(--ws-paper, var(--kbn-paper)));
 }
 /* The waiting badge is runtime-state
    info that depends on connection, not on fiber content. Cool grey-blue
