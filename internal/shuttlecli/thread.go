@@ -19,7 +19,9 @@ func (a *app) threadCmd() *cobra.Command {
 		Long: `Create a thread under a constitution and print its new fiber id.
 The ask becomes its name and lede, followed by empty Desired State and Status
 sections. Host, project_dir, role and agent inherit from the parent unless explicitly
-overridden. Threads are armed (status: active) unless --disabled.
+overridden, except that a lead-only parent agent (` + "`shuttle agents`" + ` marks it
+lead) hands its threads to its thread_agent or the registry default; pass --agent
+to keep the lead's model. Threads are armed (status: active) unless --disabled.
 
 The calling session is recorded as the one that asked. The thread's close or
 ask wakes that asker alone: the parent's worker when the parent's own session
@@ -118,6 +120,11 @@ remote draft made with --disabled stays in this store while you write it;
 					return fmt.Errorf("--take requires the caller's host %q, not %q", own, block.Host)
 				}
 			}
+			reg, err := shuttle.LoadAgentRegistry(a.env)
+			if err != nil {
+				return err
+			}
+			block.Agent = reg.ThreadAgent(block.Agent)
 			if cmd.Flags().Changed("agent") {
 				block.Agent = agent
 			}
@@ -135,10 +142,6 @@ remote draft made with --disabled stays in this store while you write it;
 			}
 			if !disabled && block.ProjectDir == "" {
 				return fmt.Errorf("armed thread requires --project-dir or a parent project_dir")
-			}
-			reg, err := shuttle.LoadAgentRegistry(a.env)
-			if err != nil {
-				return err
 			}
 			if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 				return a.printShuttleValidationErrors(errs)
@@ -229,7 +232,7 @@ remote draft made with --disabled stays in this store while you write it;
 		},
 	}
 	cmd.Flags().StringVar(&host, "host", "", "Owning daemon (default: parent's host)")
-	cmd.Flags().StringVar(&agent, "agent", "", "Agent id (default: parent's agent)")
+	cmd.Flags().StringVar(&agent, "agent", "", "Agent id (default: parent's agent, or its thread agent when the parent's is lead-only)")
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "Worker cwd; required when changing host")
 	cmd.Flags().StringVar(&role, "role", "", "Role: <office> or <office>/<person> (default: parent's role; a bare office takes this checkout's felt.person)")
 	cmd.Flags().StringVar(&slug, "slug", "", "Child slug (default: derived from ask)")

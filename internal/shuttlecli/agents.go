@@ -52,6 +52,10 @@ envelope to make the listed records the complete registry for one host. Its
 "overrides" block patches one field of any resolved agent (see ` + "`agents effort`" + `);
 the table marks an overridden default as default=<level>(override).
 
+A record with lead_only: true is marked lead: a thread cut under it without
+--agent runs on its thread_agent (marked threads=<id>), else the default agent.
+An alias of a lead-only agent is lead-only too.
+
 --json emits the bare array the daemon's GET /api/v1/agents serves to the
 browser's agent picker, and nothing else: no footer, no warnings, either
 stream.`,
@@ -315,6 +319,12 @@ func formatConstraints(a shuttle.AgentRecord) string {
 	}
 	if a.ChromeCapable {
 		parts = append(parts, "chrome")
+	}
+	if a.LeadOnly {
+		parts = append(parts, "lead")
+	}
+	if a.ThreadAgent != "" {
+		parts = append(parts, "threads="+a.ThreadAgent)
 	}
 	if len(parts) == 0 {
 		return ""

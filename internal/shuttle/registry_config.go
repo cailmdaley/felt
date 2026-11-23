@@ -307,13 +307,22 @@ func mergeAgentLayers(builtins, user []AgentRecord, mode string) ([]AgentRecord,
 		merged = append(merged, rec)
 	}
 
+	reg := &AgentRegistry{agents: merged}
 	for _, rec := range merged {
-		if rec.Source != SourceUser || rec.AliasOf == "" {
+		if rec.Source != SourceUser {
 			continue
 		}
-		if _, ok := at[strings.ToLower(rec.AliasOf)]; !ok {
-			warnings = append(warnings, fmt.Sprintf(
-				"agent %q aliases unknown base %q", rec.ID, rec.AliasOf))
+		if rec.AliasOf != "" {
+			if _, ok := at[strings.ToLower(rec.AliasOf)]; !ok {
+				warnings = append(warnings, fmt.Sprintf(
+					"agent %q aliases unknown base %q", rec.ID, rec.AliasOf))
+			}
+		}
+		if rec.ThreadAgent != "" {
+			if _, ok := reg.Find(rec.ThreadAgent); !ok {
+				warnings = append(warnings, fmt.Sprintf(
+					"agent %q names unknown thread_agent %q", rec.ID, rec.ThreadAgent))
+			}
 		}
 	}
 

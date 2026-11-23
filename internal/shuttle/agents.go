@@ -37,6 +37,12 @@ type AgentRecord struct {
 	DefaultEffort string   `json:"default_effort,omitempty"`
 	ChromeCapable bool     `json:"chrome_capable,omitempty"`
 	CostClass     string   `json:"cost_class,omitempty"`
+	// LeadOnly marks an agent that holds judgment at the top of a family: a
+	// thread cut under it without --agent runs on ThreadAgent, or on the
+	// registry's default when ThreadAgent is empty. Set on a base agent, it
+	// covers that agent's aliases too.
+	LeadOnly    bool   `json:"lead_only,omitempty"`
+	ThreadAgent string `json:"thread_agent,omitempty"`
 	// Alias record fields. AliasOf names the base agent; Axes is the overlay
 	// applied on resolution.
 	AliasOf string   `json:"alias_of,omitempty"`
@@ -289,6 +295,34 @@ func (r *AgentRegistry) Default() (AgentRecord, error) {
 		return r.agents[0], nil
 	}
 	return AgentRecord{}, fmt.Errorf("agent registry is empty")
+}
+
+// ThreadAgent is the agent a thread cut under parent defaults to. A lead-only
+// parent (the record itself, or the base an alias names) hands its threads to
+// its thread_agent — the alias's, else the base's — or else to the registry's
+// default. Any other parent, known or not, passes through unchanged.
+func (r *AgentRegistry) ThreadAgent(parent string) string {
+	rec, ok := r.Find(parent)
+	if !ok {
+		return parent
+	}
+	leadOnly, next := rec.LeadOnly, rec.ThreadAgent
+	if rec.IsAlias() {
+		if base, ok := r.Find(rec.AliasOf); ok {
+			leadOnly = leadOnly || base.LeadOnly
+			if next == "" {
+				next = base.ThreadAgent
+			}
+		}
+	}
+	if !leadOnly {
+		return parent
+	}
+	if next != "" {
+		return next
+	}
+	def, _ := r.Default() // never empty: Find just matched a record
+	return def.ID
 }
 
 // IDs returns all agent IDs in the registry.

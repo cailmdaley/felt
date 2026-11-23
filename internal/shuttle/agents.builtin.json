@@ -39,7 +39,8 @@
     "effort_levels": ["low", "medium", "high", "xhigh", "max"],
     "default_effort": "low",
     "chrome_capable": true,
-    "cost_class": "premium"
+    "cost_class": "premium",
+    "lead_only": true
   },
   {
     "id": "codex-astra",
@@ -161,7 +162,8 @@
     "requires_model": true,
     "effort_levels": ["low", "medium", "high", "xhigh", "max"],
     "default_effort": "low",
-    "cost_class": "premium"
+    "cost_class": "premium",
+    "lead_only": true
   },
   {
     "id": "pi-grok",

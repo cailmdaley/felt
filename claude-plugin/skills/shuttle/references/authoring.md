@@ -54,6 +54,7 @@ Draft threads are queued work: leave them disabled until their inputs or decisio
 Closing a sibling does not itself arm a draft.
 
 Host, project directory, role and agent inherit from the parent; runtime, schedule, seat and legacy surface do not.
+A lead-only agent (`claude-fable`, `pi-fable`) is the exception: its threads start on the default worker (`claude-opus`) unless you pass `--agent`.
 Override the agent for the work rather than assuming the orchestrator's model fits every thread.
 Changing `--host` requires `--project-dir` even for a draft: the parent's path belongs to another machine.
 Armed remote work is created by its owning daemon, which validates paths on that host and writes its store directly; an unreachable owner fails without a local copy.
