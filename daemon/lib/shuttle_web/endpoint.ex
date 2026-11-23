@@ -43,10 +43,12 @@ defmodule ShuttleWeb.Endpoint do
     cache_control_for_etags: "public, max-age=31536000, immutable"
   )
 
+  # `sdk/shuttle-sdk.js` is the UI primitives as one ES module, for a
+  # personal UI to import with no build step of its own.
   plug(Plug.Static,
     at: "/",
     from: {ShuttleWeb.Assets, :dist, []},
-    only: ~w(fonts index.html favicon.ico apple-touch-icon.png manifest.webmanifest),
+    only: ~w(sdk fonts index.html favicon.ico apple-touch-icon.png manifest.webmanifest),
     brotli: true,
     gzip: true
   )

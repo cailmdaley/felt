@@ -30,12 +30,12 @@ import { keepQueriesUncached } from './src/runtime/uncachedQueries.js'
 const apiTarget = process.env.VITE_SHUTTLE_API ?? 'http://localhost:4000'
 
 /**
- * Write `.gz` and `.br` beside every compressible bundle file. The daemon's
- * Plug.Static serves them to clients that accept the encoding, so the board
- * crosses the tailnet at about a quarter of its size, with no compression
- * work per request.
+ * Write `.gz` and `.br` beside every compressible bundle file (under `subdir`
+ * of the output, when given). The daemon's Plug.Static serves them to clients
+ * that accept the encoding, so the board crosses the tailnet at about a
+ * quarter of its size, with no compression work per request.
  */
-function precompress(): Plugin {
+export function precompress(subdir = ''): Plugin {
   const compressible = /\.(js|css|svg|json|ttf|otf|webmanifest)$/
   let outDir = ''
   return {
@@ -45,7 +45,7 @@ function precompress(): Plugin {
     writeBundle() {
       const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
         .flatMap(entry => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)])
-      for (const path of walk(outDir)) {
+      for (const path of walk(join(outDir, subdir))) {
         if (!compressible.test(path)) continue
         const source = readFileSync(path)
         if (source.length < 1024) continue

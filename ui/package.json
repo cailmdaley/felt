@@ -6,7 +6,7 @@
   "description": "The Shuttle UI — a lean web client for the Shuttle daemon (:4000): kanban board, Stash/Capture, and a fiber/file viewer. Served by the daemon as a static bundle.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && vite build -c vite.sdk.config.ts",
     "preview": "vite preview",
     "test": "TZ=America/Los_Angeles vitest run",
     "typecheck": "tsc --noEmit",

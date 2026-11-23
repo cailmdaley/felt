@@ -624,3 +624,40 @@ its API; a page served from anywhere else can only read. Build it on the
 [core routes](../reference/api.md#core), which are the stable ones.
 Its files are served to whoever can reach the daemon; see
 [Host classes and trust boundaries](#host-classes-and-trust-boundaries).
+
+### Build on the primitives
+
+Every daemon also serves the board's primitives as one ES module,
+`/sdk/shuttle-sdk.js`, with nothing else to load or build: a client for the
+core routes (`ShuttleClient`), a live feed of every host's fibers
+(`ShuttleFeed`), headless readings of a fiber (`attentionOf`, `doingOf`,
+`offersFor`, `buildFamilyTree`) and unstyled, accessible elements: a thread
+row, a post, a file preview, a fiber's action menu, its lifecycle verbs, a
+composer to message its worker, its tapestry in a frame, and a live time.
+The elements carry no class, colour or font; each names its parts with
+`data-slot` and its state with `data-*` attributes, so a UI styles and
+arranges them as it likes.
+
+```html
+<ul id="threads"></ul>
+<style>
+  [data-slot="shuttle-thread-row"] { display: flex; gap: 1ch; }
+  [data-slot="shuttle-thread-row"][data-attention="waiting"] [data-slot="slug"] { color: crimson; }
+</style>
+<script type="module">
+  import { ShuttleClient, ShuttleFeed, createThreadRow, isWaiting } from '/sdk/shuttle-sdk.js'
+
+  const client = new ShuttleClient()
+  const feed = new ShuttleFeed(client)
+  const list = document.getElementById('threads')
+  feed.subscribe(({ fibers }) => {
+    const now = Date.now()
+    list.replaceChildren(...fibers.filter(isWaiting).map(fiber => {
+      const item = document.createElement('li')
+      item.append(createThreadRow(fiber, { now, onOpen: f => open(client.threadPageUrl(f.fiber.uid, f.origin)) }))
+      return item
+    }))
+  })
+  feed.start()
+</script>
+```
