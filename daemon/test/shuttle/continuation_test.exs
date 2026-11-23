@@ -26,8 +26,9 @@ defmodule Shuttle.ContinuationTest do
     # Absent transcript (e.g. constitution re-homed from another host) is not restorable here.
     refute Continuation.restoration?(fiber.(runtime), transcript: fn _ -> nil end)
 
-    # Transcript predating this dispatch belongs to a predecessor, not this run.
-    refute Continuation.restoration?(
+    # A quiet restoration updates dispatched_at without touching the transcript;
+    # a second restart before a new turn must still restore the idle session.
+    assert Continuation.restoration?(
              fiber.(runtime),
              transcript: fn "worker" ->
                %{path: "/t/worker.jsonl", mtime: ~U[2026-06-21 11:59:59Z]}

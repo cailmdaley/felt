@@ -206,7 +206,7 @@ as `blocked`. A healthy run or a force-dispatch clears it.
 ## Boot quarantine
 
 On every start, the daemon parks fresh autonomous work in `pending_launch`.
-Oneshot workers that were running restore from their durable continuation markers without a release.
+Oneshot workers that were running restore from their durable continuation markers without a release when the session's transcript is present on this host; otherwise (for example after `shuttle.host` is reassigned) they park as fresh work.
 A finished or ambiguous turn reopens its conversation quietly; an interrupted turn receives a continuation prompt.
 Restoration preserves the conversation regardless of transcript age.
 Oneshot seats follow the same rule.

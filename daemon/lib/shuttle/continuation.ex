@@ -177,12 +177,14 @@ defmodule Shuttle.Continuation do
 
   @doc """
   True when durable runtime markers identify an interrupted worker whose
-  conversation transcript is present on this host and does not predate the
-  dispatch.
+  conversation transcript is present on this host.
 
   A re-homed constitution still carries the old host's `session_uuid` and
   `dispatched_at` with no local transcript, so it is not restorable here and
-  starts fresh instead of looping on an unopenable session.
+  starts fresh instead of looping on an unopenable session. Presence alone is
+  checked (not mtime vs `dispatched_at`) so a quietly restored idle worker that
+  never took a new turn before a second reboot is still restored rather than
+  abandoned.
 
   Options:
     * `:transcript` — `fn session_id -> %{path, mtime} | nil end`, the
@@ -190,11 +192,12 @@ defmodule Shuttle.Continuation do
   """
   @spec restoration?(map(), keyword()) :: boolean()
   def restoration?(fiber, opts \\ []) do
+    lookup = Keyword.get(opts, :transcript, &transcript_stat/1)
+
     with false <- clean_handoff_since_dispatch?(fiber),
          session_id when is_binary(session_id) <- resumable_session_id(fiber),
-         lookup <- Keyword.get(opts, :transcript, &transcript_stat/1),
-         %{} = transcript <- lookup.(session_id) do
-      not predates_dispatch?(transcript, fiber)
+         %{} <- lookup.(session_id) do
+      true
     else
       _ -> false
     end

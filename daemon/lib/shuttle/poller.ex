@@ -3703,7 +3703,9 @@ defmodule Shuttle.Poller do
   end
 
   # Durable interrupted-worker markers authorize restoration across daemon
-  # restarts. Dispatcher re-fetches the fiber before restoring its conversation.
+  # restarts when the conversation's transcript is present on this host;
+  # otherwise (e.g. a re-homed constitution) it parks as fresh work.
+  # Dispatcher re-fetches the fiber before restoring its conversation.
   # Fresh work stays parked; due standing runs carry scheduled authorization.
   defp park_autonomous_launches(dispatchable, %State{} = state) do
     now = DateTime.utc_now()
