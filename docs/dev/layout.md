@@ -67,7 +67,7 @@ run in four tiers:
 | Tier | Commands | When |
 |---|---|---|
 | the suites | `go test ./...`, `make mix-test`, `(cd ui && npm test)` | every change |
-| full | `make test`, then `make test-linux` (CI's Ubuntu) | before pushing; CI |
+| full | `make test`, then `make test-linux` or `make test-colab` (CI's Ubuntu) | before pushing; CI |
 | browser | `(cd ui && npm run e2e)` | changes to anything the board draws; CI, as the Journeys job |
 | opt-in | real harness smoke, `scripts/test-bootstrap.sh`, `integration`-tagged tests | when touching what they cover |
 
@@ -75,6 +75,7 @@ run in four tiers:
 make test                  # go test ./... + mix test + the board suite + the plugin hooks + the bootstrap shims
 go test ./...              # Go (felt and shuttle CLIs)
 make test-linux            # the Go suite in a Linux container, as CI runs it
+make test-colab            # CI's core Linux test suites on an ephemeral Colab VM (COLAB_SUITE=go|elixir|ui|e2e|all|shell)
 make mix-test              # full Elixir suite; shells both CLIs on PATH, so `make cli-install` first
 (cd daemon && mix test --only focus)  # tagged subset
 (cd ui && npm test)        # the board suite; vitest, once, under
@@ -89,6 +90,8 @@ bash scripts/test-bootstrap.sh     # bootstrap.sh's login PATH and fail-fast che
 # sends no prompt, captures the idle pane, then kills the smoke sessions.
 (cd daemon && SHUTTLE_REAL_HARNESS_SMOKE=1 mix test --only integration test/shuttle/real_harness_smoke_test.exs)
 ```
+
+`scripts/test-colab.sh` (and `make test-colab`) runs CI's core Linux test suites (`go`, `elixir`, `ui`, `e2e`, `all`, or `shell`) on an ephemeral `--high-mem` Linux Google Colab VM via `google-colab-cli` (`colab`). It syncs the current working tree (uncommitted changes included, without credentials or build caches), provisions CI-matching toolchains, runs tests as a non-root `tester` user, and stops the VM on exit; pass `--keep` (or `COLAB_FLAGS="--keep --session felt-ci"`) to reuse a warm VM across runs. Through Make, use `COLAB_SUITE=... COLAB_ARGS="..."` (`COLAB_ARGS` is shell-split by Make, so pass complex regexes directly to `scripts/test-colab.sh`).
 
 **The board suite runs once, under one pinned zone.** `npm test` pins
 TZ=America/Los_Angeles, a negative-offset DST zone, so view code that defaults

@@ -83,7 +83,7 @@ MIX := env -u ROOTDIR -u BINDIR -u PROGNAME -u EMU PATH='$(MIX_PATH)' mix
 AGENT_STORES ?=
 AGENT_PATH ?=
 
-.PHONY: build cli cli-install ui ui-unlocked daemon daemon-unlocked test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test \
+.PHONY: build cli cli-install ui ui-unlocked daemon daemon-unlocked test test-linux test-colab go-test mix-test js-test plugin-hooks-test bootstrap-test \
         all start start-selected stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
@@ -96,6 +96,7 @@ help:
 	@echo "  make cli-install — install felt and shuttle → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon release → bin/rel-built (MIX_ENV=prod)"
 	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite  AND  the plugin hooks"
+	@echo "  make test-colab  — run Linux CI suites on an ephemeral Colab VM (COLAB_SUITE=go|elixir|ui|e2e|all|shell)"
 	@echo "  make plugin-hooks-test — exercise harness hooks and the native Pi extension"
 	@echo "  make lint-personal — fail on maintainer host/account names in tracked source"
 	@echo "  make install     — full bootstrap (felt + shuttle + daemon + ui + hook + keep-alive)"
@@ -216,6 +217,14 @@ go-test:
 # or docker; see scripts/test-linux.sh.
 test-linux:
 	$(SUITE_SLOT) scripts/test-linux.sh
+
+# Run Linux CI suites on an ephemeral Google Colab VM via `colab`
+# (google-colab-cli); see scripts/test-colab.sh.
+COLAB_SUITE ?= go
+COLAB_FLAGS ?=
+COLAB_ARGS ?=
+test-colab:
+	scripts/test-colab.sh $(COLAB_FLAGS) $(COLAB_SUITE) $(COLAB_ARGS)
 
 # The full daemon suite, the production boot gate included (a bare
 # `mix test` leaves the gate out).
