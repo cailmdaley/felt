@@ -8,7 +8,7 @@
 .ws-worker-prompt {
   position: absolute; left: 10px; top: 0; height: var(--ws-box-line);
   display: inline-flex; align-items: center;
-  color: var(--ws-ink-muted); font: var(--type-row)/1 var(--font-mono);
+  color: var(--ws-ink-muted); font: var(--type-row)/var(--leading-solid) var(--font-mono);
   pointer-events: none; user-select: none;
 }
 .ws-worker-hint {
