@@ -90,6 +90,7 @@ const (
 	HostSourceDefault      = "default"
 	HostSourceHostFile     = "file"
 	HostSourceListenEnv    = "SHUTTLE_LISTEN"
+	HostSourceAmbientEnv   = "SHUTTLE_AMBIENT"
 	HostSourceClassDefault = "class-default"
 )
 
@@ -210,12 +211,13 @@ func ParsePort(text string) (int, error) {
 
 // HostConfig is the resolved class, terminal, ambient mode, and listener.
 type HostConfig struct {
-	Class        HostClass
-	ClassSource  string
-	Terminal     string
-	Ambient      bool
-	Listen       Listener
-	ListenSource string
+	Class         HostClass
+	ClassSource   string
+	Terminal      string
+	Ambient       bool
+	AmbientSource string
+	Listen        Listener
+	ListenSource  string
 	// File is the host file the configuration was read from (it may not exist).
 	File string
 	// DataDir is DataDir(env), or "" when it cannot be resolved.
@@ -382,8 +384,24 @@ func HostAmbient(env *sysenv.Env) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	v, _, err := boolKey(doc, "ambient", path)
+	v, _, err := hostAmbient(env, doc, path)
 	return v, err
+}
+
+// hostAmbient is the ambient mode and the tier that decided it. A malformed
+// "ambient" key is an error even under an override.
+func hostAmbient(env *sysenv.Env, doc map[string]json.RawMessage, path string) (bool, string, error) {
+	value, inFile, err := boolKey(doc, "ambient", path)
+	if err != nil {
+		return false, "", err
+	}
+	if v, ok := parseAmbientEnv(env.Getenv("SHUTTLE_AMBIENT")); ok {
+		return v, HostSourceAmbientEnv, nil
+	}
+	if inFile {
+		return value, HostSourceHostFile, nil
+	}
+	return false, HostSourceDefault, nil
 }
 
 func hostTerminal(doc map[string]json.RawMessage, path string) (string, error) {
@@ -432,13 +450,9 @@ func ResolveHostConfig(env *sysenv.Env) (HostConfig, error) {
 	if err != nil {
 		return HostConfig{}, err
 	}
-	fileAmbient, _, err := boolKey(doc, "ambient", path)
+	c.Ambient, c.AmbientSource, err = hostAmbient(env, doc, path)
 	if err != nil {
 		return HostConfig{}, err
-	}
-	c.Ambient = fileAmbient
-	if v, ok := parseAmbientEnv(env.Getenv("SHUTTLE_AMBIENT")); ok {
-		c.Ambient = v
 	}
 	class, hasClass, err := stringKey(doc, "class", path)
 	if err != nil {
