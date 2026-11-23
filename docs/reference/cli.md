@@ -217,6 +217,7 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
+| `shuttle adopt <fiber-id> [title]` | Atomically create (unless `--existing` or present), install as a draft, claim for the current terminal conversation, and activate a fiber (`--project-dir`, `--host`, `--agent`, `--session-uuid`, `--rex-session`, `--rex-block`, `--tmux-session`, `--tmux-pane`, `--existing`, `--role`, `--json`). Leaves the fiber as an open draft if claim fails |
 | `shuttle claim <fiber>` | Associate the current terminal conversation with an installed draft without launching or activating a worker (`--session <native-id>`, `--tmux-session <name>`, `--json`) |
 | `shuttle migrate <to-fiber>` | Move the caller's live conversation to another installed fiber on the same host without ending it. Infer the source from current session/pane identity; `--from <fiber>` overrides it. The destination must have no live worker. The source gets a fresh worker from `## Status`; `--rest` leaves it resting, or `--disabled` leaves it open in Drafts. The destination receives the session UUID, watcher and current assignment; exact-session messages still reach it. Repeating the same session/destination succeeds without a second move. No conversation context is copied or merged. Supports `--json` |
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |

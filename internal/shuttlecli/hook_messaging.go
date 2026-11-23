@@ -84,9 +84,11 @@ func (a *app) handleHook(input eventHookInput, emit func(string) error) error {
 		a.recordHumanPrompt(input)
 		digest, acknowledgeDigest = a.boardDigest(harness, input.SessionID)
 	}
+	ambient := a.ambientSessionContext(input, host)
+	standaloneContext := combineHookContext(digest, ambient)
 	if a.env.Getenv("SHUTTLE_MESSAGES") == "off" {
-		if digest != "" {
-			return writeContext(digest)
+		if standaloneContext != "" {
+			return writeContext(standaloneContext)
 		}
 		return nil
 	}
@@ -97,8 +99,8 @@ func (a *app) handleHook(input eventHookInput, emit func(string) error) error {
 		receiver = messaging.HookReceiverPID()
 	}
 	if messaging.RegisterMailbox(a.env, harness, input.SessionID, host, input.CWD, receiver, input.HookEventName != "SessionEnd") != nil {
-		if digest != "" {
-			return writeContext(digest)
+		if standaloneContext != "" {
+			return writeContext(standaloneContext)
 		}
 		return nil
 	}
@@ -130,6 +132,10 @@ func (a *app) handleHook(input eventHookInput, emit func(string) error) error {
 				context.WriteString("\n[Shuttle family board digest]\n")
 				context.WriteString(digest)
 			}
+			if ambient != "" {
+				context.WriteString("\n")
+				context.WriteString(ambient)
+			}
 			wrote = true
 			outputErr = writeContext(context.String())
 			return outputErr
@@ -138,8 +144,8 @@ func (a *app) handleHook(input eventHookInput, emit func(string) error) error {
 			return outputErr
 		}
 	}
-	if !wrote && digest != "" {
-		return writeContext(digest)
+	if !wrote && standaloneContext != "" {
+		return writeContext(standaloneContext)
 	}
 	return nil
 }

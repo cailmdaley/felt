@@ -208,11 +208,12 @@ func ParsePort(text string) (int, error) {
 	return port, nil
 }
 
-// HostConfig is the resolved class, terminal and listener.
+// HostConfig is the resolved class, terminal, ambient mode, and listener.
 type HostConfig struct {
 	Class        HostClass
 	ClassSource  string
 	Terminal     string
+	Ambient      bool
 	Listen       Listener
 	ListenSource string
 	// File is the host file the configuration was read from (it may not exist).
@@ -339,6 +340,52 @@ func stringKey(doc map[string]json.RawMessage, key, path string) (string, bool, 
 	return s, true, nil
 }
 
+// boolKey reads an optional boolean key; present-but-not-a-boolean is malformed.
+func boolKey(doc map[string]json.RawMessage, key, path string) (bool, bool, error) {
+	raw, ok := doc[key]
+	if !ok {
+		return false, false, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false, false, HostErr(HostErrMalformed, "%s: %q is null; omit the key instead", path, key)
+	}
+	var b bool
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return false, false, HostErr(HostErrMalformed, "%s: %q must be true or false", path, key)
+	}
+	return b, true, nil
+}
+
+func parseAmbientEnv(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "on", "yes":
+		return true, true
+	case "0", "false", "off", "no":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// HostAmbient reports whether ambient Shuttle mode is enabled for unattached
+// sessions. SHUTTLE_AMBIENT (1/true/on/yes or 0/false/off/no) overrides
+// host.json's optional "ambient" boolean (default false).
+func HostAmbient(env *sysenv.Env) (bool, error) {
+	if v, ok := parseAmbientEnv(env.Getenv("SHUTTLE_AMBIENT")); ok {
+		return v, nil
+	}
+	path, err := HostConfigFile(env)
+	if err != nil {
+		return false, err
+	}
+	doc, err := ReadHostFile(path)
+	if err != nil {
+		return false, err
+	}
+	v, _, err := boolKey(doc, "ambient", path)
+	return v, err
+}
+
 func hostTerminal(doc map[string]json.RawMessage, path string) (string, error) {
 	raw, ok := doc["terminal"]
 	if !ok {
@@ -384,6 +431,14 @@ func ResolveHostConfig(env *sysenv.Env) (HostConfig, error) {
 	c.Terminal, err = hostTerminal(doc, path)
 	if err != nil {
 		return HostConfig{}, err
+	}
+	fileAmbient, _, err := boolKey(doc, "ambient", path)
+	if err != nil {
+		return HostConfig{}, err
+	}
+	c.Ambient = fileAmbient
+	if v, ok := parseAmbientEnv(env.Getenv("SHUTTLE_AMBIENT")); ok {
+		c.Ambient = v
 	}
 	class, hasClass, err := stringKey(doc, "class", path)
 	if err != nil {
