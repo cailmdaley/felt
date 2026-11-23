@@ -264,9 +264,9 @@ live worker's thread page beside it:
 ## Store auto fast-forward
 
 `host.json`'s `auto_ff_stores` boolean controls whether `Shuttle.StoreSync`
-periodically fetches and fast-forwards (`git merge --ff-only @{u}`) the git
-repositories backing configured felt stores and any symlinked mounted stores
-under `.felt/`.
+periodically runs `felt sync --ff-only --json` (fetching the tracking branch
+and fast-forwarding `HEAD` to `FETCH_HEAD`) on the git repositories backing
+configured felt stores and any symlinked mounted stores under `.felt/`.
 
 - **Default:** `false` on `single-user` hosts; `true` on `shared-multi-user`
   and `exposed` hosts.

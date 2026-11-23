@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func runFFOnlyJSON(t *testing.T, storeDir string) syncFFReport {
@@ -316,4 +317,90 @@ func TestSyncFFOnlyHonorsFeltSyncLock(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("syncStoreAndMountsFFOnly did not complete after lock release")
 	}
+}
+
+func TestSyncRunGitPreservesInheritedEnvWhenOSEnvIsNil(t *testing.T) {
+	t.Setenv("FELT_SYNC_ENV_PROBE", "preserved-value")
+	t.Setenv("GIT_TERMINAL_PROMPT", "")
+	f := newSyncFixture(t)
+	a := &app{env: sysenv.OS()}
+	out, err := a.runSyncGit(t.Context(), f.clone, syncGitTimeout, "-c", `alias.envprobe=!printf "%s:%s" "$FELT_SYNC_ENV_PROBE" "$GIT_TERMINAL_PROMPT"`, "envprobe")
+	if err != nil {
+		t.Fatalf("runSyncGit failed under sysenv.OS(): %v (out=%q)", err, out)
+	}
+	if strings.TrimSpace(out) != "preserved-value:0" {
+		t.Fatalf("envprobe output = %q, want %q", out, "preserved-value:0")
+	}
+}
+
+func TestSyncFFOnlyRefusesHiddenUntrackedAndDirtySubmodule(t *testing.T) {
+	t.Parallel()
+	t.Run("status.showUntrackedFiles=no still blocks fast-forward", func(t *testing.T) {
+		t.Parallel()
+		f := newSyncFixture(t)
+		initFeltDir(t, f)
+		syncTestGit(t, f.clone, "config", "status.showUntrackedFiles", "no")
+		beforeHead := syncTestGit(t, f.clone, "rev-parse", "HEAD")
+
+		writeSyncFile(t, f.peer, felt.DirName+"/remote.md", "# remote\n")
+		syncTestGit(t, f.peer, "add", felt.DirName+"/remote.md")
+		syncTestGit(t, f.peer, "commit", "-m", "remote update")
+		syncTestGit(t, f.peer, "push")
+
+		draft := filepath.Join(f.clone, felt.DirName, "draft.md")
+		writeSyncFile(t, f.clone, felt.DirName+"/draft.md", "# local draft\n")
+
+		report := runFFOnlyJSON(t, f.clone)
+		if len(report.Repos) != 1 || report.Repos[0].Status != "stale_dirty" {
+			t.Fatalf("result = %+v, want stale_dirty", report.Repos)
+		}
+		if got := syncTestGit(t, f.clone, "rev-parse", "HEAD"); got != beforeHead {
+			t.Fatalf("HEAD moved to %s, want %s", got, beforeHead)
+		}
+		data, err := os.ReadFile(draft)
+		if err != nil || string(data) != "# local draft\n" {
+			t.Fatalf("draft content = %q (%v), want preserved", string(data), err)
+		}
+	})
+
+	t.Run("dirty submodule with ignore=all still blocks fast-forward", func(t *testing.T) {
+		t.Parallel()
+		f := newSyncFixture(t)
+		initFeltDir(t, f)
+		sub := newSyncFixture(t)
+		syncTestGit(t, f.clone, "-c", "protocol.file.allow=always", "submodule", "add", sub.remote, "sub")
+		syncTestGit(t, f.clone, "config", "-f", ".gitmodules", "submodule.sub.ignore", "all")
+		syncTestGit(t, f.clone, "add", ".gitmodules", "sub")
+		syncTestGit(t, f.clone, "commit", "-m", "add ignored submodule")
+		syncTestGit(t, f.clone, "push")
+		syncTestGit(t, f.peer, "pull", "--ff-only")
+		beforeHead := syncTestGit(t, f.clone, "rev-parse", "HEAD")
+
+		writeSyncFile(t, f.peer, felt.DirName+"/remote.md", "# remote\n")
+		syncTestGit(t, f.peer, "add", felt.DirName+"/remote.md")
+		syncTestGit(t, f.peer, "commit", "-m", "remote update")
+		syncTestGit(t, f.peer, "push")
+
+		writeSyncFile(t, f.clone, "sub/dirty.txt", "dirty\n")
+
+		report := runFFOnlyJSON(t, f.clone)
+		if len(report.Repos) != 1 || report.Repos[0].Status != "stale_dirty" {
+			t.Fatalf("result = %+v, want stale_dirty", report.Repos)
+		}
+		if got := syncTestGit(t, f.clone, "rev-parse", "HEAD"); got != beforeHead {
+			t.Fatalf("HEAD moved to %s, want %s", got, beforeHead)
+		}
+	})
+
+	t.Run("non-git store reports an error instead of empty repos", func(t *testing.T) {
+		t.Parallel()
+		nonGit := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(nonGit, felt.DirName), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		report := runFFOnlyJSON(t, nonGit)
+		if len(report.Repos) != 1 || report.Repos[0].Status != "error" || report.Repos[0].Reason == "" {
+			t.Fatalf("non-git result = %+v, want single error entry", report.Repos)
+		}
+	})
 }

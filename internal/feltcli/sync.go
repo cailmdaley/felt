@@ -69,14 +69,17 @@ runs to completion without a hard deadline, so a slow filesystem cannot leave a
 killed merge holding the Git index lock.
 
 --ff-only runs a strict fast-forward pass: it fetches the tracking branch and
-runs git merge --ff-only only when the working tree is completely clean (no
-staged, unstaged, or untracked files), no Git operation is in progress, and the
-branch has zero local commits ahead of upstream. Any other state is left
-untouched and reported with its reason (use --json for structured output).
+runs git merge --ff-only FETCH_HEAD only when the working tree is completely
+clean (no staged, unstaged, untracked, or dirty submodule files), no Git
+operation is in progress, and the branch has zero local commits ahead of
+upstream. Any other state is left untouched and reported per repository (use
+--json for structured output, exiting 0 once the report is emitted; it skips
+the unreadable-fiber walk).
 
-Sync ends by naming every fiber in the store whose frontmatter no longer
-parses, and then exits non-zero although the merge and push completed: such a
-fiber is invisible to every listing, board and daemon until it is fixed.`,
+In ordinary sync (without --ff-only), sync ends by naming every fiber in the
+store whose frontmatter no longer parses, and then exits non-zero although the
+merge and push completed: such a fiber is invisible to every listing, board and
+daemon until it is fixed.`,
 		Example: `  felt sync                   before substantive work
   felt sync --push            after committing
   felt sync --ff-only --json  fast-forward clean store repos only`,
@@ -190,17 +193,23 @@ type syncMount struct {
 // walk meets it, and the store's own repository not at all. A target outside
 // Git or inside the store's own repository is not a mount and is not walked.
 func (a *app) mountedRepositories(parent context.Context, storeRoot string) []syncMount {
-	toplevel := func(dir string) string {
+	mounts, _ := a.discoverMountedRepositories(parent, storeRoot)
+	return mounts
+}
+
+func (a *app) discoverMountedRepositories(parent context.Context, storeRoot string) ([]syncMount, []syncFFRepoResult) {
+	toplevel := func(dir string) (string, error) {
 		out, err := a.runSyncGit(parent, dir, syncGitTimeout, "rev-parse", "--show-toplevel")
 		if err != nil {
-			return ""
+			return "", err
 		}
-		return strings.TrimSpace(out)
+		return strings.TrimSpace(out), nil
 	}
-	own := toplevel(storeRoot)
+	own, _ := toplevel(storeRoot)
 	seen := map[string]bool{}
 	walked := map[string]bool{}
 	var mounts []syncMount
+	var errs []syncFFRepoResult
 	var walk func(base, prefix string)
 	walk = func(base, prefix string) {
 		if walked[base] {
@@ -209,6 +218,7 @@ func (a *app) mountedRepositories(parent context.Context, storeRoot string) []sy
 		walked[base] = true
 		_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
+				errs = append(errs, syncFFRepoResult{Path: p, Status: "error", Reason: conciseSyncError(err)})
 				return nil
 			}
 			if d.IsDir() && d.Name() == ".git" {
@@ -232,7 +242,13 @@ func (a *app) mountedRepositories(parent context.Context, storeRoot string) []sy
 				return nil
 			}
 			at := path.Join(prefix, filepath.ToSlash(rel))
-			repo := toplevel(target)
+			repo, err := toplevel(target)
+			if err != nil {
+				if !strings.Contains(err.Error(), "not a git repository") {
+					errs = append(errs, syncFFRepoResult{Path: target, Status: "error", Reason: conciseSyncError(err)})
+				}
+				return nil
+			}
 			if repo == "" || repo == own {
 				return nil
 			}
@@ -245,7 +261,7 @@ func (a *app) mountedRepositories(parent context.Context, storeRoot string) []sy
 		})
 	}
 	walk(storeRoot, "")
-	return mounts
+	return mounts, errs
 }
 
 // noUpstreamError is a branch with no remote branch to sync with.
@@ -372,13 +388,28 @@ func (a *app) syncStoreAndMountsFFOnly(parent context.Context, storeRoot string,
 	}
 	seen := map[string]bool{}
 	var repos []string
+	var discoveryErrors []syncFFRepoResult
 	addRepo := func(dir string) {
+		reportPath := dir
+		if filepath.Base(dir) == felt.DirName {
+			reportPath = filepath.Dir(dir)
+		}
 		out, err := a.runSyncGit(parent, dir, syncGitTimeout, "rev-parse", "--show-toplevel")
 		if err != nil {
+			discoveryErrors = append(discoveryErrors, syncFFRepoResult{
+				Path:   reportPath,
+				Status: "error",
+				Reason: conciseSyncError(err),
+			})
 			return
 		}
 		root := strings.TrimSpace(out)
 		if root == "" {
+			discoveryErrors = append(discoveryErrors, syncFFRepoResult{
+				Path:   reportPath,
+				Status: "error",
+				Reason: "git rev-parse --show-toplevel returned empty path",
+			})
 			return
 		}
 		if resolved, err := filepath.EvalSymlinks(root); err == nil {
@@ -390,13 +421,16 @@ func (a *app) syncStoreAndMountsFFOnly(parent context.Context, storeRoot string,
 		}
 	}
 	addRepo(storeRoot)
-	for _, mount := range a.mountedRepositories(parent, storeRoot) {
+	mounts, mountErrs := a.discoverMountedRepositories(parent, storeRoot)
+	discoveryErrors = append(discoveryErrors, mountErrs...)
+	for _, mount := range mounts {
 		addRepo(mount.repo)
 	}
-	results := make([]syncFFRepoResult, 0, len(repos))
+	results := make([]syncFFRepoResult, 0, len(repos)+len(discoveryErrors))
 	for _, repo := range repos {
 		results = append(results, a.syncStoreFFOnly(parent, repo, fetchTimeout))
 	}
+	results = append(results, discoveryErrors...)
 	return syncFFReport{Repos: results}
 }
 
@@ -483,7 +517,7 @@ func (a *app) syncStoreFFOnly(parent context.Context, repo string, fetchTimeout 
 	if err := rejectGitOperationInProgress(git, gitDir); err != nil {
 		return syncFFRepoResult{Path: repo, Status: "stale_dirty", Upstream: upstreamShort, Ahead: &ahead, Behind: &behind, Reason: "git operation in progress"}
 	}
-	statusOut, err := git("status", "--porcelain")
+	statusOut, err := git("status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
 		return syncFFRepoResult{Path: repo, Status: "error", Upstream: upstreamShort, Ahead: &ahead, Behind: &behind, Reason: conciseSyncError(err)}
 	}
@@ -563,15 +597,19 @@ func (a *app) runSyncGit(parent context.Context, dir string, timeout time.Durati
 	}
 	fullArgs := append([]string{"--no-optional-locks", "-C", dir}, args...)
 	cmd := a.env.CommandContext(ctx, "git", fullArgs...)
+	var extraEnv []string
 	if a.env.Getenv("GIT_TERMINAL_PROMPT") == "" {
-		cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+		extraEnv = append(extraEnv, "GIT_TERMINAL_PROMPT=0")
 	}
 	if args[0] == "fetch" || args[0] == "push" {
 		if a.env.Getenv("GIT_SSH_COMMAND") == "" {
-			cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=15")
+			extraEnv = append(extraEnv, "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=15")
 		}
 		cancelSyncNetworkTree(cmd)
 		cmd.WaitDelay = time.Second
+	}
+	if len(extraEnv) > 0 {
+		cmd.Env = append(cmd.Environ(), extraEnv...)
 	}
 	var output bytes.Buffer
 	cmd.Stdout = &output

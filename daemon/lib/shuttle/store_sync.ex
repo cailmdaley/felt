@@ -1,6 +1,6 @@
 defmodule Shuttle.StoreSync do
   @moduledoc """
-  Periodic read-only fast-forward sync for clean felt store repositories.
+  Periodic fetch-and-fast-forward-only sync for clean felt store repositories.
 
   When enabled (`Shuttle.Host.auto_ff_stores?/0`), shells
   `felt -C <store> sync --ff-only --json` for each configured felt store.

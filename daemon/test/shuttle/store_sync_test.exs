@@ -350,7 +350,12 @@ defmodule Shuttle.StoreSyncTest do
 
   test "/api/v1/version exposes store_sync status end-to-end", %{tmp_dir: tmp} do
     fixture = create_store_fixture(tmp, "version-endpoint")
-    pid = start_sync(enabled: true, stores: [fixture.store])
+    non_git = Path.join(System.tmp_dir!(), "shuttle-non-git-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(non_git) end)
+    File.mkdir_p!(Path.join(non_git, ".felt"))
+    {:ok, non_git_real} = Shuttle.Realpath.resolve(non_git)
+
+    pid = start_sync(enabled: true, stores: [fixture.store, non_git])
     Env.put_server(StoreSync, pid)
     _ = StoreSync.sync_now(pid)
 
@@ -359,8 +364,10 @@ defmodule Shuttle.StoreSyncTest do
       |> get("/api/v1/version")
       |> json_response(200)
 
-    assert %{"enabled" => true, "state" => "idle", "repos" => [repo]} = body["store_sync"]
-    assert repo["path"] == fixture.store
-    assert repo["status"] == "up_to_date"
+    assert %{"enabled" => true, "state" => "idle", "repos" => repos} = body["store_sync"]
+    by_path = Map.new(repos, &{&1["path"], &1})
+    assert by_path[fixture.store]["status"] == "up_to_date"
+    assert by_path[non_git_real]["status"] == "error"
+    assert is_binary(by_path[non_git_real]["reason"]) and by_path[non_git_real]["reason"] != ""
   end
 end
