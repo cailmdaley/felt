@@ -688,8 +688,15 @@ Publish readable regular files to the Shuttle board and the session/fiber sent-f
 trail. `shuttle show` writes the same `file_sent` event with `"show": true` so a
 thread page marks the new file unread and auto-advances to it when idle; `shuttle
 send-file` records the delivery without `"show"`. Claude, Codex, Pi and Antigravity sessions use these commands. Paths are resolved to absolute
-paths on the owning host; files must remain there for subsequent viewing.
-The command validates the whole batch before recording one `file_sent` event.
+paths on the owning host. The command copies each file, with its own access,
+into the host's copy store (`sent-files/` beside the event stream, named by
+content digest) and the event names each copy under its path. The board opens
+a sent file from its path while the host's daemon can read it there, so a
+rewritten report stays live, and from the copy otherwise: a file sent from
+`~/Documents`, which a launchd daemon cannot read, or from a scratch directory
+since cleared, still opens. Files over 256 MiB are not copied; each send
+removes copies untouched for 30 days.
+The command reads the whole batch before recording one `file_sent` event.
 It fails visibly if attribution or recording is unavailable.
 `--caption "<text>"` records why the files are sent on that event; the board
 shows it as the words of a file message that has none of its own.
@@ -713,7 +720,8 @@ receiver is invisible to ancestry); else the first set of
 `CLAUDE_SESSION_ID`, `PI_SESSION_ID`.
 The event stream uses the same configuration as `shuttle hook event`; recording
 works offline and confirms registration, not a completed client download.
-The daemon also reads `SendUserFile` hook events as sends, with their `caption`.
+The daemon also reads `SendUserFile` hook events as sends, with their `caption`;
+`shuttle hook event`, running inside the harness, takes their copies.
 
 ### `shuttle sent-files ls <fiber> [--json]`
 

@@ -23,7 +23,7 @@ import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
 import { getDaemonJson, postDaemonJson } from './daemonApi.js'
 import { drawChangeList, type ChangePRListing } from './workspace/changeList.js'
-import { forgetText, head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
+import { byteStatus, forgetText, head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
 import { loadDuration } from './workspace/audioWaveform.js'
 import { carryReading, connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import type { SwipeSignal } from './workspace/PhoneGestures.js'
@@ -191,8 +191,8 @@ export function buildFileViewer(
       if (!disposed) options.onState?.({ status: 'ready' })
     })
     img.addEventListener('error', () => {
-      void head(src, RESOURCE_PRIORITY.selected, { fresh: true }).then(info => {
-        if (!disposed) options.onState?.({ status: 'error', error: info?.exists ? new Error('image format is not supported by this browser') : headError(info), hasContent: false })
+      void nativeFailure(src, 'image format is not supported by this browser').then(error => {
+        if (!disposed) options.onState?.({ status: 'error', error, hasContent: false })
       })
     })
     viewerDisposers.set(wrap, () => { disposed = true })
@@ -317,9 +317,8 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
   let disposed = false
   media.addEventListener('error', () => {
-    // The cache's head distinguishes a missing resource from a codec failure.
-    void head(src, RESOURCE_PRIORITY.selected, { fresh: true }).then(info => {
-      if (!disposed) options.onState?.({ status: 'error', error: info?.exists ? new Error('media format is not supported by this browser') : headError(info), hasContent: false })
+    void nativeFailure(src, 'media format is not supported by this browser').then(error => {
+      if (!disposed) options.onState?.({ status: 'error', error, hasContent: false })
     })
   })
   page.append(media)
@@ -341,6 +340,16 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
 /** Why a document a native viewer could not show failed, from its head. */
 function headError(info: Head | null): Error {
   return new Error(info ? 'file request failed: 404' : 'the daemon could not be reached')
+}
+
+/**
+ * Why a native viewer could not show a document: the owner's answer when the
+ * bytes never arrived, else that this browser cannot decode what did.
+ */
+async function nativeFailure(src: string, undecodable: string): Promise<Error> {
+  const status = await byteStatus(src)
+  if (status === null) return new Error('the daemon could not be reached')
+  return status < 400 ? new Error(undecodable) : new Error(`file request failed: ${status}`)
 }
 
 function buildUnsupportedViewer(base: string, path: string, owner: string, options: FileViewerOptions): HTMLElement {

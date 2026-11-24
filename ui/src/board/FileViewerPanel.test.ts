@@ -602,15 +602,24 @@ describe('workspace file viewer hooks', () => {
     expect(pdfRenderer.mount).not.toHaveBeenCalled()
   })
 
-  it('tells an image that exists but cannot be decoded from a missing one', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (src: string) => new Response(JSON.stringify(src.includes('gone') ? { exists: false } : { exists: true, size: 9, modified_at: 1 }))))
-    const errors: string[] = []
-    for (const path of ['/broken.png', '/gone.png']) {
-      const viewer = buildFileViewer('', path, 'host-a', undefined, undefined, { onState: state => { if (state.status === 'error') errors.push((state.error as Error).message) } })
+  it('asks the owner for the bytes a failed image never showed', async () => {
+    const statuses: Record<string, number> = { '/broken.png': 200, '/gone.png': 404, '/locked.png': 403 }
+    const fetcher = vi.fn(async (src: string, init?: RequestInit) => {
+      expect(init?.method).toBe('HEAD')
+      return new Response(null, { status: statuses[new URL(src, 'http://x').searchParams.get('path')!] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const errors: Record<string, string> = {}
+    for (const path of Object.keys(statuses)) {
+      const viewer = buildFileViewer('', path, 'host-a', undefined, undefined, { onState: state => { if (state.status === 'error') errors[path] = (state.error as Error).message } })
       viewer.querySelector('img')!.dispatchEvent(new Event('error'))
     }
-    await vi.waitFor(() => expect(errors).toHaveLength(2))
-    expect(errors.sort()).toEqual(['file request failed: 404', 'image format is not supported by this browser'])
+    await vi.waitFor(() => expect(Object.keys(errors)).toHaveLength(3))
+    expect(errors).toEqual({
+      '/broken.png': 'image format is not supported by this browser',
+      '/gone.png': 'file request failed: 404',
+      '/locked.png': 'file request failed: 403',
+    })
   })
 
   it('reports missing PDFs and rejects non-PDF responses before opening the viewer', async () => {

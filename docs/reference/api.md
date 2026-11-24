@@ -361,6 +361,16 @@ owner's cache headers, including a remote 304. The board sends `If-None-Match`
 only with a digest `ETag`; an owner that offers none is read in full and the
 board compares a content fingerprint, leaving unchanged views untouched.
 
+A local path's bytes come from the file itself when the owner can open it,
+else from the copy the newest retained send of that path took (each send
+records `copies`, see [the event stream](../dev/event-stream.md)); `/file-info`
+answers the same way. A path with neither is a 404. A regular file the owner
+cannot open is a 403 `{error: "owner could not read file", detail}`, answered
+at once: macOS keeps a launchd daemon out of `~/Documents`, `~/Desktop` and
+`~/Downloads`, so those folders are refused without an open, and any other
+open that has not finished in 5 seconds counts as unreadable. An owner-routed
+request relays the owner's 403; a 502 means the owner did not answer.
+
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; it carries a weak `ETag` and honors
 `If-None-Match` with a 304, and a forwarded read relays the owner's validators.

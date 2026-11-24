@@ -84,6 +84,12 @@ each `--stores` entry, under `--print` as well as a real install — and then
 installs anyway, so the warning is the whole protection. Put both somewhere else: `~/dev/felt` for a checkout,
 `~/notes` or `~/loom` for a store, or anything outside the three folders.
 
+The same holds for a file the board opens by path, such as an embed or a
+report's figure: the daemon answers 403 for a file in one of the three
+folders without trying to open it, since macOS would hold that open on a
+consent prompt nobody sees. A file *sent* from there still opens, because the
+sending worker, which can read it, copies it into `~/.shuttle/sent-files/`.
+
 That turns the symlink direction into a correctness constraint rather than a
 matter of taste. A project on your Desktop can still be daemon-visible — but
 only if its bytes are canonical *outside* the protected folder: the store lives

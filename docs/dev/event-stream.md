@@ -86,6 +86,20 @@ Passthrough reaches the outer terminal only while the pane is visible in an atta
 The outer terminal owns the record as tmux; working and blocked records drop when the client exits, while done survives.
 Switching sessions within a client can leave a stale record.
 
+### Sent-file copies
+
+Every send carries `copies`, an object naming, for each sent absolute path,
+its copy in `sent-files/` beside the stream: `file_sent` lines from
+`shuttle send-file`, `show`, `post --file`, `close --file` and `change`, and a
+harness's `SendUserFile` tool call, whose copies `shuttle hook event` takes
+inside the harness, keyed by the path resolved against the event's `cwd`.
+The writer copies with the sender's access (`internal/shuttlecli/sent_copies.go`),
+content-addressed as `<sha256><ext>`; a re-send of the same bytes renews one
+copy's mtime, and each send removes copies untouched for 30 days. A file over
+256 MiB is recorded without a copy, as is a hook path the hook could not read.
+`Shuttle.SentFiles.copy_for/2` reads the newest send's copy of a path for the
+file route, which serves it when the daemon cannot read the path itself.
+
 ### Clearing sent files
 
 `shuttle sent-files clear <fiber> [--path <file>]` appends a `sent_files_cleared` event through the same locked, rotating writer as `shuttle send-file`.

@@ -760,24 +760,33 @@ function readScroll(key: DocKey): ScrollPosition {
 }
 
 /**
- * Why a document could not be drawn: missing on its owner, its owner
- * unreachable, or a format this browser cannot show, with a retry. A stale
- * notice is a small status over the last loaded copy; otherwise it stands in
- * the document's place.
+ * Why a document could not be drawn, with a retry: missing on its owner, its
+ * owner unable to read it, its owner unreachable or not answering, or bytes
+ * that arrived in a format this browser cannot show. A stale notice is a
+ * small status over the last loaded copy; otherwise it stands in the
+ * document's place.
  */
 export function documentFailure(shuttleBase: string, path: string, owner: string, name: string, error: unknown, stale: boolean, retry: () => void): HTMLElement {
   const message = error instanceof Error ? error.message : ''
-  const missing = /file request failed: (404|410)\b/.test(message)
+  const status = /file request failed: (\d{3})\b/.exec(message)?.[1]
+  const missing = status === '404' || status === '410'
+  const unreadable = status === '403'
   const notice = document.createElement('div')
   notice.className = stale ? 'ws-document-status' : 'ws-document-state'
   notice.setAttribute('role', 'status')
   const cause = document.createElement('p')
   const unsupportedMedia = message === 'media format is not supported by this browser' || message === 'image format is not supported by this browser'
-  cause.textContent = missing
-    ? `Not found on ${owner}${stale ? ' — showing last loaded copy' : ''}`
+  const lastCopy = stale ? ' — showing last loaded copy' : ''
+  cause.textContent = missing ? `Not found on ${owner}${lastCopy}`
+    : unreadable ? `${owner} could not read this file${lastCopy}`
     : unsupportedMedia ? (message.startsWith('image') ? 'This browser cannot show this image' : 'This browser cannot play this format')
-    : `${owner} is unreachable${stale ? ' — showing last loaded copy' : ''}`
+    : `${owner} is unreachable${lastCopy}`
   notice.append(cause)
+  if (unreadable && !stale) {
+    const resend = document.createElement('p')
+    resend.textContent = 'The worker can send it again.'
+    notice.append(resend)
+  }
   if (unsupportedMedia) {
     const download = document.createElement('a')
     download.href = fileBytesUrl(shuttleBase, path, owner)
@@ -785,7 +794,7 @@ export function documentFailure(shuttleBase: string, path: string, owner: string
     download.textContent = 'Download'
     notice.append(download)
   }
-  if (missing) {
+  if (missing || unreadable) {
     const where = document.createElement('code')
     where.className = 'ws-document-path'
     where.textContent = path

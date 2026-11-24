@@ -127,10 +127,15 @@ The two channels overlap — the file a worker sends can also be the fiber's
 
 | | Companion | Send |
 |---|---|---|
-| What it is | a file in the fiber directory | an event record pointing at a path |
+| What it is | a file in the fiber directory | an event record naming a path and a copy taken when it was sent |
 | Travels with | `nest`, `unnest`, git, sync | nothing — it stays on the machine that ran the worker |
-| Lifetime | as long as the fiber | as long as the live `events.jsonl`; a trail that rolled over is gone |
+| Lifetime | as long as the fiber | as long as the live `events.jsonl`; a trail that rolled over is gone. The copy outlives its original for 30 days |
 | Scope | any machine that has the fiber | that host, capped at 50 entries per card |
+
+Sending takes a copy: the sending process copies each file into the host's
+`~/.shuttle/sent-files/`, and the board opens the file from its path while the
+host's daemon can read it there, from the copy otherwise. A send from a folder
+the daemon cannot read, or from a scratch directory since cleared, still opens.
 
 Sending a file does not put it in the fiber, and putting a file in the fiber
 does not surface it on the board.

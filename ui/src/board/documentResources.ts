@@ -16,7 +16,8 @@ import { DOCUMENT_HEAD, remotePage } from '../sdk/remotePage.js'
  *   owner's mtime and size.
  * - **Four answers:** `head` (existence, size, mtime), `peek` (the first
  *   64 KiB), `text` (the whole body) and `bytes` (a whole binary body, read for
- *   a derivation and not kept).
+ *   a derivation and not kept). `byteStatus` asks, uncached, how the owner
+ *   answers for the bytes a native viewer failed to show.
  * - **One read per question:** concurrent askers share a request in flight,
  *   and a settled answer stands for `RESOURCE_FRESH_MS`. After that it
  *   revalidates with `If-None-Match`, so an unchanged document costs a
@@ -239,6 +240,22 @@ export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY
       return value
     } finally { limit.answered() }
   }, options.signal).catch(() => null)
+}
+
+/**
+ * The owner's answer for a document's bytes, from a bodiless request for
+ * them: its HTTP status, or null when no answer came in time. A native viewer
+ * (`<img>`, `<audio>`, `<video>`) hides the status of the request it made, so
+ * one that fails asks here whether the bytes never arrived or arrived and
+ * could not be decoded.
+ */
+export async function byteStatus(src: string, signal?: AbortSignal): Promise<number | null> {
+  const limit = deadline(signal, RESOURCE_DEADLINE_MS)
+  try {
+    return (await fetch(bytesUrl(src), { method: 'HEAD', cache: 'no-store', signal: limit.signal })).status
+  } catch {
+    return null
+  } finally { limit.answered() }
 }
 
 /**

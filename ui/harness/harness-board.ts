@@ -11,6 +11,7 @@
  * `?transcript=live` to give its constitution a live worker, or
  * `?example=workspace&transcript=search` stages the bar Find's constitutions and grouped transcript hits for "mask".
  * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
+ * `?example=workspace&failures` sends four images the reader cannot draw, one for each cause it names.
  * `?example=channels&illuminated=1` is a design experiment, not the board: each channel's head set in the illuminated capitals.
  * `?example=desk` is a busy Desk over the channels' fixture, its `/board/family` answering what waits (a post to the human among it).
  * `?page=thread&f=<uid>@<host>` mounts a page (src/pages/) instead of the board, over the same mocked daemon:
@@ -114,6 +115,23 @@ if (workspaceFixture && search.has('manyFiles')) {
       : i % 3 === 1 ? `Scan ${i}: response by redshift bin` : undefined
     workspaceFixture.receipts.push({ ...first, fullPath, basename: fullPath.split('/').at(-1), timestamp: now - (40 + i * 7) * 60_000, sessionId: `many-files-${i}`, ...caption ? { caption } : {} })
   }
+}
+// `failures` sends four images the reader cannot draw, one for each cause it
+// names: the owner cannot read it, it is gone, its owner does not answer, and
+// bytes this browser cannot decode. The owner's answer for each is its status.
+const fileFaults = new Map<string, number>()
+if (workspaceFixture && search.has('failures')) {
+  const sends: Array<[string, string, number]> = [
+    [WORKSPACE_HOST, '/home/fixture/Documents/projects/talks/2611_meeting/_check/01-title.png', 403],
+    [WORKSPACE_HOST, '/tmp/fixture-scratch/frame.png', 404],
+    [workspaceFixture.remote, '/scratch/fixture-store/covariance/residuals.png', 502],
+    [WORKSPACE_HOST, '/fixture-store/workspace/deliverables/truncated.png', 200],
+  ]
+  sends.forEach(([host, fullPath, status], i) => {
+    workspaceFixture.receipts.push({ fullPath, basename: fullPath.split('/').at(-1), timestamp: now - (5 + i) * 60_000, sessionId: 'failed-sends', uid: WORKSPACE_UID, host })
+    if (status === 200) workspaceFixture.files.push({ owner: host, path: fullPath, mime: 'image/png', body: new Blob(['not an image'], { type: 'image/png' }) })
+    else fileFaults.set(fullPath, status)
+  })
 }
 const channelsFixture = workspaceFixture && example === 'channels' ? addChannelsFixtures(workspaceFixture, now)
   : workspaceFixture && example === 'desk' ? addDeskFixtures(workspaceFixture, now) : null
@@ -1458,6 +1476,9 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // A text card's body. Images, pages and PDFs load by URL, not through
   // fetch, so offline they stay faces.
   if (url.includes('/api/v1/file')) {
+    const fileUrl = new URL(url, 'http://harness.invalid')
+    const fault = fileUrl.pathname.endsWith('/api/v1/file') ? fileFaults.get(fileUrl.searchParams.get('path') ?? '') : undefined
+    if (fault) return json({ error: fault === 403 ? 'owner could not read file' : 'file not found' }, fault)
     if (workspaceFixture) {
       const response = workspaceFixture.fileResponse(url, method, init?.headers)
       ;(request as Record<string, unknown>).status = response.status
