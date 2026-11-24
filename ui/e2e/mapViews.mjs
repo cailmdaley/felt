@@ -125,13 +125,15 @@ export function registerMapViewJourneys(test) {
     await page.waitForTimeout(100)
     const [barTop, scrollTop] = await Promise.all([bar.boundingBox(), scroller.boundingBox()]).then(([b, s]) => [Math.round(b.y), Math.round(s.y)])
     assert.equal(barTop, scrollTop, 'the bar is pinned to the top of the scroll')
-    // → and ← step, from the page and from inside the file; the board takes neither as back.
+    // → and ← step from the page; the board takes neither as back.
     const at = page.url()
     await page.keyboard.press('ArrowRight')
     assert.deepEqual(await where(), ['report.html', '2 / 6'])
     // The report itself shows, not a frame left empty.
     assert.equal(await page.frameLocator('.ws-page.ws-selected .uf-page iframe').locator('h1').textContent(), 'Report: Pipeline repository steward')
-    await page.frameLocator('.ws-page.ws-selected .uf-page iframe').locator('body').click()
+    await view(page).locator('.uf-page iframe').waitFor()
+    // A press on the page opens it full screen; the keys reach the unfolded page by focus.
+    await view(page).locator('.uf-page').focus()
     await page.keyboard.press('ArrowLeft')
     await until(page, () => document.querySelector('.ws-page.ws-selected .uf-bar .uf-count')?.textContent === '1 / 6')
     await page.keyboard.press('ArrowLeft')

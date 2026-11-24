@@ -327,7 +327,7 @@ export class Reader {
     this.opts.onSelect(next.key)
     return true
   }
-  /** Back, Escape and the phone swipe: the view the reader was opened from. */
+  /** Back, Escape and the phone swipe: the page beneath full screen, else the view the reader was opened from. */
   back(): void { this.opts.onReturn() }
   closeSettings(after: () => void): void { this.settingsMenu.close(after) }
   /** Seat the console under the stage, or clear it where the page has none. */

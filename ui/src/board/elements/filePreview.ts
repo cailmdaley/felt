@@ -225,7 +225,8 @@ function scroller(el: HTMLElement): HTMLElement | null {
  * unfolds that file at its natural height in the same place, the same card
  * grown, under a quiet bar pinned to the top of whatever scrolls it: the
  * file's name, ‹ i / n › when there are several (the count opening the list
- * of them, {@link openFileList}), full screen, and the fold chevron. The bar has no ground of its own until it pins over the file, when
+ * of them, {@link openFileList}), full screen, and the fold chevron. A framed page (a tapestry, a report) unfolded with full screen
+ * offered opens full screen when pressed. The bar has no ground of its own until it pins over the file, when
  * it takes its page's ground and a hairline. While one is unfolded, ← and →
  * step to its neighbours, from the page or from inside the file, and Escape
  * folds it, returning to the preview.
@@ -331,6 +332,8 @@ export class Unfold {
     this.page.dataset.kind = kind
     this.page.dataset.key = key
     this.page.replaceChildren(viewer)
+    // A framed page keeps every press for itself, so a pane over it takes the press: it opens full screen, where the page is the reader's to use.
+    if (kind === 'html' && this.opts.full && !this.isPinned(key)) this.page.append(this.cover(key))
     this.el.setAttribute('data-unfolded', '')
     this.el.replaceChildren(this.bar, this.page)
     // Grown first, so a fold elsewhere that the page then answers has room to scroll.
@@ -392,6 +395,17 @@ export class Unfold {
     disposeFileViewer(this.open.viewer)
     this.open.viewer.remove()
     this.open = null
+  }
+  /** The pane over an unfolded framed page: a press opens the page full screen; a drag scrolls what holds it. */
+  private cover(key: DocKey): HTMLButtonElement {
+    const cover = document.createElement('button')
+    cover.type = 'button'
+    cover.className = 'uf-cover'
+    cover.tabIndex = -1
+    cover.title = 'Full screen'
+    cover.setAttribute('aria-label', cover.title)
+    cover.addEventListener('click', event => { event.stopPropagation(); this.opts.full!(key) })
+    return cover
   }
   private isPinned(key = this.open?.key): boolean {
     return !!key && !!this.opts.pinned?.(key)

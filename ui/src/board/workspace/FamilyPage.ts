@@ -34,6 +34,8 @@ export interface ViewFeeds extends MapFeeds, DocFeeds {
   waits(): Waits
   /** One of its pages that the view unfolds in place beside its files, where no reader opens it (its constitution, in a page). */
   page?(card: KanbanCard, doc: DocKey): MapFile | undefined
+  /** A file unfolded here, sent full screen: shown over this view, whose back returns here. Without it, full screen opens the file as `open` does. */
+  full?(card: KanbanCard, doc: DocKey): void
 }
 
 /** How far the page must be pulled down past its top before its orchestrator's view opens, in px. */
@@ -148,7 +150,7 @@ export class FamilyPage {
           this.docs.refresh()
         }
       },
-      full: key => { if (this.card) feeds.open(this.card, key) },
+      full: key => { if (this.card) (feeds.full ?? feeds.open)(this.card, key) },
       link: (key, href) => { if (this.card) feeds.link(this.card, key, href) },
       pinned: key => this.pinLead && key === this.leadKey,
     })

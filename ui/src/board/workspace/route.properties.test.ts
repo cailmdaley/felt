@@ -2,14 +2,16 @@
 /**
  * Back is one step from anywhere. A random walk over everything that moves the
  * reader or the browser (opening a constitution from a view, moving to another
- * one, its pages, a scan, the reader's back, the browser's back and forward,
- * another view's tab, a reload) runs against jsdom's real session history, and
- * from wherever it ends:
+ * one, its pages, a page sent full screen, a scan, the reader's back and its
+ * leave, the browser's back and forward, another view's tab, a reload) runs
+ * against jsdom's real session history, and from wherever it ends:
  *
- *  - the reader's back reaches a view in one step, and that view is the one
- *    the reader names as its way back;
+ *  - from full screen, the reader's back or the browser's reaches the page
+ *    beneath it in one step;
+ *  - from any other page, the reader's back reaches a view in one step, and
+ *    that view is the one the reader names as its way back;
  *  - the browser's back from a reader opened over a view reaches that view in
- *    one step too;
+ *    one step too, and leaving reaches it in one call from anywhere;
  *  - the address names the page or view last shown.
  *
  * Steps may be rushed, leaving a back in flight when the next one starts; a
@@ -34,6 +36,8 @@ type Step =
   | { kind: 'open'; uid: string; view: WorkspaceOriginView }
   | { kind: 'move'; uid: string; quiet: boolean }
   | { kind: 'page'; doc: string }
+  | { kind: 'full'; doc: string }
+  | { kind: 'back' }
   | { kind: 'name'; doc: string }
   | { kind: 'leave' }
   | { kind: 'browserBack' }
@@ -49,6 +53,8 @@ const step: fc.Arbitrary<Step> = fc.oneof(
   fc.record({ kind: fc.constant('open' as const), uid, view }),
   fc.record({ kind: fc.constant('move' as const), uid, quiet: fc.boolean() }),
   fc.record({ kind: fc.constant('page' as const), doc }),
+  fc.record({ kind: fc.constant('full' as const), doc }),
+  fc.constant({ kind: 'back' as const }),
   fc.record({ kind: fc.constant('name' as const), doc }),
   fc.constant({ kind: 'leave' as const }),
   fc.constant({ kind: 'browserBack' as const }),
@@ -67,7 +73,7 @@ const inReader = (): boolean => parseRoute(window.location.hash)?.kind === 'chan
 describe('back is one step from anywhere', () => {
   it('after any walk, the reader\'s back or the browser\'s reaches the view it names in one step, and the address names what is shown', async () => {
     const walkStep = fc.record({ step, rush: fc.boolean() })
-    await fc.assert(fc.asyncProperty(view, fc.boolean(), fc.array(walkStep, { maxLength: 24 }), fc.constantFrom('reader', 'browser'), async (start, deep, walk, back) => {
+    await fc.assert(fc.asyncProperty(view, fc.boolean(), fc.array(walkStep, { maxLength: 24 }), fc.constantFrom('reader', 'browser', 'leave'), async (start, deep, walk, back) => {
       history?.dispose()
       // A fresh entry, so nothing a previous walk left ahead of it can be reached; a deep start is a reader address with nothing of ours below.
       window.history.pushState({ floor: true }, '', deep ? '#/board/deep@host' : `#/${start}`)
@@ -75,11 +81,15 @@ describe('back is one step from anywhere', () => {
       const make = (): WorkspaceHistory => new WorkspaceHistory(route => { shown = route })
       history = make()
       history.start()
+      let revisited = false
       for (const { step: s, rush } of walk) {
         const reader = inReader()
+        revisited ||= s.kind === 'browserForward' || (rush && s.kind === 'browserBack')
         if (s.kind === 'open' && !reader) history.enter(s.uid, 'host', undefined, s.view)
         else if (s.kind === 'move' && reader) history.enter(s.uid, 'host', undefined, undefined, s.quiet)
         else if (s.kind === 'page') history.show(s.doc)
+        else if (s.kind === 'full') history.full(s.doc)
+        else if (s.kind === 'back') history.back()
         // The reader settled on a page by itself: what it shows is what the address now names.
         else if (s.kind === 'name') { const before = window.location.hash; history.name(s.doc); if (window.location.hash !== before) shown = parseRoute(window.location.hash) }
         else if (s.kind === 'leave') history.leave()
@@ -95,9 +105,21 @@ describe('back is one step from anywhere', () => {
       await settle()
       if (shown) expect(window.location.hash, 'the address names what is shown').toBe(addressOf(shown))
       if (!inReader()) return
+      const beneath = history.beneath
+      if (beneath && back !== 'leave') {
+        if (back === 'reader') history.back()
+        else window.history.back()
+        await settle()
+        // Full screen the browser's forward revisits may stand over an entry the board has since rewritten (a move, a tab, a leave): the back lands there.
+        if (!revisited) expect(window.location.hash, 'one back from full screen lands on the page beneath it').toBe(formatRoute(beneath))
+        expect(addressOf(shown!)).toBe(window.location.hash)
+        expect(history.beneath).toBeNull()
+        if (!inReader()) return
+      }
       const named = history.backLabel.toLowerCase()
       // The browser's back from a deep link with nothing below leaves the board, as it should; only the reader's is checked there.
-      if (back === 'reader' || window.history.state?.floor) history.leave()
+      if (back === 'leave') history.leave()
+      else if (back === 'reader' || window.history.state?.floor) history.back()
       else window.history.back()
       await settle()
       const landed = viewOfHash(window.location.hash)

@@ -31,6 +31,7 @@ import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } fro
 import { VoiceStrip, voiceLine } from '../board/workspace/voiceStrip.js'
 import { WorkerActions, type StartWorker } from '../board/workspace/workerActions.js'
 import '../board/workspace/dock.css'
+import { MOBILE_MEDIA } from '../board/mobile.js'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
 import { PageActions, pageActLabel, pageActsFor } from './pageActions.js'
@@ -67,6 +68,9 @@ const fiberPath = (card: KanbanCard): string => {
   return card.path.startsWith('/') ? card.path : `${card.feltStore ?? ''}/${card.path}`
 }
 
+/** The history entry of a file shown full screen over the page. */
+const FULL_STATE = 'threadPageFull'
+
 /**
  * Opens a file in a 3/4-screen floating window (RexWeb Popup on Mac, normal
  * window/tab in browsers), which learns nothing of the page that opened it.
@@ -87,13 +91,15 @@ const openFloating = (url: string): void => {
  * to another fiber moves Rex there when the page stands in a Rex pane
  * (`in=rex`), and otherwise opens that fiber's page in its place. Its lead
  * tapestry sits full-bleed in place with no fold chrome; a file shown full
- * opens in a window of its own. For any constitution, the board's
+ * opens in a window of its own, or on a phone over the page, under a bar
+ * whose back (or the browser's) returns to it. For any constitution, the board's
  * docked console footer sits flush at the bottom edge across both modes,
  * holding its context/cache warmth meter, Listen mic control and voice strip,
  * and {@link WorkerActions} (message box, Send/Resume, and New session). Beside
  * the Console in its top bar stand its lifecycle acts ({@link PageActions}),
  * with a live worker or none: the verb that fits its state, a menu of them
- * all, and their ⌥⌘ chords. It moves no history or swipe.
+ * all, and their ⌥⌘ chords. Its one history entry is a file shown full
+ * screen on a phone; it moves no swipe.
  */
 export class ThreadPage {
   readonly el = document.createElement('main')
@@ -145,6 +151,8 @@ export class ThreadPage {
   private mode: ThreadMode = 'files'
   private modeCardUid: string | null = null
   private selectedChangeFile: { path: string; owner: string } | null = null
+  /** The file shown full screen over the page on a phone. */
+  private full: { layer: HTMLElement; viewer: HTMLElement } | null = null
   private changesViewer: HTMLElement | null = null
   private changesKey: string | null = null
   private usage: TranscriptUsage | null = null
@@ -251,7 +259,7 @@ export class ThreadPage {
         const file = parseDocKey(key)
         if (!file) return
         if (isChangeFile(file.path)) { this.openChangeFile(file); return }
-        void fileTabUrl(this.opts.base, file.path, file.owner).then(openFloating)
+        this.showFull(key)
       },
       lead: card => this.leads.of(card),
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
@@ -409,8 +417,51 @@ export class ThreadPage {
     }
   }
 
+  /**
+   * A file shown full: a window of its own, or on a phone a layer over the
+   * page with one history entry, whose back (the bar's or the browser's)
+   * returns to the page as it was.
+   */
+  private showFull(key: DocKey): void {
+    const file = parseDocKey(key)
+    if (!file) return
+    if (!window.matchMedia(MOBILE_MEDIA).matches) { void fileTabUrl(this.opts.base, file.path, file.owner).then(openFloating); return }
+    this.closeFull()
+    const card = this.feed.card(), name = card ? slug(card) : 'thread'
+    const layer = document.createElement('section'), bar = document.createElement('nav'), back = document.createElement('button'), title = document.createElement('span')
+    layer.className = 'pg-full'
+    bar.className = 'pg-nav'
+    back.type = 'button'
+    back.className = 'pg-back'
+    back.textContent = `← ${name}`
+    back.setAttribute('aria-label', `Back to ${name}`)
+    back.addEventListener('click', () => window.history.back())
+    title.className = 'pg-bar-title'
+    title.textContent = basename(file.path)
+    title.title = file.path
+    bar.append(back, title)
+    const viewer = buildFileViewer(this.opts.base, file.path, file.owner, undefined, undefined, { active: true, onNavigate: href => this.link(key, href) })
+    layer.append(bar, viewer)
+    this.el.append(layer)
+    this.full = { layer, viewer }
+    window.history.pushState({ ...window.history.state, [FULL_STATE]: true }, '')
+    window.addEventListener('popstate', this.leaveFull)
+  }
+  /** The browser moved off the full file's entry: the page shows again. */
+  private readonly leaveFull = (event: PopStateEvent): void => {
+    if (!(event.state as Record<string, unknown> | null)?.[FULL_STATE]) this.closeFull()
+  }
+  private closeFull(): void {
+    window.removeEventListener('popstate', this.leaveFull)
+    if (!this.full) return
+    disposeFileViewer(this.full.viewer)
+    this.full.layer.remove()
+    this.full = null
+  }
+
   dispose(): void {
     this.disposed = true
+    this.closeFull()
     clearTimeout(this.saidTimer)
     clearInterval(this.usageTimer)
     for (const event of INTERACTION_EVENTS) document.removeEventListener(event, this.onInteract, { capture: true })
@@ -789,7 +840,7 @@ export class ThreadPage {
         const file = parseDocKey(doc)
         if (!file) return
         if (isChangeFile(file.path)) { this.openChangeFile(file); return }
-        void fileTabUrl(this.opts.base, file.path, file.owner).then(openFloating)
+        this.showFull(doc)
       },
       edits: false,
     }

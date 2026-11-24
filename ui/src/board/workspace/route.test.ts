@@ -100,6 +100,68 @@ describe('workspace routes', () => {
     }
   })
 
+  it('full screen is one entry above the page it was sent from: back, the reader\'s or the browser\'s, returns there, and a second back to the view', async () => {
+    for (const back of ['reader', 'browser'] as const) {
+      resetHash('#/desk')
+      const onRoute = vi.fn()
+      const history = create(onRoute)
+      history.start()
+      history.enter('a', 'host', 'family:a', 'desk')
+      const view = window.location.hash, length = window.history.length
+      history.full('host:/a/tapestry.html')
+      expect(window.history.length).toBe(length + 1)
+      // Steps inside full screen take its place.
+      history.show('host:/a/plot.svg')
+      expect(window.history.length).toBe(length + 1)
+      expect(history.beneath).toEqual({ kind: 'channel', uid: 'a', owner: 'host', doc: 'family:a' })
+      await nextPop(() => back === 'reader' ? history.back() : window.history.back())
+      await settle()
+      expect(window.location.hash).toBe(view)
+      expect(onRoute).toHaveBeenLastCalledWith({ kind: 'channel', uid: 'a', owner: 'host', doc: 'family:a' })
+      expect(history.beneath).toBeNull()
+      expect(history.backLabel).toBe('Desk')
+      await nextPop(() => back === 'reader' ? history.back() : window.history.back())
+      expect(window.location.hash).toBe('#/desk')
+      history.dispose()
+    }
+  })
+
+  it('from full screen, the page beneath chosen is back, and leaving reaches the view in one call', async () => {
+    resetHash('#/channels')
+    const onRoute = vi.fn()
+    const history = create(onRoute)
+    history.start()
+    history.enter('a', 'host', 'family:a', 'channels')
+    const view = window.location.hash, length = window.history.length
+    history.full('host:/a/tapestry.html')
+    await nextPop(() => history.show('family:a'))
+    expect(window.location.hash).toBe(view)
+    expect(window.history.length).toBe(length + 1)
+    history.full('host:/a/tapestry.html')
+    history.leave()
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })
+    await settle()
+    await settle()
+    expect(window.location.hash).toBe('#/channels')
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/channels' })
+  })
+
+  it('full screen over an address opened directly returns to it, and a reload keeps where back goes', async () => {
+    const deep = formatRoute({ kind: 'channel', uid: 'deep', owner: 'host', doc: 'family:deep' })
+    resetHash(deep)
+    const history = create()
+    history.start()
+    history.full('host:/deep/tapestry.html')
+    history.dispose()
+    const reloaded = create()
+    reloaded.start()
+    expect(reloaded.beneath).toEqual(parseRoute(deep))
+    await nextPop(() => reloaded.back())
+    expect(window.location.hash).toBe(deep)
+    reloaded.back()
+    expect(window.location.hash).toBe('#/channels')
+  })
+
   it('a back that lands in a framed page\'s own history goes on back to the view; a frame stepping back by itself is left be', () => {
     resetHash('#/channels')
     const history = create()

@@ -13,8 +13,12 @@ export const FRAME_STEPS = 8
 export const LANDING_MS = 500
 /** The view a reader entry was opened from: `desk`, or a registered view's id. */
 export type WorkspaceOriginView = string
-/** What a reader entry says about itself: whether the view it was opened from is the entry below it, and which view that is. */
-interface RouteState { layer: boolean; originView: WorkspaceOriginView }
+/**
+ * What a reader entry says about itself: whether the view it was opened from
+ * is the entry below it, which view that is, and, for a page shown full
+ * screen, the address of the page beneath it, which is the entry below.
+ */
+interface RouteState { layer: boolean; originView: WorkspaceOriginView; under?: string }
 type StateObject = Record<string, unknown>
 
 function encode(value: string): string {
@@ -57,7 +61,8 @@ function stateObject(value: unknown): StateObject {
 
 function readRouteState(value: unknown): RouteState | null {
   const entry = stateObject(value)[STATE_KEY] as Partial<RouteState> | undefined
-  return entry && typeof entry.layer === 'boolean' && typeof entry.originView === 'string' && entry.originView ? { layer: entry.layer, originView: entry.originView } : null
+  if (!entry || typeof entry.layer !== 'boolean' || typeof entry.originView !== 'string' || !entry.originView) return null
+  return { layer: entry.layer, originView: entry.originView, ...typeof entry.under === 'string' ? { under: entry.under } : {} }
 }
 
 function withRouteState(value: unknown, routeState: RouteState | null): StateObject {
@@ -69,17 +74,24 @@ function withRouteState(value: unknown, routeState: RouteState | null): StateObj
 
 /**
  * Where back goes. The reader is one layer over the view it was opened
- * from, and back's destination depends only on where you are, never on how
- * you got there: back from any page the reader shows returns to that view.
+ * from, and back from any page the reader shows returns to that view, save
+ * a page sent full screen, whose back returns to the page it was sent from.
  *
- * The layer holds at most one history entry, pushed directly above its
- * view's when the reader opens. Every move inside the reader (another
- * constitution, another page, a link, a scan) replaces that entry, so the
- * address always names what is shown while the history never grows. The
- * reader's back, Escape, the phone's swipe, the origin view's tab and the
- * browser's own back are therefore the same single step. A reader address
- * opened directly (a deep link, a typed URL with nothing of ours below it)
- * has no view entry below: leaving it replaces it with its view.
+ * The layer holds one history entry, pushed directly above its view's when
+ * the reader opens. Every move inside the reader (another constitution,
+ * another page, a link, a scan) replaces that entry, so the address always
+ * names what is shown while the history never grows. The reader's back,
+ * Escape, the phone's swipe, the origin view's tab and the browser's own
+ * back are therefore the same single step. A reader address opened
+ * directly (a deep link, a typed URL with nothing of ours below it) has no
+ * view entry below: leaving it replaces it with its view.
+ *
+ * Full screen (a file a page shows in place, sent to fill the reader) is
+ * one entry more, above the page it was sent from: moves inside it replace
+ * it, and back from it (the reader's, Escape, the phone's swipe, the
+ * browser's) returns to that page; that page chosen from it is back too.
+ * Leaving for the view from it (the view's tab, Channels' swipe) passes
+ * both entries.
  *
  * Another view chosen from the reader replaces the reader's entry, so the
  * browser's back from there returns to the view the reader covered; the
@@ -96,8 +108,12 @@ export class WorkspaceHistory {
   private origin: WorkspaceOriginView = CHANNELS_VIEW
   /** The reader's entry sits directly above its view's. */
   private layered = false
+  /** The address of the page beneath the page shown full screen, the entry below; null when nothing is full screen. */
+  private under: string | null = null
   /** A back this history asked for has not landed: anything asked meanwhile waits for it. */
   private leaving = false
+  /** A leave from full screen has yet to pass the page beneath it. */
+  private passing = false
   private queued: (() => void) | null = null
   /** How many entries of framed pages' history the back in flight has gone on through. */
   private steps = 0
@@ -111,6 +127,11 @@ export class WorkspaceHistory {
   get originView(): WorkspaceOriginView { return viewOrDesk(this.origin) }
   /** Its name. */
   get backLabel(): string { return viewTitle(this.originView) }
+  /** The page beneath the page shown full screen, where the reader's back goes; null when nothing is full screen. */
+  get beneath(): Extract<WorkspaceRoute, { kind: 'channel' }> | null {
+    const route = this.under ? parseRoute(this.under) : null
+    return route?.kind === 'channel' ? route : null
+  }
 
   start(): void {
     if (this.started) return
@@ -130,6 +151,7 @@ export class WorkspaceHistory {
     this.current = route
     this.layered = saved?.layer ?? false
     this.origin = saved?.originView ?? CHANNELS_VIEW
+    this.under = saved?.under ?? null
     this.onRoute(route, false)
   }
 
@@ -143,11 +165,14 @@ export class WorkspaceHistory {
     const route: Extract<WorkspaceRoute, { kind: 'channel' }> = { kind: 'channel', uid, owner, ...(doc === undefined ? {} : { doc }) }
     const hash = formatRoute(route)
     if (hash === this.currentHash) return
+    // The page beneath full screen, chosen from it, is back.
+    if (hash === this.under) { this.back(); return }
     if (this.current?.kind === 'channel') {
       window.history.replaceState(withRouteState(window.history.state, this.routeState()), '', hash)
     } else {
       this.origin = viewOfHash(this.currentHash) ?? originView ?? this.origin
       this.layered = true
+      this.under = null
       window.history.pushState(withRouteState(null, this.routeState()), '', hash)
     }
     this.current = route
@@ -159,6 +184,27 @@ export class WorkspaceHistory {
   show(doc: DocKey): void {
     if (this.current?.kind !== 'channel' || this.current.doc === doc) return
     this.enter(this.current.uid, this.current.owner, doc)
+  }
+
+  /**
+   * A page of the constitution shown full screen, one entry above the page
+   * on show, which back returns to. Asked from full screen, it takes full
+   * screen's place.
+   */
+  full(doc: DocKey): void {
+    if (this.leaving) { this.queued = () => this.full(doc); return }
+    if (this.current?.kind !== 'channel') return
+    if (this.under) { this.show(doc); return }
+    const route: WorkspaceRoute = { kind: 'channel', uid: this.current.uid, owner: this.current.owner, doc }
+    const hash = formatRoute(route)
+    if (hash === this.currentHash) return
+    // The page beneath says what it is (a deep link's says nothing yet), so a back that lands on it knows.
+    window.history.replaceState(withRouteState(window.history.state, this.routeState()), '')
+    this.under = this.currentHash
+    window.history.pushState(withRouteState(null, this.routeState()), '', hash)
+    this.current = route
+    this.currentHash = hash
+    this.onRoute(route, false)
   }
 
   /** The address follows a page the reader settled on by itself, applying nothing. */
@@ -184,6 +230,7 @@ export class WorkspaceHistory {
     else window.history.pushState(null, '', hash)
     this.origin = viewOfHash(hash) ?? DESK_VIEW
     this.layered = false
+    this.under = null
     this.current = { kind: 'overview', hash }
     this.currentHash = hash
     this.onRoute(this.current, false)
@@ -191,21 +238,37 @@ export class WorkspaceHistory {
 
   /** A back that landed in a framed page's own history (a deck's slides): the back this history asked for goes on to the view. */
   framePopped(): void {
-    if (this.leaving && ++this.steps <= FRAME_STEPS) this.back()
+    if (this.leaving && ++this.steps <= FRAME_STEPS) this.pop()
   }
 
-  /** Back, from anywhere in the reader: its view, in one step. */
+  /** The reader's back: from full screen, the page beneath it; from any other page, the view. */
+  back(): void {
+    const beneath = this.beneath
+    if (this.current?.kind !== 'channel' || this.leaving) return
+    if (!beneath) { this.leave(); return }
+    this.leaving = true
+    this.steps = 0
+    this.pop()
+    this.current = beneath
+    this.currentHash = this.under!
+    this.under = null
+    this.onRoute(beneath, false)
+  }
+
+  /** Leave the reader, from anywhere in it: its view, a step back, or two from full screen; with no view below, its entry becomes the view. */
   leave(): void {
     if (this.current?.kind !== 'channel' || this.leaving) return
     const hash = `#/${this.originView}`
     if (this.layered) {
       this.leaving = true
+      this.passing = !!this.under
       this.steps = 0
-      this.back()
+      this.pop()
     } else {
       window.history.replaceState(withRouteState(window.history.state, null), '', hash)
     }
     this.layered = false
+    this.under = null
     this.current = { kind: 'overview', hash }
     this.currentHash = hash
     this.onRoute(this.current, false)
@@ -226,14 +289,15 @@ export class WorkspaceHistory {
    * One step back. A back the board never hears land (it stopped in a frame's
    * history past the steps it goes on through, or on an entry a nested frame
    * made, which reports nothing) is taken as landed: the entry it stopped on
-   * names the view, and what was asked meanwhile goes ahead.
+   * names what the board shows (the view, or the page beneath full screen),
+   * and what was asked meanwhile goes ahead.
    */
-  private back(): void {
+  private pop(): void {
     window.history.back()
     clearTimeout(this.landing)
     this.landing = window.setTimeout(() => {
       if (!this.leaving) return
-      window.history.replaceState(withRouteState(window.history.state, null), '', this.currentHash)
+      window.history.replaceState(withRouteState(window.history.state, this.current?.kind === 'channel' ? this.routeState() : null), '', this.currentHash)
       this.handleLocation(window.history.state)
     }, LANDING_MS)
   }
@@ -245,6 +309,7 @@ export class WorkspaceHistory {
     window.removeEventListener('hashchange', this.onHashChange)
     this.started = false
     this.leaving = false
+    this.passing = false
     this.queued = null
   }
 
@@ -253,7 +318,7 @@ export class WorkspaceHistory {
   }
 
   private routeState(): RouteState {
-    return { layer: this.layered, originView: this.origin }
+    return { layer: this.layered, originView: this.origin, ...this.under ? { under: this.under } : {} }
   }
 
   /** An address that stands for another is replaced by it where it stands. */
@@ -265,19 +330,36 @@ export class WorkspaceHistory {
   /** The browser moved: through its own back or forward, a typed address, or a back this history asked for. */
   private handleLocation(state: unknown): void {
     this.redirect(settled)
-    const hash = window.location.hash
     clearTimeout(this.landing)
+    // A leave from full screen landed on the page beneath it: on to the view below that.
+    if (this.passing && this.leaving) {
+      this.passing = false
+      this.pop()
+      return
+    }
+    const hash = window.location.hash
     const queued = this.leaving ? this.queued : null
     this.leaving = false
     this.queued = null
     if (hash !== this.currentHash) this.land(hash, state)
+    else this.know(state)
     queued?.()
+  }
+
+  /** Landed on an entry at the address already shown (a page and full screen over it can share one): what the entry says of itself holds. */
+  private know(state: unknown): void {
+    const saved = readRouteState(state)
+    if (!saved || this.current?.kind !== 'channel') return
+    this.layered = saved.layer
+    this.origin = saved.originView
+    this.under = saved.under ?? null
   }
 
   private land(hash: string, state: unknown): void {
     const route = parseRoute(hash)
     const saved = readRouteState(state)
     if (route?.kind === 'channel') {
+      this.under = saved?.under ?? null
       if (!saved) {
         // An address typed or followed outside the board, above whatever was shown.
         this.layered = this.current?.kind === 'overview'
@@ -292,6 +374,7 @@ export class WorkspaceHistory {
       this.currentHash = hash
       if (!this.current && !viewOfHash(hash)) return
       this.layered = false
+      this.under = null
       this.origin = viewOfHash(hash) ?? this.origin
       this.current = { kind: 'overview', hash }
     }

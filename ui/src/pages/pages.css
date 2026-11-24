@@ -164,6 +164,9 @@
   flex: 1;
   min-height: 0;
 }
+/* A file shown full screen over the page on a phone, under a bar whose back returns to it. */
+.pg-full { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--ws-paper); }
+.pg-full > :not(.pg-nav) { flex: 1; min-height: 0; }
 /* Baked changes and clicked .change.json bundles on /thread. */
 .pg-changes {
   flex: 1;

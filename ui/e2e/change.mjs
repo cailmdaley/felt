@@ -168,7 +168,9 @@ export function registerChangeJourneys(test) {
     await link.press('Enter')
     await page.locator('.ws-selected .change-reader').waitFor()
     assert.equal(popups.length, 0, 'relative change links stay in the workspace after the report bridge is ready')
-    // The change took the tapestry's place in the reader's one entry: Back is the Desk.
+    // The change took the full-screen tapestry's place: Back is the view, and once more the Desk.
+    await pageBack(page)
+    await page.locator('.ws-selected[data-key^="family:"] .ov-head').waitFor()
     await pageBack(page)
     await page.locator('.ws-reader.ws-dormant').waitFor()
     assert.equal(route(), desk)

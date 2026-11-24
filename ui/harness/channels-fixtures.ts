@@ -19,7 +19,7 @@ interface Row {
   closed?: boolean
   minutes: number
   /** Its tapestry page; `figure` names a file in its folder the page shows first. */
-  tapestry?: { title: string; lede: string; figure?: string; slide?: boolean; heavy?: boolean }
+  tapestry?: { title: string; lede: string; figure?: string; deck?: boolean; heavy?: boolean }
   /** Put to rest (`horizon: stashed`), until this civil day when one is named. */
   rest?: string | true
   /** Armed with no worker: a standing one asleep until its next run. */
@@ -31,7 +31,7 @@ interface Row {
 const DAY = 1440
 /** The human, as a board address: a label with no fiber or session. */
 const HUMAN = { label: 'Sam' }
-/** A deck's first slide drawn inline as a portrait page, as a tapestry built from slides shows it. */
+/** A deck's slide, a portrait page. */
 const SLIDE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" width="100%"><rect width="794" height="1123" fill="#fbf6e9"/><text x="60" y="140" font-size="54" fill="#30291f">UNIONS cosmic shear</text><text x="60" y="210" font-size="30" fill="#6b5d45">Paris SWG · Thursday</text><path d="M80 900V400H720" fill="none" stroke="#a39478" stroke-width="3"/><path d="M100 820C260 520 420 760 560 560S680 620 710 480" fill="none" stroke="#3f8278" stroke-width="6"/></svg>'
 
 /**
@@ -90,7 +90,7 @@ const ROWS: Row[] = [
   { id: 'pando/unions/ia', name: 'Intrinsic alignments', parent: 'pando/unions', state: 'working', minutes: 70 },
   { id: 'pando/unions/photoz', name: 'Photo-z calibration', parent: 'pando/unions', state: 'working', minutes: 40 },
   { id: 'pando/unions/paper', name: 'Paper draft', parent: 'pando/unions', state: 'working', minutes: 28,
-    tapestry: { title: 'Paris SWG deck', lede: 'Twelve slides for Thursday: the null tests, the blinded S8 and what is left before unblinding.', slide: true } },
+    tapestry: { title: 'Paris SWG deck', lede: 'Twelve slides for Thursday: the null tests, the blinded S8 and what is left before unblinding.', deck: true } },
   { id: 'pando/unions/north', name: 'north hub', parent: 'pando/unions', role: 'hub', seat: true, minutes: 2 * DAY },
   { id: 'pando/unions/south', name: 'south hub', parent: 'pando/unions', role: 'hub', seat: true, minutes: 3 * DAY },
   { id: 'pando/unions/weekly', name: 'Weekly shear digest', parent: 'pando/unions', standing: true, armed: true, minutes: 2 * DAY },
@@ -255,8 +255,13 @@ function addBoardFixtures(example: WorkspaceExample, now: number, ROWS: Row[], m
   })
   for (const row of ROWS) {
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.outcome ?? row.ask ?? 'Under way.'}`
-    if (row.tapestry) {
-      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p>${row.tapestry.heavy ? heavyFigures() : row.tapestry.slide ? SLIDE : row.tapestry.figure ? `<figure><img src="${row.tapestry.figure}" alt=""></figure>` : '<div class="map">κ × tSZ, 9σ</div>'}<p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal; the <a href="#/board/${encodeURIComponent('cmbx/foregrounds')}@${WORKSPACE_HOST}">foreground mask</a> is the open call.</p></body></html>`
+    if (row.tapestry?.deck) {
+      // A tapestry that is one full-bleed frame of a slide deck, which steps on a press and keeps its slide in its own history.
+      const deck = `<!doctype html><html><head><style>body{margin:0;background:#fbf6e9}svg{display:block;height:100vh;width:auto;margin:auto}</style></head><body>${SLIDE}<script>let slide = 0; document.addEventListener('click', () => { history.pushState(null, '', location.href.split('#')[0] + '#' + ++slide) })</script></body></html>`
+      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>html,body{margin:0;height:100%}iframe{display:block;width:100%;height:100vh;border:0}</style></head><body><iframe title="${row.tapestry.title}" srcdoc="${deck.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe></body></html>`
+      example.files.push({ owner: WORKSPACE_HOST, path: `${dir(row.id)}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
+    } else if (row.tapestry) {
+      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.tapestry.title}</title><style>body{font:17px/1.6 Georgia,serif;margin:28px;color:#30291f;background:#fbf6e9}.map{height:30vh;display:grid;place-items:center;background:#e4dcc8;border-radius:4px;color:#6b5d45}</style></head><body><h1>${row.tapestry.title}</h1><p>${row.tapestry.lede}</p>${row.tapestry.heavy ? heavyFigures() : row.tapestry.figure ? `<figure><img src="${row.tapestry.figure}" alt=""></figure>` : '<div class="map">κ × tSZ, 9σ</div>'}<p>The cross-spectrum is flat to ℓ = 3000 and the 1-halo term carries most of the signal; the <a href="#/board/${encodeURIComponent('cmbx/foregrounds')}@${WORKSPACE_HOST}">foreground mask</a> is the open call.</p></body></html>`
       example.files.push({ owner: WORKSPACE_HOST, path: `${dir(row.id)}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
     }
   }

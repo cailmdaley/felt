@@ -178,6 +178,7 @@ export class Workspace {
       refresh: () => this.refreshFamilyFeeds(),
       lead: card => this.leads.of(card),
       open: (card, doc) => this.openDocument(card, doc),
+      full: (card, doc) => this.openFull(card, doc),
       link: (card, source, href) => this.openLink(card, source, href),
       said: card => this.said(card),
       view: (card, quiet) => this.openFromDesk(card, quiet),
@@ -255,7 +256,7 @@ export class Workspace {
         await this.dock.sendReview(target.card, message)
       },
       onCrossing: travel => this.depth.cross(travel),
-      onReturn: () => this.history.leave(),
+      onReturn: () => this.history.back(),
       onSwipe: signal => this.swipeBeneath?.(signal) ?? false,
       onVerdict: verdict => this.deferVerdict(verdict),
       onConversation: card => { this.dock.openConversation(card) },
@@ -390,6 +391,12 @@ export class Workspace {
   private openDocument(card: KanbanCard, doc: DocKey): void {
     if (this.isActive) this.open(card, this.origin, doc, this.library.hasMetadata(card))
     else this.openPage(card, doc)
+  }
+  /** A file the view on show unfolded, sent full screen over it: back returns to the view. */
+  private openFull(card: KanbanCard, doc: DocKey): void {
+    const state = this.current
+    if (this.isActive && state && (state.card.uid ?? state.card.id) === (card.uid ?? card.id) && state.card.originId === card.originId) this.history.full(doc)
+    else this.openDocument(card, doc)
   }
   /** One of a fiber's pages, or its own page, opened from the view on show. */
   openPage(card: KanbanCard, doc?: DocKey): void {
@@ -619,9 +626,10 @@ export class Workspace {
     this.dock.open(state.card)
     return this.dock
   }
-  /** The reader's way back names the view it returns to. */
+  /** The reader's way back names where it returns: the constitution beneath full screen, else the view. */
   private nameBack(): void {
-    this.reader.setBackDestination(this.history.backLabel)
+    const beneath = this.history.beneath, card = beneath && cardNamed(this.opts.cards(), beneath.uid, beneath.owner)
+    this.reader.setBackDestination(beneath ? card ? slug(card) : beneath.uid : this.history.backLabel)
   }
   /** Seat the band over the channel's pages, with its links. */
   private seatBand(state: ChannelState): void {

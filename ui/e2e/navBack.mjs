@@ -226,6 +226,129 @@ export function registerViewFullScreenJourneys(test) {
   }, { width: 1440, height: 900 }, 'reduce', false)
 }
 
+/**
+ * A tapestry sent full screen, on a phone and a desktop: one frame of a slide
+ * deck, full bleed, which takes every press inside it. Reached from Find over
+ * the Desk and from a post's thread in Channels, a press on the page unfolded
+ * in the constitution's view opens it full screen; its way back stands above
+ * the frame, in reach, names the constitution, and returns to the view, the
+ * page still unfolded, as the browser's back does; one more back reaches the
+ * view the reader was opened from.
+ */
+export function registerTapestryFullScreenJourneys(test) {
+  const channelsHome = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=channels`
+  for (const [device, viewport, phone] of [
+    ['phone', { width: 390, height: 844 }, true],
+    ['small phone', { width: 375, height: 667 }, true],
+    ['desktop', { width: 1440, height: 900 }, false],
+  ]) test(`Full screen tapestry (${device}): back returns to the view it was opened from, then to the Desk or Channels`, async page => {
+    const shot = async name => {
+      if (!process.env.NAV_BACK_SHOTS) return
+      await mkdir(process.env.NAV_BACK_SHOTS, { recursive: true })
+      await page.screenshot({ path: resolve(process.env.NAV_BACK_SHOTS, `full-${device.replace(' ', '-')}-${name}.png`) })
+    }
+    const press = (locator, options) => phone ? locator.tap(options) : locator.click(options)
+    const backControl = () => phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')
+    const hash = () => decodeURIComponent(new URL(page.url()).hash)
+    /** The way back stands in reach above whatever the page draws, and names where it goes. */
+    const reachableBack = async label => {
+      const control = backControl()
+      await page.waitForFunction(label => [...document.querySelectorAll('.ws-return, .ws-page.ws-selected .ws-document-back')].some(el => el.getAttribute('aria-label') === `Back to ${label}` && el.getClientRects().length), label)
+      const box = await control.boundingBox()
+      assert.ok(box && box.y >= 0 && box.y + box.height <= viewport.height && box.x >= 0 && box.x + box.width <= viewport.width, `the way back is on screen: ${JSON.stringify(box)}`)
+      if (phone) assert.ok(box.width >= 44 && box.height >= 44, `the way back is a touch target: ${JSON.stringify(box)}`)
+      assert.ok(await control.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) }), 'nothing covers the way back')
+      return control
+    }
+    /** The constitution's view on show with its tapestry unfolded: a press on the page itself opens it full screen. */
+    const fullScreen = async (slug, label) => {
+      const view = selected(page)
+      if (!await view.locator('.ov-unfold[data-unfolded]').count()) await press(view.locator('.ov-unfold .uf-card'))
+      const cover = view.locator('.ov-unfold .uf-cover')
+      await cover.waitFor()
+      await shot(`${label}-unfolded`)
+      const box = await cover.boundingBox()
+      if (phone) await page.touchscreen.tap(box.x + box.width / 2, box.y + 40)
+      else await page.mouse.click(box.x + box.width / 2, box.y + 40)
+      await page.waitForFunction(() => /tapestry\.html$/.test(decodeURIComponent(location.hash)))
+      await selected(page).locator('iframe').waitFor()
+      await shot(`${label}-full`)
+      return reachableBack(slug)
+    }
+    const onView = async () => {
+      await page.waitForFunction(() => decodeURIComponent(location.hash).includes('/family:'))
+      await selected(page).locator('.ov-unfold[data-unfolded] .uf-cover').waitFor()
+    }
+
+    // From Find over the Desk: a constitution whose tapestry is one frame of a deck.
+    await page.goto(`${channelsHome}#/desk`)
+    const below = await page.evaluate(() => navigation.currentEntry.index)
+    if (phone) {
+      await press(page.locator('.kbn-viewtabs-phone-find'))
+      await page.locator('.ws-find-sheet input').fill('Paper draft')
+      await press(page.locator('.ws-find-sheet .ws-find-pick').first())
+    } else {
+      await page.locator('.kbn-viewtabs-find input').click()
+      await page.locator('.kbn-viewtabs-find input').fill('Paper draft')
+      await page.locator('.ws-find .ws-find-pick').first().click()
+    }
+    await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
+    await page.waitForFunction(() => /paper@.*\/family:/.test(decodeURIComponent(location.hash)))
+    const view = hash()
+    let back = await fullScreen('paper', 'desk')
+    assert.equal(await page.evaluate(() => navigation.currentEntry.index), below + 2, 'full screen is one entry above the view')
+    await press(back)
+    await onView()
+    assert.equal(hash(), view, 'the reader\'s back returns to the view, the tapestry still unfolded')
+    await reachableBack('Desk')
+    await shot('desk-back-on-view')
+    await fullScreen('paper', 'desk-again')
+    await page.goBack()
+    await onView()
+    assert.equal(hash(), view, 'the browser\'s back returns to the view')
+    await press(await reachableBack('Desk'))
+    await page.locator('.ws-reader.ws-dormant').waitFor()
+    assert.equal(hash(), '#/desk')
+    await shot('desk-back-on-desk')
+
+    // From a post in Channels, its thread's view, as the phone shows it under "‹ Channels".
+    await page.goto(`${channelsHome}#/channels`)
+    const pick = page.locator('.kbn-ch-pick', { hasText: 'cmbx' }).first()
+    await pick.waitFor({ state: 'attached' })
+    if (await pick.isVisible()) await press(pick)
+    await press(page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]').last().locator('.kbn-ch-who'))
+    await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
+    await reachableBack('Channels')
+    const thread = hash()
+    back = await fullScreen('kappa-tsz', 'channels')
+    await press(back)
+    await onView()
+    assert.equal(hash(), thread, 'back returns to the thread\'s view')
+    await press(await reachableBack('Channels'))
+    await page.locator('.ws-reader.ws-dormant').waitFor()
+    assert.equal(hash(), '#/channels')
+    await shot('channels-back-on-channel')
+  }, viewport, 'reduce', phone)
+
+  // The standalone thread page on a phone: a file shown full screen covers the page under a bar whose back returns to it.
+  test('Full screen on the thread page (phone): the bar\'s back and the browser\'s return to the page', async page => {
+    await page.goto(`${channelsHome}&page=thread&f=${encodeURIComponent('cmbx/kappa-tsz')}@umber-workstation`)
+    const full = page.locator('.uf-full:visible').first()
+    for (const way of ['bar', 'browser']) {
+      await full.tap()
+      const back = page.locator('.pg-full .pg-back')
+      await back.waitFor()
+      const box = await back.boundingBox()
+      assert.ok(box.y >= 0 && box.width >= 44 && box.height >= 44, `the way back is a touch target: ${JSON.stringify(box)}`)
+      assert.equal(await back.getAttribute('aria-label'), 'Back to kappa-tsz')
+      if (way === 'bar') await back.tap()
+      else await page.goBack()
+      await page.locator('.pg-full').waitFor({ state: 'detached' })
+      assert.ok(await full.isVisible(), `${way}: the page is back`)
+    }
+  }, { width: 390, height: 844 }, 'reduce', true)
+}
+
 /** `t` on a post in Channels opens its worker's tapestry in the reader; a worker with none moves nothing. */
 export function registerPostTapestryJourneys(test) {
   test('t on a post in Channels opens its tapestry in the reader', async page => {
