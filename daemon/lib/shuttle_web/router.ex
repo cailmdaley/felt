@@ -82,6 +82,7 @@ defmodule ShuttleWeb.Router do
     # A constitution's threads, for `shuttle threads`.
     get("/threads/*id", ThreadsController, :show)
     post("/lifecycle", LifecycleController, :create)
+    post("/rehome", RehomeController, :create)
     post("/project-dir/resolve", ProjectDirController, :resolve)
     post("/felt-edit", FeltEditController, :create)
     post("/felt-nest", FeltNestController, :create)

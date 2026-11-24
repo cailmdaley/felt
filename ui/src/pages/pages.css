@@ -5,7 +5,37 @@
 .pg-thread > .ws-family-page[hidden] { display: none; }
 /* What the page cannot show: a quiet line in its place. */
 .pg-status { margin: 10px 24px 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
-.pg-status[hidden], .pg-said[hidden], .pg-nav[hidden], .pg-modes[hidden], .pg-mode-tabs[hidden], .pg-mode-pill[hidden], .pg-posts[hidden], .pg-changes[hidden], .pg-changes-bar[hidden], .pg-console[hidden], .pg-actions[hidden] { display: none; }
+.pg-status[hidden], .pg-said[hidden], .pg-nav[hidden], .pg-modes[hidden], .pg-mode-tabs[hidden], .pg-mode-pill[hidden], .pg-posts[hidden], .pg-changes[hidden], .pg-changes-bar[hidden], .pg-console[hidden], .pg-actions[hidden], .pg-host-mismatch[hidden] { display: none; }
+/* Banner shown instead of the dock composer when a pane's host does not own the fiber. */
+.pg-host-mismatch {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--ws-hairline);
+  background: var(--ws-paper);
+  color: var(--ws-ink);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
+}
+.pg-host-mismatch-text { min-width: 0; }
+.pg-host-mismatch-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.pg-host-mismatch-btn {
+  appearance: none;
+  border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-control-radius);
+  background: transparent;
+  color: var(--ws-ink);
+  padding: 4px 10px;
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
+  cursor: pointer;
+}
+.pg-host-mismatch-btn:hover, .pg-host-mismatch-btn:focus-visible {
+  background: var(--ws-hover);
+  outline: none;
+}
 .pg-thread .ov-tools { gap: 2px; }
 /* Standalone browser / PWA navigation bar on /thread (omitted when in=rex). */
 .pg-nav {

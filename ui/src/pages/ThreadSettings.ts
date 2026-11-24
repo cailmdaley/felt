@@ -3,6 +3,7 @@ import { dueCivilDay } from '../sdk/civilDay.js'
 import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'
 import type { KanbanCard, ShuttleKind } from '../board/KanbanTypes.js'
 import { headerIcon } from '../board/workspace/headerIcon.js'
+import { HostMoveControl, type RehomeResult } from '../board/workspace/HostMoveControl.js'
 import { anchorSelect } from '../board/workspace/selectPicker.js'
 import { SettingsMenu } from '../board/workspace/SettingsMenu.js'
 import { agentGroups, type AgentEntry } from '../forms/agents.js'
@@ -101,6 +102,8 @@ export class ThreadSettings {
   private agentSelect: HTMLSelectElement | null = null
   private effortSelect: HTMLSelectElement | null = null
   private chromeToggle: HTMLInputElement | null = null
+  private hostMove: HostMoveControl | null = null
+  private readonly onMoved: ((result: RehomeResult) => void) | undefined
   private agentsState: 'idle' | 'loading' | 'loaded' = 'idle'
   private savesPending = 0
   private saveTail: Promise<void> = Promise.resolve()
@@ -109,11 +112,12 @@ export class ThreadSettings {
   private readonly reseeders: Array<() => void> = []
   private readonly disposers: Array<() => void> = []
 
-  constructor(base: string, host: HTMLElement, card: KanbanCard) {
+  constructor(base: string, host: HTMLElement, card: KanbanCard, opts?: { onMoved?: (result: RehomeResult) => void }) {
     this.base = base
     this.host = host
     this.card = card
     this.lastFeedCard = card
+    this.onMoved = opts?.onMoved
     this.button.type = 'button'
     this.button.className = 'ws-header-icon ws-thread-settings'
     this.button.setAttribute('aria-label', 'Settings')
@@ -146,6 +150,19 @@ export class ThreadSettings {
     this.drawer = null
   }
 
+  /** Open the settings popover anchored at `anchor` (default: gear button) and pre-select `targetHost`. */
+  openHostMove(targetHost: string, anchor: HTMLElement = this.button, container: HTMLElement = this.host): void {
+    const drawer = this.ensureDrawer()
+    this.paintFacts()
+    if (!this.savesPending) {
+      for (const fn of this.reseeders) fn()
+    }
+    ;(this.menu ??= new SettingsMenu()).show(drawer, anchor, container)
+    void this.ensureAgents()
+    void this.hostMove?.ensureLoaded()
+    this.hostMove?.selectTarget(targetHost)
+  }
+
   private toggle(): void {
     if (this.menu?.isOpen) {
       this.menu.close()
@@ -158,6 +175,7 @@ export class ThreadSettings {
     }
     ;(this.menu ??= new SettingsMenu()).show(drawer, this.button, this.host)
     void this.ensureAgents()
+    void this.hostMove?.ensureLoaded()
   }
 
   private ensureDrawer(): HTMLElement {
@@ -200,6 +218,32 @@ export class ThreadSettings {
     chrome.label.hidden = !chrome.input.checked
 
     fields.append(field('Agent', agentSelect, effortSelect, chrome.label))
+
+    // ── Host (rehome) ──────────────────────────────────────────────────────
+    const hostMove = this.hostMove = new HostMoveControl({
+      base: this.base,
+      card: () => this.card,
+      withSaveStatus: write => this.withSaveStatus(write),
+      onMoved: (result) => {
+        this.card = {
+          ...this.card,
+          originId: result.host,
+          shuttleHost: result.host,
+          ...(result.projectDir ? { shuttleProjectDir: result.projectDir } : {}),
+        }
+        this.paintFacts()
+        this.onMoved?.(result)
+      },
+      onWarning: (warning) => {
+        if (this.errorEl) {
+          this.errorEl.textContent = warning
+          this.errorEl.style.display = ''
+        }
+      },
+    })
+    this.disposers.push(() => hostMove.dispose())
+    this.reseeders.push(() => hostMove.reseed())
+    fields.append(hostMove.row, hostMove.confirmRow)
 
     // ── Kind / Cron / TZ ───────────────────────────────────────────────────
     const baseline = {

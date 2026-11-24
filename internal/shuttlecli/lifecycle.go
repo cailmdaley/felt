@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1403,6 +1404,163 @@ or replace a worker.`,
 	setAgentCmd.Flags().StringVar(&setAgentProjectDir, "project-dir", "", "Set the worker cwd without changing its lifecycle")
 	setAgentCmd.Flags().Bool("local", false, localFlagUsage)
 	return setAgentCmd
+}
+
+// ---- set-host --------------------------------------------------------------
+
+// setHostCmd rehomes a constitution to another host (and optional project_dir).
+// Without --local it calls POST /api/v1/rehome on the local daemon so the new
+// host authoritatively takes over and the previous host stops its worker and
+// releases its Rex place; with --local it performs the single-host validated
+// frontmatter write (used by the daemon inside its Poller and for offline edits).
+func (a *app) setHostCmd() *cobra.Command {
+	var projectDir string
+	cmd := &cobra.Command{
+		Use:   "set-host <fiber> <host>",
+		Short: "Move a constitution to another host",
+		Long: `Changes a constitution's owning host (shuttle.host) and optionally its
+project directory (shuttle.project_dir) on the destination host.
+
+Without --local, routes through the local daemon's POST /api/v1/rehome so the
+destination host takes over first (carrying the document if needed and
+validating --project-dir there) and the previous host stops any running worker
+and drops its Rex place. If the previous host is unreachable, takeover on the
+destination still succeeds and reports a warning.
+
+With --local, writes the fiber file directly on this host and clears host-local
+runtime session markers when the host changes.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			targetHost := strings.TrimSpace(args[1])
+			if targetHost == "" || strings.ContainsAny(targetHost, " \t\r\n") {
+				return fmt.Errorf("host must be a non-empty identifier without whitespace")
+			}
+
+			if !localOnly(cmd) {
+				var fiberArg = args[0]
+				var origin string
+				var fiberPath string
+				if f, _, block, _, unlock, err := a.resolveOwnedShuttleFiber(args[0], "use 'shuttle install' first"); err == nil {
+					if f.UID != "" {
+						fiberArg = f.UID
+					}
+					origin = strings.TrimSpace(block.Host)
+					fiberPath = f.ID
+					unlock()
+				}
+				reqBody := map[string]any{
+					"fiber":       fiberArg,
+					"target_host": targetHost,
+				}
+				if origin != "" {
+					reqBody["origin"] = origin
+				}
+				if fiberPath != "" {
+					reqBody["fiber_path"] = fiberPath
+				}
+				if cmd.Flags().Changed("project-dir") {
+					reqBody["project_dir"] = strings.TrimSpace(projectDir)
+				}
+				payload, err := json.Marshal(reqBody)
+				if err != nil {
+					return err
+				}
+				endpoint, err := a.daemonEndpoint("/api/v1/rehome")
+				if err != nil {
+					return err
+				}
+				raw, err := a.postDaemon(endpoint, payload, a.daemonLifecycleTimeout)
+				if err != nil {
+					return err
+				}
+				if a.json {
+					fmt.Fprintln(a.env.Stdout, strings.TrimSpace(string(raw)))
+					return nil
+				}
+				var res struct {
+					Host                string `json:"host"`
+					FromHost            string `json:"from_host"`
+					ProjectDir          string `json:"project_dir"`
+					Unchanged           bool   `json:"unchanged"`
+					PreviousHostWarning string `json:"previous_host_warning"`
+				}
+				if err := json.Unmarshal(raw, &res); err == nil && res.Host != "" {
+					if res.Unchanged {
+						fmt.Fprintf(a.env.Stdout, "%s is already on %s\n", args[0], res.Host)
+					} else if res.FromHost != "" && res.FromHost != res.Host {
+						fmt.Fprintf(a.env.Stdout, "moved %s: %s → %s", args[0], res.FromHost, res.Host)
+						if res.ProjectDir != "" {
+							fmt.Fprintf(a.env.Stdout, " (%s)", res.ProjectDir)
+						}
+						fmt.Fprintln(a.env.Stdout)
+					} else {
+						fmt.Fprintf(a.env.Stdout, "moved %s → %s\n", args[0], res.Host)
+					}
+					if res.PreviousHostWarning != "" {
+						fmt.Fprintf(a.env.Stderr, "warning: %s\n", res.PreviousHostWarning)
+					}
+					return nil
+				}
+				fmt.Fprintln(a.env.Stdout, strings.TrimSpace(string(raw)))
+				return nil
+			}
+
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "use 'shuttle install' first")
+			if err != nil {
+				return err
+			}
+			defer unlock()
+
+			ownHost, _ := a.resolveOwnHost("")
+			oldHost := strings.TrimSpace(block.Host)
+
+			if cmd.Flags().Changed("project-dir") {
+				if targetHost == ownHost {
+					if err := a.setProjectDirFlag(cmd, projectDir, f, block); err != nil {
+						return err
+					}
+				} else {
+					if err := setRemoteProjectDirFlag(cmd, projectDir, f, block); err != nil {
+						return err
+					}
+				}
+			} else if targetHost == ownHost && f.Status == felt.StatusActive {
+				// Armed takeover on this host requires a valid local project_dir.
+				if strings.TrimSpace(block.ProjectDir) == "" {
+					return fmt.Errorf("project_dir is required on %s for an active constitution (pass --project-dir)", ownHost)
+				}
+				resolvedDir, err := a.resolveProjectDirFlag(block.ProjectDir)
+				if err != nil {
+					return err
+				}
+				if err := shuttle.SetField(f, "project_dir", resolvedDir); err != nil {
+					return err
+				}
+				block.ProjectDir = resolvedDir
+			}
+
+			if err := shuttle.SetNodeField(f, "host", targetHost); err != nil {
+				return err
+			}
+			if oldHost != targetHost {
+				// Host-local session coordinates cannot resume across hosts.
+				_ = shuttle.SetRuntimeField(f, "session_uuid", "")
+				_ = shuttle.SetRuntimeField(f, "tmux_session", "")
+			}
+			if err := a.writeFiber(st, f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+			fmt.Fprintf(a.env.Stdout, "set host for %s%s → %s", args[0], ref.Location(), targetHost)
+			if block.ProjectDir != "" {
+				fmt.Fprintf(a.env.Stdout, " project_dir=%s", block.ProjectDir)
+			}
+			fmt.Fprintln(a.env.Stdout)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&projectDir, "project-dir", "", "Working directory on the destination host")
+	cmd.Flags().Bool("local", false, localFlagUsage)
+	return cmd
 }
 
 // agentAxes is one composition of a block's dispatch axes: base agent (empty

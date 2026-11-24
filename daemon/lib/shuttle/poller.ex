@@ -2496,23 +2496,30 @@ defmodule Shuttle.Poller do
         args: args ++ if(is_map(target), do: LifecycleService.hint_args(target), else: [])
       )
 
-    # A rest, pause, or close writes first (the document is at rest, closed, or a
-    # standing run concluded before any stop), then stops the worker, so its
-    # exit cannot be read as a reason to relaunch. A failed stop is reported;
-    # the document has already moved.
+    # A rest, pause, close, or outgoing set_host writes first (the document is at
+    # rest, closed, standing-concluded, or owned by another host before any stop),
+    # then stops the worker, so its exit cannot be read as a reason to relaunch.
+    # A failed stop is reported; the document has already moved.
+    releasing_host? = verb == :set_host and List.first(args) != state.own_host_id
+
     stops_worker? =
-      verb == :rest or ((verb == :pause or verb == :close) and "--no-kill" not in args)
+      verb == :rest or ((verb == :pause or verb == :close) and "--no-kill" not in args) or
+        releasing_host?
 
     {result, state} =
       case {stops_worker?, result} do
         {true, {:ok, output}} ->
           case stop_worker(state, address) do
             {{:ok, :no_session}, state} ->
-              if verb in [:rest, :close], do: close_rex_place(state.runner, address)
+              if verb in [:rest, :close] or releasing_host?,
+                do: close_rex_place(state.runner, address)
+
               {{:ok, output}, state}
 
             {{:ok, session}, state} ->
-              if verb in [:rest, :close], do: close_rex_place(state.runner, address)
+              if verb in [:rest, :close] or releasing_host?,
+                do: close_rex_place(state.runner, address)
+
               {{:ok, output <> "  worker: stopped #{session}\n"}, state}
 
             {{:error, reason}, state} ->

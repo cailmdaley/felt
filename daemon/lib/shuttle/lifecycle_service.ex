@@ -42,6 +42,7 @@ defmodule Shuttle.LifecycleService do
           | :channel
           | :clear_ask
           | :adopt
+          | :set_host
 
   @spec transition(verb(), String.t(), [String.t()], String.t() | nil) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
@@ -56,7 +57,8 @@ defmodule Shuttle.LifecycleService do
              :seat,
              :channel,
              :clear_ask,
-             :adopt
+             :adopt,
+             :set_host
            ] and
              is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id} = resolved} <-
@@ -85,6 +87,11 @@ defmodule Shuttle.LifecycleService do
   def write(:clear_ask, fiber_id, opts) do
     {args, opts} = Keyword.pop(opts, :args, [])
     Shuttle.CLI.run_lifecycle("ask", fiber_id, ["--clear" | args], opts)
+  end
+
+  def write(:set_host, fiber_id, opts) do
+    {args, opts} = Keyword.pop(opts, :args, [])
+    Shuttle.CLI.run_lifecycle("set-host", fiber_id, args, opts)
   end
 
   def write(verb, fiber_id, opts)

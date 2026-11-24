@@ -174,6 +174,7 @@ defmodule Shuttle.Terminal.RexLayout do
     rows = normalize_fiber_rows(fibers_input)
     family_rows = if family_fibers_input, do: normalize_fiber_rows(family_fibers_input), else: rows
     rows_by_path = fiber_uid_by_path(rows, family_rows)
+    host_by_path = fiber_host_by_path(rows, family_rows)
     live_by_uid = live_family_bindings(bindings, rows_by_path, places, sessions)
 
     closed_verdict_uids =
@@ -292,7 +293,9 @@ defmodule Shuttle.Terminal.RexLayout do
     active_chosen_roots =
       Enum.filter(chosen_roots, fn root ->
         root_uid = rows_by_path[root] || get_in(views, [root, "uid"])
-        root_uid == nil or not MapSet.member?(closed_verdict_uids, root_uid)
+        root_host = host_by_path[root]
+        owned_elsewhere? = owned_elsewhere?(root_host, own_host_id)
+        not owned_elsewhere? and (root_uid == nil or not MapSet.member?(closed_verdict_uids, root_uid))
       end)
 
     all_family_roots =
@@ -317,9 +320,10 @@ defmodule Shuttle.Terminal.RexLayout do
         label = if waiting?, do: @waiting_mark <> base_label, else: base_label
 
         root_uid = rows_by_path[root] || get_in(views, [root, "uid"])
+        root_host = host_by_path[root]
 
         view =
-          if is_binary(root_uid) and root_uid != "" do
+          if is_binary(root_uid) and root_uid != "" and not owned_elsewhere?(root_host, own_host_id) do
             [view_entry] = Tree.layout([%{fiber: root, depth: 0}])
 
             %{
@@ -382,6 +386,19 @@ defmodule Shuttle.Terminal.RexLayout do
         do: {path, uid}
   end
 
+  defp fiber_host_by_path(rows, family_rows) do
+    for fiber <- family_rows ++ rows,
+        path = fiber["slug"] || fiber["id"],
+        host = get_in(fiber, ["shuttle", "host"]),
+        is_binary(path) and path != "" and is_binary(host) and host != "",
+        into: %{},
+        do: {path, host}
+  end
+
+  defp owned_elsewhere?(host, own_host_id) do
+    is_binary(own_host_id) and is_binary(host) and host != "" and host != own_host_id
+  end
+
   defp keep_existing_place(acc, uid, place, base, own_host_id) do
     family = place["family"]
     fiber = place["fiber"] || family
@@ -401,10 +418,15 @@ defmodule Shuttle.Terminal.RexLayout do
   end
 
   defp owned_or_tracked?(fiber, uid, own_host_id, live_by_uid, places) do
-    own_host_id == nil or
-      get_in(fiber, ["shuttle", "host"]) == own_host_id or
-      Map.has_key?(live_by_uid, uid) or
-      Map.has_key?(places, uid)
+    fiber_host = get_in(fiber, ["shuttle", "host"])
+
+    cond do
+      own_host_id == nil -> true
+      fiber_host == own_host_id -> true
+      Map.has_key?(live_by_uid, uid) -> true
+      owned_elsewhere?(fiber_host, own_host_id) -> false
+      true -> Map.has_key?(places, uid)
+    end
   end
 
   defp waiting_on_human?(fiber, _column) do

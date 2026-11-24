@@ -110,6 +110,10 @@ export class ThreadPage {
   private readonly changesSlot = document.createElement('div')
   private readonly stream: ChannelStream
   private readonly dockBand = document.createElement('div')
+  private readonly hostMismatch = document.createElement('div')
+  private readonly hostMismatchText = document.createElement('span')
+  private readonly hostMismatchOpen = document.createElement('button')
+  private readonly hostMismatchMove = document.createElement('button')
   private readonly dock = document.createElement('div')
   private readonly dockBody = document.createElement('div')
   private readonly meter = document.createElement('span')
@@ -257,6 +261,29 @@ export class ThreadPage {
     this.dockBand.className = 'ws-stage-band'
     this.dockBand.dataset.part = 'thread-dock'
     this.dockBand.hidden = true
+    this.hostMismatch.className = 'pg-host-mismatch'
+    this.hostMismatch.setAttribute('role', 'status')
+    this.hostMismatch.hidden = true
+    this.hostMismatchText.className = 'pg-host-mismatch-text'
+    this.hostMismatchOpen.type = 'button'
+    this.hostMismatchOpen.className = 'pg-host-mismatch-btn'
+    this.hostMismatchOpen.addEventListener('click', () => {
+      const card = this.feed.card()
+      if (card) this.goTo(owned(card), slug(card))
+    })
+    this.hostMismatchMove.type = 'button'
+    this.hostMismatchMove.className = 'pg-host-mismatch-btn pg-host-mismatch-move'
+    this.hostMismatchMove.addEventListener('click', () => {
+      const paneHost = this.opts.route.fiber?.host
+      const card = this.feed.card()
+      if (!paneHost || !card) return
+      this.ensureDockControls(card)
+      this.settings?.openHostMove(paneHost, this.hostMismatchMove, this.el)
+    })
+    const mismatchActs = document.createElement('div')
+    mismatchActs.className = 'pg-host-mismatch-acts'
+    mismatchActs.append(this.hostMismatchOpen, this.hostMismatchMove)
+    this.hostMismatch.append(this.hostMismatchText, mismatchActs)
     this.dock.className = 'ws-dock'
     this.dock.dataset.part = 'act'
     this.dock.dataset.act = 'band'
@@ -281,7 +308,7 @@ export class ThreadPage {
     this.family.pulls = false
     this.family.unfoldLead = true
     this.family.pinLead = true
-    this.el.append(this.nav, this.status, this.modes, this.postsPane, this.family.el, this.changesPane, this.dockBand, this.said)
+    this.el.append(this.nav, this.status, this.modes, this.postsPane, this.family.el, this.changesPane, this.hostMismatch, this.dockBand, this.said)
     for (const event of INTERACTION_EVENTS) document.addEventListener(event, this.onInteract, { capture: true, passive: true })
     window.addEventListener(CONVERSATION_OPENING_CHANGED, this.onOpeningChanged)
     this.unsubscribe = feed.subscribe(() => this.render())
@@ -344,9 +371,18 @@ export class ThreadPage {
         suspendFileViewer(this.changesViewer)
       }
 
-      const showDock = isAgentCard(card)
+      const paneHost = this.opts.route.fiber?.host
+      const hostMismatch = Boolean(paneHost && card.originId && paneHost !== card.originId)
+      const showDock = isAgentCard(card) && !hostMismatch
+      this.hostMismatch.hidden = !hostMismatch
+      if (hostMismatch && paneHost) {
+        this.hostMismatchText.textContent = `Runs on ${card.originId} (this pane is on ${paneHost}).`
+        this.hostMismatchOpen.textContent = `Open on ${card.originId}`
+        this.hostMismatchMove.textContent = `Move to ${paneHost}`
+        this.settings?.update(card)
+      }
       this.dockBand.hidden = !showDock
-      this.el.toggleAttribute('data-dock', showDock)
+      this.el.toggleAttribute('data-dock', showDock || hostMismatch)
       if (showDock) {
         this.followUsage(card)
         this.paintDock(card)
@@ -361,6 +397,7 @@ export class ThreadPage {
       this.family.el.hidden = true
       this.changesPane.hidden = true
       this.disposeChanges()
+      this.hostMismatch.hidden = true
       this.dockBand.hidden = true
       this.el.removeAttribute('data-dock')
       this.status.textContent = this.feed.failure ?? (this.feed.loaded ? 'This thread is not on the board.' : 'Reading the board…')
@@ -561,27 +598,40 @@ export class ThreadPage {
         }
       }, USAGE_REFRESH_MS)
     }
-    if (!this.workerActions) {
-      this.workerActions = new WorkerActions(card, this.startWorker, { prompt: true })
-      this.voice = new Voice(this.opts.base)
-      this.voice.mount()
-      this.listen = new ListenControl({
-        card: () => this.feed.card() ?? card,
-        voice: this.voice,
-        shuttleBase: this.opts.base,
-        fiberSlug: (fiber, origin) => this.fiberSlug(fiber, origin),
-      })
-      this.voiceStrip = new VoiceStrip()
-      this.voiceUnsub = this.voice.subscribe(() => this.paintVoice())
-      this.settings = new ThreadSettings(this.opts.base, this.dock, card)
-      this.workerActions.seat(this.listen.el, this.voiceStrip.el, this.settings.button)
-      this.workerActions.seatPlaceholder(this.meter)
-      this.dockBody.append(this.workerActions.el)
-      this.unbindKeyboard = bindAvoidKeyboard(this.dock)
-    }
+    this.ensureDockControls(card)
     this.paintVoice(card)
     this.settings?.update(card)
-    this.workerActions.update(card, note)
+    this.workerActions?.update(card, note)
+  }
+
+  private ensureDockControls(card: KanbanCard): void {
+    if (this.workerActions) return
+    this.workerActions = new WorkerActions(card, this.startWorker, { prompt: true })
+    this.voice = new Voice(this.opts.base)
+    this.voice.mount()
+    this.listen = new ListenControl({
+      card: () => this.feed.card() ?? card,
+      voice: this.voice,
+      shuttleBase: this.opts.base,
+      fiberSlug: (fiber, origin) => this.fiberSlug(fiber, origin),
+    })
+    this.voiceStrip = new VoiceStrip()
+    this.voiceUnsub = this.voice.subscribe(() => this.paintVoice())
+    this.settings = new ThreadSettings(this.opts.base, this.dock, card, {
+      onMoved: (result) => {
+        if (result.warning) this.say(result.warning)
+        else this.say(`Moved to ${result.host}.`)
+        this.feed.refresh()
+        const current = this.feed.card()
+        if (!this.opts.route.inRex && current) {
+          this.opts.navigate(threadHref(window.location.href, { uid: current.uid ?? current.id, host: result.host }))
+        }
+      },
+    })
+    this.workerActions.seat(this.listen.el, this.voiceStrip.el, this.settings.button)
+    this.workerActions.seatPlaceholder(this.meter)
+    this.dockBody.append(this.workerActions.el)
+    this.unbindKeyboard = bindAvoidKeyboard(this.dock)
   }
 
   private fiberSlug(fiber: string, origin?: string | null): string | undefined {

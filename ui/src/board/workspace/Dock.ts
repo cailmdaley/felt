@@ -23,6 +23,7 @@ import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instant
 import { dressAction, dressVerb, labelVerb, leadVerb, lifecycleVerbsFor, verbSpec, VERB_KEY, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions, type SessionMode } from './workerActions.js'
 import { SettingsMenu } from './SettingsMenu.js'
+import { HostMoveControl } from './HostMoveControl.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { slug } from '../threadOutline.js'
@@ -1169,6 +1170,28 @@ export class Dock {
     }
 
     col.append(field('Agent', agentSelect, effortSelect, chrome.label))
+
+    const hostMove = new HostMoveControl({
+      base: this.shuttleBase,
+      card: () => card,
+      withSaveStatus: write => this.withSaveStatus(statusEl, errorEl, write),
+      onMoved: (result) => {
+        reflect({
+          originId: result.host,
+          shuttleHost: result.host,
+          ...(result.projectDir ? { shuttleProjectDir: result.projectDir } : {}),
+        })
+        this.onSaved()
+      },
+      onWarning: (warning) => {
+        errorEl.textContent = warning
+        errorEl.style.display = ''
+      },
+    })
+    this.disposers.push(() => hostMove.dispose())
+    reseed(() => hostMove.reseed())
+    void hostMove.ensureLoaded()
+    col.append(hostMove.row, hostMove.confirmRow)
     void this.loadAgentPicker(
       { agentSelect, effortSelect, chromeToggle: chrome.input },
       {

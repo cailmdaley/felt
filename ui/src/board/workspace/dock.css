@@ -277,6 +277,12 @@
 .ws-dock .kbn-conversation-menu { left: 0; right: auto; min-width: var(--ws-menu-width); }
 .ws-dock .kbn-ctl-ledger { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ws-inset); padding: 8px 0 var(--ws-inset); }
 .ws-dock .kbn-ctl-fields { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 9px 8px; align-items: center; }
+.kbn-ctl-host-move { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+.kbn-ctl-host-move[hidden] { display: none; }
+.kbn-ctl-host-dir { width: 100%; box-sizing: border-box; font: var(--type-note)/var(--leading-ui) var(--font-mono); }
+.kbn-ctl-host-note { margin: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.kbn-ctl-host-note[hidden] { display: none; }
+.kbn-ctl-host-actions { display: flex; gap: 6px; align-items: center; }
 .ws-dock .kbn-ctl-field { display: contents; }
 .ws-dock .kbn-ctl-label { font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-value { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ws-small-gap); min-width: 0; }
