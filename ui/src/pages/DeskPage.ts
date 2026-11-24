@@ -37,7 +37,7 @@ const MAX_SEARCH_RESULTS = 30
  * The Desk, alone at its own address (`/desk`): three columns (Waiting on you,
  * Working, Awaiting review) over a shelf of three (Drafts, Resting, Roles &
  * standing), with no depth, workspace, tabs, voice or Rex following. Clicking
- * a card or waiting line calls `POST /api/v1/go` when `in=rex`, and otherwise
+ * a card or a member's line calls `POST /api/v1/go` when `in=rex`, and otherwise
  * navigates to that fiber's `/thread` page. The selected row answers to the
  * lifecycle keys, and a right-click on any row opens its lifecycle acts
  * ({@link PageActions}). Tempered and discarded fibers are

@@ -237,8 +237,23 @@ describe('the Desk: every family once, in the section its members put it in', ()
       ['cmbx/kappa/beam/mask', 'ask', 'Which threshold?'],
       ['cmbx/kappa/beam/cov', 'review', 'for review'],
     ])
-    // The idle worker asked nothing: it works.
-    expect(cmbx.working).toBe(3)
+    // Below the top-level, every live worker that asks nothing is named, mid-turn before idle; an idle worker that asked nothing works.
+    expect(cmbx.live.map(card => card.id)).toStrictEqual(['cmbx/kappa', 'cmbx/kappa/beam'])
+  })
+
+  it('names a family\'s live members mid-turn first, then by latest activity, whatever section the family stands in', () => {
+    const graph = new ThreadIndex([
+      node('talks', { status: 'closed', closedAt: at(40) }),
+      node('talks/jobs', { status: 'active', workerState: 'running', runtimePhase: 'waiting', lastActivityAt: NOW - 60_000 }),
+      node('talks/jobs/fresh', { status: 'active', workerState: 'running', runtimePhase: 'waiting', lastActivityAt: NOW - 30_000 }),
+      node('talks/old/seminar', { status: 'active', workerState: 'running', runtimePhase: 'working', lastActivityAt: NOW - 50 * 60_000 }),
+      node('talks/old', { status: 'open' }),
+      node('talks/new', { status: 'active', workerState: 'running', runtimePhase: 'working', lastActivityAt: NOW - 120_000 }),
+    ])
+    const [talks] = deskOrder(graph, new Map()).sections.review
+    expect([talks.root.id, talks.waits.map(wait => wait.card.id), talks.live.map(card => card.id)]).toStrictEqual([
+      'talks', ['talks'], ['talks/new', 'talks/old/seminar', 'talks/jobs/fresh', 'talks/jobs'],
+    ])
   })
 
   it('moves a family to Waiting on you for a post the board names, and orders that section by its newest wait', () => {
@@ -276,10 +291,11 @@ describe('the Desk: every family once, in the section its members put it in', ()
     expect(deskOrder(under, new Map()).sections.working.map(family => family.root.id)).toContain('done')
   })
 
-  it('walks the reader through each family\'s top-level, then its waiting members, section by section', () => {
+  it('walks the reader through each family\'s top-level, then its waiting members, then its live ones, section by section', () => {
     const order = deskOrder(index, new Map())
     expect(order.rows.map(row => [row.id, order.placements.get(JSON.stringify([row.originId, row.uid]))?.group])).toStrictEqual([
       ['cmbx', 'Waiting on you'], ['cmbx/kappa/beam/mask', 'Waiting on you'], ['cmbx/kappa/beam/cov', 'Waiting on you'],
+      ['cmbx/kappa', 'Waiting on you'], ['cmbx/kappa/beam', 'Waiting on you'],
       ['pipe', 'Working'], ['plan', 'Drafts'], ['notes', 'Resting'],
     ])
   })

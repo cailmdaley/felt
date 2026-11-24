@@ -53,7 +53,7 @@ afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreA
 it('clears a post three levels down from its family card, and does nothing else: one write, the dismissal, no lifecycle request', async () => {
   inside.readBoard(inside.lastResponse!)
   await settle(); await settle(); await settle()
-  const line = document.querySelector<HTMLElement>('[data-column="waiting"] .kbn-family-wait[data-card-uid="deep-uid"]')!
+  const line = document.querySelector<HTMLElement>('[data-column="waiting"] .kbn-family-line[data-card-uid="deep-uid"]')!
   expect(line.querySelector('.thread-row-doing')!.textContent!.trim()).toBe('The cut is in.')
   const from = vi.mocked(fetch).mock.calls.length
   line.querySelector<HTMLButtonElement>('.kbn-ch-clear')!.click()
@@ -70,7 +70,7 @@ it('clears a post three levels down from its family card, and does nothing else:
 it('offers to undo a clear for a few seconds: undo writes the unclear, and the post waits again', async () => {
   inside.readBoard(inside.lastResponse!)
   await settle(); await settle(); await settle()
-  document.querySelector<HTMLButtonElement>('.kbn-family-wait[data-card-uid="deep-uid"] .kbn-ch-clear')!.click()
+  document.querySelector<HTMLButtonElement>('.kbn-family-line[data-card-uid="deep-uid"] .kbn-ch-clear')!.click()
   await settle(); await settle()
   const undo = document.querySelector<HTMLButtonElement>('.shuttle-toast .toast-undo')!
   expect(undo.closest('.shuttle-toast')!.textContent).toContain('Cleared')
@@ -80,6 +80,6 @@ it('offers to undo a clear for a few seconds: undo writes the unclear, and the p
   await settle(); await settle()
   const writes = vi.mocked(fetch).mock.calls.slice(from).filter(([, init]) => init?.method === 'POST')
   expect(writes.map(([url, init]) => [String(url), JSON.parse(String(init!.body))])).toStrictEqual([['/api/v1/channels/dismiss', { key: `unclear:deep-uid:${posted}`, fiber: 'deep-uid' }]])
-  expect(document.querySelector('[data-column="waiting"] .kbn-family-wait[data-card-uid="deep-uid"] .kbn-ch-clear')).not.toBeNull()
+  expect(document.querySelector('[data-column="waiting"] .kbn-family-line[data-card-uid="deep-uid"] .kbn-ch-clear')).not.toBeNull()
   expect(document.querySelector('.shuttle-toast')).toBeNull()
 })

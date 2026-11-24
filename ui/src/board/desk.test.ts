@@ -19,7 +19,7 @@ function draw(waits: Map<string, Wait>, clear = vi.fn(), openDetail = vi.fn()) {
   const index = new ThreadIndex(cards)
   const desk = new KanbanSurfaceRenderer({ waits: () => waits, openDetail, clear }).renderDesk(deskOrder(index, waits), index)
   document.body.append(desk)
-  const lines = [...desk.querySelectorAll<HTMLElement>('.kbn-family-top, .kbn-family-wait')]
+  const lines = [...desk.querySelectorAll<HTMLElement>('.kbn-family-top, .kbn-family-line')]
   return { desk, lines, clear, openDetail, said: lines.map(line => [line.querySelector('.thread-row-slug')?.textContent ?? null, line.querySelector('.thread-row-doing')!.textContent!.trim(), !!line.querySelector('.kbn-ch-clear')]) }
 }
 
@@ -51,23 +51,24 @@ it('draws the three columns, then the shelf of three, each named, a shelf card w
   expect([meta('plan'), meta('later'), meta('referee'), meta('watch'), meta('chair')]).toStrictEqual(['', '', '', 'paused', 'paused'])
 })
 
-it('heads a family with its top-level\'s own waiting line, the working count beside it, and never repeats it below', () => {
+it('heads a family with its top-level\'s own waiting line, names what works under it, and never repeats it below', () => {
   const lone = [node('move', { ask: { text: 'Which van?', at: '2026-11-15T10:00:00Z' } }), node('trip', { ask: { text: 'Which train?', at: '2026-11-15T09:00:00Z' } }), node('trip/bags', { workerState: 'running', runtimePhase: 'working' })]
   const index = new ThreadIndex(lone)
   const desk = new KanbanSurfaceRenderer({ waits: () => new Map(), openDetail: vi.fn(), clear: vi.fn() }).renderDesk(deskOrder(index, new Map()), index)
   const move = desk.querySelector<HTMLElement>('.kbn-family[data-card-uid="move"]')!
   expect([move.querySelector('.kbn-family-head'), move.querySelectorAll('[data-card-uid]').length]).toStrictEqual([null, 0])
   expect([...move.querySelectorAll('.thread-row')].map(row => [row.querySelector('.thread-row-slug')!.textContent, row.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([['move', 'Which van?']])
-  // With a thread working under it, the same head counts it after its age, and no line below repeats the top-level.
+  // With a thread working under it, the same head stands as it is, and a line below names the thread; none repeats the top-level.
   const trip = desk.querySelector<HTMLElement>('.kbn-family[data-card-uid="trip"]')!
   const head = trip.querySelector<HTMLElement>(':scope > .kbn-family-top')!
-  expect([...head.children].map(part => part.classList.contains('thread-row-age') ? 'age' : part.className.split(' ')[0])).toStrictEqual(['constitution-state-dot', 'thread-row-slug', 'thread-row-doing', 'age', 'kbn-family-meta'])
-  expect([head.querySelector('.thread-row-slug')!.textContent, head.querySelector('.kbn-family-meta')!.textContent, trip.querySelectorAll('.kbn-family-wait, .kbn-family-head').length]).toStrictEqual(['trip', '1 working', 0])
+  expect([...head.children].map(part => part.classList.contains('thread-row-age') ? 'age' : part.className.split(' ')[0])).toStrictEqual(['constitution-state-dot', 'thread-row-slug', 'thread-row-doing', 'age'])
+  expect([...trip.querySelectorAll<HTMLElement>('.kbn-family-line')].map(line => [line.dataset.cardUid, line.dataset.attention, line.dataset.kind, !!line.querySelector('.kbn-ch-clear')])).toStrictEqual([['trip/bags', 'working', undefined, false]])
+  expect(trip.querySelector('.kbn-family-head')).toBeNull()
   // A top-level that does not wait keeps the plain head, its waiting members below.
   const base = new ThreadIndex([node('base', { workerState: 'running', runtimePhase: 'working' }), node('base/a')])
   const posted = new Map([['base/a', { id: 'p', at: 1, kind: 'post' as const, text: 'In.' }]])
   const plain = new KanbanSurfaceRenderer({ waits: () => posted, openDetail: vi.fn(), clear: vi.fn() }).renderDesk(deskOrder(base, posted), base)
-  expect([plain.querySelector('.kbn-family-top'), plain.querySelector('.kbn-family-head .kbn-family-name')!.textContent, [...plain.querySelectorAll('.kbn-family-wait .thread-row-slug')].map(each => each.textContent)]).toStrictEqual([null, 'base', ['a']])
+  expect([plain.querySelector('.kbn-family-top'), plain.querySelector('.kbn-family-head .kbn-family-name')!.textContent, [...plain.querySelectorAll('.kbn-family-line .thread-row-slug')].map(each => each.textContent)]).toStrictEqual([null, 'base', ['a']])
 })
 
 it('keeps a lone waiting post\'s ✓ on its one row: the ✓ clears and opens nothing, the row opens the constitution', () => {

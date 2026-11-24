@@ -1,7 +1,7 @@
 /* The Desk: three columns of family cards over a shelf of three. A card is
-   its top-level's line (state dot, slug, how many members work or a quiet
-   one's faint word), then one line for every member that waits on the
-   human. The columns' slugs are set dense in mono like the constitution
+   its top-level's line (state dot, slug, a quiet one's faint word), then one
+   line for every member that moves: each that waits on the human, then each
+   with a live worker. The columns' slugs are set dense in mono like the constitution
    view's rows, and what a member wants reads in serif at note size; the
    shelf's slugs read in serif at note size too. Opening a card or a line
    enters the reader. */
@@ -96,20 +96,19 @@
 .kbn-family[data-attention='quiet'] .kbn-family-name { font-weight: 400; color: var(--kbn-ink-soft); }
 .kbn-family-meta { white-space: nowrap; color: var(--kbn-ink-muted); font-variant-numeric: tabular-nums; }
 .kbn-family[data-attention='quiet'] .kbn-family-meta { font-family: var(--font-serif); font-style: italic; }
-/* Every member that waits, one line each: its slug, then what it wants. */
-.kbn-family-waits { display: flex; flex-direction: column; margin-left: 20px; }
-.kbn-family-wait { min-height: var(--kbn-desk-row); padding: 0 2px; border-radius: 2px; cursor: pointer; }
-/* A waiting top-level's own line is its family's head: the row stands where a head would, its working count after its age. */
+/* Every member that moves, one line each: its slug, then what it wants or is doing. */
+.kbn-family-lines { display: flex; flex-direction: column; margin-left: 20px; }
+.kbn-family-line { min-height: var(--kbn-desk-row); align-items: center; padding: 0 2px; border-radius: 2px; cursor: pointer; }
+/* A waiting top-level's own line is its family's head: the row stands where a head would. */
 .kbn-family-top { min-height: var(--kbn-desk-row); align-items: center; gap: 6px; }
 .kbn-family-top > .thread-row-slug { font-weight: 600; color: var(--kbn-ink); }
-.kbn-family-top > .kbn-family-meta { flex: none; margin-left: 4px; font-family: var(--font-mono); }
-.kbn-family-wait:hover { background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
-:is(.kbn-family-wait, .kbn-family-top) > .kbn-ch-clear { flex: none; align-self: center; margin-left: 6px; }
-.kbn-family.kbn-key-selected, .kbn-family-wait.kbn-key-selected {
+.kbn-family-line:hover { background: color-mix(in srgb, var(--kbn-ink) 5%, transparent); }
+:is(.kbn-family-line, .kbn-family-top) > .kbn-ch-clear { flex: none; align-self: center; margin-left: 6px; }
+.kbn-family.kbn-key-selected, .kbn-family-line.kbn-key-selected {
   background: var(--kbn-paper-bright);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kbn-ink) 45%, transparent);
 }
-.kbn-family:focus-visible, .kbn-family-wait:focus-visible { outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); outline-offset: -1px; }
+.kbn-family:focus-visible, .kbn-family-line:focus-visible { outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); outline-offset: -1px; }
 /* The waiting and review columns' initials are gold, the working column's blue, the shelf's ink. */
 .kbn-col-waiting .kbn-cap, .kbn-col-review .kbn-cap { color: var(--kbn-owed-bright); }
 .kbn-col-working .kbn-cap { color: var(--kbn-agent); }
@@ -131,14 +130,15 @@
 .kbn-col-action-idea:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-agent) 40%, transparent); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  :root { --kbn-desk-row: 32px; }
+  /* A touch target is 44px tall: every head and line on the phone stands a row of it. */
+  :root { --kbn-desk-row: 44px; }
   .kbn-desk-head { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 28px; }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-tab { gap: 6px; }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
   .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }
   .kbn-folio .kbn-folio-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; color: var(--kbn-ink-muted); }
-  .kbn-family-waits { margin-left: 18px; }
+  .kbn-family-lines { margin-left: 18px; }
   .kbn-desk-shelf { grid-template-columns: minmax(0, 1fr); }
   .kbn-desk-shelf > .kbn-col { max-height: none; }
   @media (orientation: portrait) {

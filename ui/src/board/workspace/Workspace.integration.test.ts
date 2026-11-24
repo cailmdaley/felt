@@ -883,7 +883,8 @@ describe('workspace reader integration', () => {
     const raw = [
       thread({ id: 'draft', status: 'open' }),
       thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
-      thread({ id: 'hub/sub', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      // A quiet thread: the Desk names only the members that move.
+      thread({ id: 'hub/sub', orchestrator: 'hub', status: 'open' }),
       thread({ id: 'settled', status: 'closed', tempered: true }),
       thread({ id: 'settled/ask', orchestrator: 'settled', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }),
       thread({ id: 'review', status: 'closed' }),

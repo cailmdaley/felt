@@ -1,6 +1,7 @@
 import { ATTENTION_ORDER, attentionOf, lastActive, wantOf, type Attention, type Want, type Waits } from './attention.js'
 import type { KanbanCard } from './KanbanTypes.js'
 import { slug } from './threadOutline.js'
+import { turnOf } from './turn.js'
 import type { ThreadIndex } from './threads.js'
 
 /**
@@ -28,7 +29,8 @@ export interface FamilyWait { card: KanbanCard; want: Want }
 
 /**
  * One family as the Desk draws it: a top-level constitution with everything
- * under it, in the section its members put it in.
+ * under it, in the section its members put it in, naming every member that
+ * moves: those that wait on the human, then those with a live worker.
  */
 export interface DeskFamily {
   root: KanbanCard
@@ -37,8 +39,8 @@ export interface DeskFamily {
   section: DeskSection
   /** Every member that waits on the human, at any depth, the newest wait first. */
   waits: FamilyWait[]
-  /** How many members are working. */
-  working: number
+  /** Every member below the top-level with a live worker that asks nothing, at any depth: mid-turn first, then the latest active. */
+  live: KanbanCard[]
   /** What orders it in its section: its newest wait while it waits, else its latest activity. */
   at: number
 }
@@ -46,7 +48,7 @@ export interface DeskFamily {
 /** The Desk's visible order. */
 export interface DeskOrder {
   sections: Readonly<Record<DeskSection, DeskFamily[]>>
-  /** What the reader's j / k walk: each family's top-level, then its members that wait, section by section. */
+  /** What the reader's j / k walk: each family's top-level, then its members that wait, then its live members, section by section. */
   rows: KanbanCard[]
   placements: ReadonlyMap<string, DeskPlacement>
 }
@@ -70,6 +72,10 @@ function shelf(root: KanbanCard): DeskSection {
   return root.column === 'resting' ? 'resting' : 'drafts'
 }
 
+/** Mid-turn before idle (or starting, or unheard from), then the latest active first. */
+const byLiveness = (a: KanbanCard, b: KanbanCard): number =>
+  Number(turnOf(b).turn === 'working') - Number(turnOf(a).turn === 'working') || lastActive(b) - lastActive(a)
+
 /**
  * A family's place on the Desk. Waiting on you when a member wants an answer
  * (an ask, a post, a prompt, a turn that could not start); else Awaiting
@@ -82,10 +88,10 @@ export function deskFamily(index: ThreadIndex, root: KanbanCard, waits: Waits): 
   const attention = ATTENTION_ORDER.find(state => states.includes(state))!
   const found = members.flatMap(card => { const want = wantOf(card, waits); return want ? [{ card, want }] : [] })
     .sort((a, b) => b.want.at - a.want.at)
-  const working = states.filter(state => state === 'working').length
+  const live = members.filter((_, i) => i > 0 && states[i] === 'working').sort(byLiveness)
   const section: DeskSection = found.some(wait => wait.want.kind !== 'review') ? 'waiting'
-    : found.length ? 'review' : working ? 'working' : shelf(root)
-  return { root, attention, section, waits: found, working, at: found.length ? found[0].want.at : Math.max(...members.map(lastActive)) }
+    : found.length ? 'review' : attention === 'working' ? 'working' : shelf(root)
+  return { root, attention, section, waits: found, live, at: found.length ? found[0].want.at : Math.max(...members.map(lastActive)) }
 }
 
 /**
@@ -109,7 +115,7 @@ export function deskOrder(index: ThreadIndex, waits: Waits): DeskOrder {
   const placements = new Map<string, DeskPlacement>()
   for (const section of DESK_SECTIONS) {
     for (const family of sections[section]) {
-      for (const card of [family.root, ...family.waits.map(wait => wait.card)]) {
+      for (const card of [family.root, ...family.waits.map(wait => wait.card), ...family.live]) {
         const key = deskCardKey(card)
         if (placements.has(key)) continue
         placements.set(key, { section, group: DESK_SECTION_TITLE[section] })

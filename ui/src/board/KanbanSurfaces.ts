@@ -1,8 +1,8 @@
 import '@ui-sdk/web/tabs'
 import { markVerdictHost } from './workspace/Verdicts.js'
-import { clearable, quietWord, type Waits } from './attention.js'
+import { clearable, quietWord, type Want, type Waits } from './attention.js'
 import { dueCivilDay, formatCivilDay } from '../sdk/civilDay.js'
-import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection, type FamilyWait } from './deskOrdering.js'
+import { DESK_COLUMNS, DESK_FOLIO_NAME, DESK_SECTION_TITLE, DESK_SECTIONS, type DeskFamily, type DeskOrder, type DeskSection } from './deskOrdering.js'
 import { activeFolioIndex, folioScrollTarget } from './deskMobile.js'
 import type { KanbanCard, KanbanOriginStaleness } from './KanbanTypes.js'
 import { isMobileViewport } from './mobile.js'
@@ -22,6 +22,8 @@ const EMPTY: Readonly<Record<DeskSection, string>> = {
 }
 /** The faint word a shelf's own name already says. */
 const SAID: Partial<Record<DeskSection, string>> = { drafts: 'draft', resting: 'resting', roles: 'seat' }
+/** A member a family's card names under its head: one that waits, with what it wants, or one with a live worker. */
+interface FamilyMember { card: KanbanCard; want?: Want }
 
 export interface DeskRendererOptions {
   /** What waits on the human, by fiber. */
@@ -170,9 +172,9 @@ export class KanbanSurfaceRenderer {
   /**
    * One family, headed by its top-level: while the top-level waits, its own
    * thread row (what it wants, how long ago, a post's ✓, its undo window);
-   * otherwise its dot and slug, or a quiet one's faint word. Beside either,
-   * how many of its members work. Under the head, every other member that
-   * waits on the human, one line each. A line opens that member's view;
+   * otherwise its dot and slug, and a quiet one's faint word. Under the head,
+   * every other member that moves, one thread row each: those that wait on the
+   * human, then those with a live worker. A line opens that member's view;
    * anywhere else on the card opens the top-level's.
    */
   private family(family: DeskFamily, index: ThreadIndex): HTMLElement {
@@ -189,22 +191,17 @@ export class KanbanSurfaceRenderer {
     }
     identify(card, root)
     card.setAttribute('aria-label', `${root.name}${root.unreadable ? ', unreadable' : ''}, ${DESK_SECTION_TITLE[family.section].toLowerCase()}`)
+    const own = family.waits.find(wait => wait.card === root)
+    const members = [...family.waits.filter(wait => wait !== own), ...family.live.map(member => ({ card: member }))]
     card.addEventListener('click', event => {
       if ((event.target as Element).closest('button, a')) return
-      const line = (event.target as Element).closest<HTMLElement>('.kbn-family-wait')
-      const wait = line && family.waits.find(each => fiber(each.card) === line.dataset.cardUid)
-      this.o.openDetail(wait ? wait.card : root)
+      const line = (event.target as Element).closest<HTMLElement>('.kbn-family-line')
+      const member = line && members.find(each => fiber(each.card) === line.dataset.cardUid)
+      this.o.openDetail(member ? member.card : root)
     })
-    const meta = document.createElement('span')
-    meta.className = 'kbn-family-meta'
-    // A family of one says nothing its dot does not; a larger one counts its workers.
-    const word = family.attention === 'quiet' ? quietWord(root) : ''
-    meta.textContent = family.attention === 'quiet' ? (word === SAID[family.section] ? '' : family.section === 'resting' ? word.replace(/^resting /, '') : word) : family.working && index.children(root).length ? `${family.working} working` : ''
-    const own = family.waits.find(wait => wait.card === root)
     if (own) {
       const head = this.row(own)
       head.classList.add('kbn-family-top')
-      if (meta.textContent) head.querySelector('.thread-row-age')!.after(meta)
       card.append(head)
     } else {
       const head = document.createElement('div')
@@ -212,6 +209,10 @@ export class KanbanSurfaceRenderer {
       const name = document.createElement('span')
       name.className = 'kbn-family-name'
       name.textContent = rowLabel(index, root)
+      const meta = document.createElement('span')
+      meta.className = 'kbn-family-meta'
+      const word = family.attention === 'quiet' ? quietWord(root) : ''
+      meta.textContent = word === SAID[family.section] ? '' : family.section === 'resting' ? word.replace(/^resting /, '') : word
       if (root.unreadable) {
         const badge = document.createElement('span')
         badge.className = 'kbn-unreadable-badge'
@@ -225,31 +226,32 @@ export class KanbanSurfaceRenderer {
       markVerdictHost(head, root)
       card.append(head)
     }
-    const members = family.waits.filter(wait => wait !== own)
     if (members.length) {
       const lines = document.createElement('div')
-      lines.className = 'kbn-family-waits'
-      lines.append(...members.map(wait => this.line(wait)))
+      lines.className = 'kbn-family-lines'
+      lines.append(...members.map(member => this.line(member)))
       card.append(lines)
     }
     return card
   }
 
-  /** A member that waits, as a line of its family's card that opens it. */
-  private line(wait: FamilyWait): HTMLElement {
-    const line = this.row(wait)
-    line.classList.add('kbn-family-wait')
+  /** A member that moves, as a line of its family's card that opens it. */
+  private line(member: FamilyMember): HTMLElement {
+    const line = this.row(member)
+    line.classList.add('kbn-family-line')
     line.dataset.deskLine = ''
-    identify(line, wait.card)
+    identify(line, member.card)
     return line
   }
 
   /**
-   * A member that waits, as a thread row (elements/threadRow.ts: dot, slug,
-   * what it wants, how long ago), a post's ✓, and the member's undo window.
+   * A member as a thread row (elements/threadRow.ts: dot, slug, what it wants
+   * or is doing, how long ago); one that waits carries a post's ✓ and the
+   * member's undo window.
    */
-  private row({ card, want }: FamilyWait): HTMLElement {
+  private row({ card, want }: FamilyMember): HTMLElement {
     const line = threadRow(card, { waits: this.o.waits(), now: Date.now() })
+    if (!want) return line
     line.dataset.kind = want.kind
     markVerdictHost(line, card)
     if (clearable(want)) {

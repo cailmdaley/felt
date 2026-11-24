@@ -1145,7 +1145,7 @@ describe('the desk page', () => {
 
     // When go fails, a quiet .pg-said toast explains why.
     goAnswer = { went: false, place: 'none' }
-    const waitLine = page.el.querySelector<HTMLElement>('.kbn-family-wait[data-card-uid="thread-review"]')!
+    const waitLine = page.el.querySelector<HTMLElement>('.kbn-family-line[data-card-uid="thread-review"]')!
     waitLine.click()
     await settle(); await settle()
     const said = page.el.querySelector<HTMLElement>('.pg-said')!

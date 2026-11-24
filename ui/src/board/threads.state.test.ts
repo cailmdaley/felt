@@ -61,23 +61,23 @@ describe('a family sits where its most urgent member puts it', () => {
   const review = (id: string) => kid(id, { status: 'closed' })
   const place = (cards: KanbanCard[]) => {
     const family = deskFamily(new ThreadIndex(cards), cards[0], new Map())
-    return { attention: family.attention, waits: family.waits.map(wait => wait.card.id), working: family.working }
+    return { attention: family.attention, waits: family.waits.map(wait => wait.card.id), live: family.live.map(card => card.id) }
   }
   it('what waits outranks a live worker, and an idle worker that asked nothing works', () => {
-    expect(place([root(), review('r'), idle('y')])).toEqual({ attention: 'waiting', waits: ['cmbx/r'], working: 2 })
+    expect(place([root(), review('r'), idle('y')])).toEqual({ attention: 'waiting', waits: ['cmbx/r'], live: ['cmbx/y'] })
     expect(place([root({ workerState: undefined, runtimePhase: undefined, status: 'open', effectiveHorizon: 'stashed' }), working('w')]))
-      .toEqual({ attention: 'working', waits: [], working: 1 })
+      .toEqual({ attention: 'working', waits: [], live: ['cmbx/w'] })
   })
-  it('the root waits among its threads, one line each, and the others that work are a count', () => {
+  it('the root waits among its threads, one line each, and the others that work are named after them', () => {
     expect(place([root({ ask: { text: 'Which?', at: '2026-11-09T10:00:00Z' } }), review('a'), working('w')]))
-      .toMatchObject({ attention: 'waiting', waits: expect.arrayContaining(['cmbx', 'cmbx/a']), working: 1 })
+      .toMatchObject({ attention: 'waiting', waits: expect.arrayContaining(['cmbx', 'cmbx/a']), live: ['cmbx/w'] })
   })
   it('an armed root without a worker still stands with a tree whose only life is a working thread', () => {
-    expect(place([root({ workerState: undefined, runtimePhase: undefined }), working('w')])).toEqual({ attention: 'working', waits: [], working: 1 })
+    expect(place([root({ workerState: undefined, runtimePhase: undefined }), working('w')])).toEqual({ attention: 'working', waits: [], live: ['cmbx/w'] })
   })
   it('a quiet tree is quiet, wherever the root rests', () => {
     expect(place([root({ status: 'open', effectiveHorizon: 'stashed', workerState: undefined, runtimePhase: undefined }), kid('d', { status: 'open' })]))
-      .toEqual({ attention: 'quiet', waits: [], working: 0 })
+      .toEqual({ attention: 'quiet', waits: [], live: [] })
   })
   it('every node of the tree reads the same top-level', () => {
     const cards = [root(), idle('y'), working('w')]

@@ -151,7 +151,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['?'], 'This guide', everywhere('help')),
   ] },
   { title: 'Moving', note: 'On the Desk.', rows: [
-    row(['j', 'k', '↓', '↑'], 'Next / previous card or waiting line', on('desk', 'down', 'up')),
+    row(['j', 'k', '↓', '↑'], 'Next / previous card or member\'s line', on('desk', 'down', 'up')),
     row(['h', '←'], 'Clear selection', on('desk', 'back')),
     row(['g', 'G'], 'First / last in the column', on('desk', 'first', 'last')),
     row(['l', '→', 'Enter', 'o'], 'Open the selected constitution', on('desk', 'open')),

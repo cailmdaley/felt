@@ -86,6 +86,28 @@ it('keeps an idle worker that asked nothing in Working, its dot still, when a lo
   expect([dot.dataset.attention, dot.hasAttribute('data-busy')]).toEqual(['working', false])
 })
 
+// A slide-deck worker two levels under a top-level closed for review was found only by search: the Desk named it nowhere, only "2 working" on its family's head.
+it('names a live worker deep in a family closed for review on the Desk, and opens its own view from its line and from the walk', async () => {
+  const career = card({ id: 'career-futures', uid: 'career-uid', status: 'closed', closedAt: '2026-11-24T18:00:00Z' })
+  const talks = card({ id: 'career-futures/talks', uid: 'talks-uid', orchestrator: 'career-uid', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
+  const seminar = card({ id: 'career-futures/talks/ice-seminar', uid: 'seminar-uid', orchestrator: 'talks-uid', status: 'active', workerState: 'running', runtimePhase: 'working' })
+  draw(response({ now: { drafts: [], inFlight: [], awaitingReview: [career] }, threads: [talks, seminar] }))
+  const family = document.querySelector<HTMLElement>('[data-column="review"] .kbn-family[data-card-uid="career-uid"]')!
+  expect([...family.querySelectorAll<HTMLElement>('.kbn-family-line')].map(line => [line.dataset.cardUid, line.querySelector('.thread-row-slug')!.textContent])).toStrictEqual([
+    ['seminar-uid', 'ice-seminar'], ['talks-uid', 'talks'],
+  ])
+  family.querySelector<HTMLElement>('.kbn-family-line[data-card-uid="seminar-uid"] .thread-row-doing')!.click()
+  expect(inside.workspace.isActive).toBe(true)
+  expect(window.location.hash).toContain('seminar-uid')
+  // Back on the Desk its line holds the selection, one stop of the walk after its family's head.
+  await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
+  expect(selected()).toBe('seminar-uid')
+  press('k'); expect(selected()).toBe('career-uid')
+  press('j'); expect(selected()).toBe('seminar-uid')
+  press('Enter')
+  expect(window.location.hash).toContain('seminar-uid')
+})
+
 it('moves through the view tabs by arrows, Home and End, and keeps the numeric hotkeys', async () => {
   await settle()
   const tabs = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Board views"] [role="tab"]'))

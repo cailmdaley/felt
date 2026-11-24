@@ -58,7 +58,7 @@ export function registerNavigationJourneys(test) {
     await page.goto(url + '#/desk')
     // A thread under its family's root opens its own view, whose way back is the Desk.
     // The thread asks, so its family's Desk card carries it as a waiting line.
-    const name = page.locator('.kbn-desk .kbn-family-wait[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]').locator('.thread-row-doing')
+    const name = page.locator('.kbn-desk .kbn-family-line[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]').locator('.thread-row-doing')
     const questionSlug = 'question'
     const land = async () => {
       const nameBox = await name.boundingBox()

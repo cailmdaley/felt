@@ -60,17 +60,19 @@ describe('a family is one card on the Desk', () => {
     const index = threadIndexFor(board)
     return new KanbanSurfaceRenderer({ waits: () => new Map(), openDetail: () => {}, clear: () => {} }).renderDesk(deskOrder(index, new Map()), index)
   }
-  it('draws every member that waits as a line of the one card, uncapped, and counts the rest that work', () => {
+  it('draws every member that waits as a line of the one card, uncapped, its working top-level said by its dot alone', () => {
     const desk = draw(buildKanbanResponseFromComposite(family('working', 'attention', 12)))
     expect(desk.querySelectorAll('.kbn-family')).toHaveLength(1)
-    expect(desk.querySelectorAll('[data-column="waiting"] .kbn-family-wait')).toHaveLength(12)
-    expect(desk.querySelector('.kbn-family-meta')!.textContent).toBe('1 working')
+    expect(desk.querySelectorAll('[data-column="waiting"] .kbn-family-line[data-kind]')).toHaveLength(12)
+    expect([desk.querySelectorAll('.kbn-family-line').length, desk.querySelector('.kbn-family-meta')!.textContent]).toStrictEqual([12, ''])
   })
-  it('puts a family whose workers are idle in Working, with no line', () => {
+  it('puts a family whose workers are idle in Working, a line naming each one below the top-level', () => {
     const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'waiting', 3)))
     expect(desk.querySelectorAll('[data-column="working"] .kbn-family')).toHaveLength(1)
-    expect(desk.querySelector('.kbn-family-wait')).toBeNull()
-    expect(desk.querySelector('.kbn-family-meta')!.textContent).toBe('4 working')
+    expect([...desk.querySelectorAll<HTMLElement>('.kbn-family-line')].map(line => [line.dataset.fiberId, line.querySelector('.thread-row-doing')!.textContent])).toStrictEqual([
+      ['cmbx/t0', 'idle'], ['cmbx/t1', 'idle'], ['cmbx/t2', 'idle'],
+    ])
+    expect(desk.querySelector('.kbn-family-meta')!.textContent).toBe('')
   })
 })
 

@@ -65,7 +65,7 @@ export class DeskKeyboard {
       .filter(el => !el.closest('[hidden]')))
       .filter(region => region.length > 0)
   }
-  /** The drawn row for the selection: a constitution named without `line` is its card, else, drawn only as a waiting line, that line. */
+  /** The drawn row for the selection: a constitution named without `line` is its card, else, drawn only as a member's line, that line. */
   private node(): HTMLElement | undefined {
     const selected = this.selected
     if (!selected) return undefined

@@ -180,7 +180,10 @@ export function addChannelsFixtures(example: WorkspaceExample, now: number): Cha
  * notebook whose live worker is idle, asking nothing, so it works; a launch
  * that could not start; a paper closed for the human's review; and, quiet,
  * a draft, a rest until a day, a standing digest asleep until its next run,
- * a paused arXiv watch and a seat at rest.
+ * a paused arXiv watch and a seat at rest. Two families name their live
+ * members: career futures, closed for review, its seminar deck at work two
+ * levels down and its applications idle; and kinematic lensing, nine
+ * threads live under a working top-level.
  */
 export function addDeskFixtures(example: WorkspaceExample, now: number): ChannelsFixture {
   const rows: Row[] = [
@@ -200,6 +203,20 @@ export function addDeskFixtures(example: WorkspaceExample, now: number): Channel
     { id: 'arxiv', name: 'arXiv watch', standing: true, rest: true, minutes: 6 * DAY },
     { id: 'referee', name: 'Referee desk', role: 'referee', seat: true, minutes: 9 * DAY },
     { id: 'paper', name: 'Lensing paper', closed: true, minutes: 95, review: 'Section 4 is rewritten around the new covariance; read the diff against v2.', outcome: 'The draft is ready for co-authors.' },
+    { id: 'career-futures', name: 'Career futures', channel: 'Career', closed: true, minutes: 240, review: 'The two-year plan is written; the fellowship list is ranked.', outcome: 'A plan for the next two years, with three applications to draft.' },
+    { id: 'career-futures/applications', name: 'Fellowship applications', parent: 'career-futures', state: 'idle', minutes: 45, outcome: 'The research statement is drafted; the budget waits on the host institute.' },
+    { id: 'career-futures/talks', name: 'Talks', parent: 'career-futures', minutes: 3 * DAY },
+    { id: 'career-futures/talks/ice-seminar', name: 'ICE seminar deck', parent: 'career-futures/talks', state: 'working', minutes: 1, outcome: 'Slides 1–14 are drafted; the kinematic lensing forecast is next.' },
+    { id: 'kinematic', name: 'Kinematic lensing', state: 'working', minutes: 4 },
+    { id: 'kinematic/rotation', name: 'Rotation curves', parent: 'kinematic', state: 'working', minutes: 2, outcome: 'Fitting arctan curves to the 412 MaNGA disks.' },
+    { id: 'kinematic/tully-fisher', name: 'Tully–Fisher prior', parent: 'kinematic', state: 'idle', minutes: 31, outcome: 'The prior scatter is 0.05 dex after the inclination cut.' },
+    { id: 'kinematic/shape-noise', name: 'Shape noise', parent: 'kinematic', state: 'working', minutes: 6 },
+    { id: 'kinematic/ifu-sims', name: 'IFU simulations', parent: 'kinematic', state: 'working', minutes: 9, outcome: 'Rendering the second batch of mock datacubes.' },
+    { id: 'kinematic/ifu-sims/psf', name: 'IFU PSF', parent: 'kinematic/ifu-sims', state: 'idle', minutes: 52 },
+    { id: 'kinematic/forecast', name: 'Fisher forecast', parent: 'kinematic', state: 'working', minutes: 14, outcome: 'σ(γ) per galaxy is 0.021 against 0.26 for weak lensing alone.' },
+    { id: 'kinematic/systematics', name: 'Systematics budget', parent: 'kinematic', state: 'idle', minutes: 75 },
+    { id: 'kinematic/velocity-maps', name: 'Velocity maps', parent: 'kinematic', state: 'working', minutes: 3 },
+    { id: 'kinematic/paper', name: 'Kinematic lensing paper', parent: 'kinematic', state: 'idle', minutes: 120, outcome: 'The introduction and the method section are drafted.' },
   ]
   return addBoardFixtures(example, now, rows, (said, human) => [
     said('survey/catalogue/shapes/selection', 'post', 6, { to: human, text: 'The selection bias is **0.3%** after the new cuts; the plot is in the folder. Nothing to decide.' }),
