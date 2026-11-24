@@ -101,14 +101,14 @@ func takeSentCopy(dir, path string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("artifact is not a regular file: %s", path)
 	}
-	if info.Size() > sentCopyMaxBytes {
-		return "", nil
-	}
 	src, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("read artifact: %w", err)
 	}
 	defer src.Close()
+	if info.Size() > sentCopyMaxBytes {
+		return "", nil
+	}
 	tmp, err := os.CreateTemp(dir, ".copy-")
 	if err != nil {
 		return "", fmt.Errorf("copy artifact: %w", err)
