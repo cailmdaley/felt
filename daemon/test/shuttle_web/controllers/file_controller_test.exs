@@ -986,6 +986,108 @@ defmodule ShuttleWeb.FileControllerTest do
     path
   end
 
+  # The bug: a worker sent the human a PNG from ~/Documents. The launchd daemon
+  # could stat it (`/file-info` answered at once) but its open blocked on a
+  # macOS privacy prompt, so `/file` never answered and the board blamed the
+  # browser. An unreadable file now answers 403 at once, distinct from 404,
+  # and a sent file is served from the copy its send took.
+  describe "files the owner cannot read" do
+    @tag :tmp_dir
+    test "a file this daemon cannot open is a prompt 403, not a 404", %{tmp_dir: dir} do
+      path = Path.join(dir, "locked.png")
+      File.write!(path, "png")
+      File.chmod!(path, 0)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      for conn <- [get(api_conn(), url), head(api_conn(), url)] do
+        assert conn.status == 403
+      end
+
+      assert %{"error" => "owner could not read file", "detail" => "opening it failed: eacces"} =
+               json_response(get(api_conn(), url), 403)
+
+      info = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(path)}")
+      assert %{"exists" => true, "size" => 3} = json_response(info, 200)
+    end
+
+    @tag :tmp_dir
+    @tag if(:os.type() == {:unix, :darwin}, do: [], else: [skip: "macOS privacy folders"])
+    test "a file in a macOS privacy folder answers 403 without being opened", %{tmp_dir: dir} do
+      Shuttle.Test.Env.put_env("HOME", dir)
+      path = Path.join([dir, "Documents", "talk", "01-title.png"])
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "png")
+
+      {micros, conn} =
+        :timer.tc(fn -> get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}") end)
+
+      assert %{"detail" => "macOS keeps this host's daemon out of" <> _} =
+               json_response(conn, 403)
+
+      assert micros < 1_000_000
+    end
+
+    @tag :tmp_dir
+    test "a sent path is served from its copy once the original is gone or locked", %{
+      tmp_dir: dir
+    } do
+      store = Path.join(dir, "sent-files")
+      File.mkdir_p!(store)
+      stored = Path.join(store, "0123abcd.png")
+      File.write!(stored, "sent bytes")
+      gone = Path.join(dir, "scratch/frame.png")
+      locked = Path.join(dir, "locked.png")
+      File.write!(locked, "locked bytes")
+      File.chmod!(locked, 0)
+      live = Path.join(dir, "events.jsonl")
+
+      File.write!(
+        live,
+        Jason.encode!(%{
+          "type" => "file_sent",
+          "sessionId" => "sess",
+          "timestamp" => 1,
+          "files" => [gone, locked],
+          "copies" => %{gone => stored, locked => stored}
+        }) <> "\n"
+      )
+
+      Shuttle.Test.EventFiles.scope!(live)
+
+      for path <- [gone, locked] do
+        conn = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+        assert conn.status == 200
+        assert conn.resp_body == "sent bytes"
+        assert get_resp_header(conn, "content-type") |> List.first() =~ "image/png"
+
+        info = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(path)}")
+        assert %{"exists" => true, "size" => 10} = json_response(info, 200)
+      end
+
+      unsent =
+        get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(Path.join(dir, "x.png"))}")
+
+      assert unsent.status == 404
+    end
+
+    test "the owner's 403 crosses the owner-routed forward" do
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 403, [], "application/json",
+         ~s({"error":"owner could not read file","detail":"opening it failed: eperm"})}
+      )
+
+      conn =
+        get(
+          api_conn(),
+          "/api/v1/file?path=#{URI.encode_www_form("/abs/locked.png")}&origin=candide"
+        )
+
+      assert %{"error" => "owner could not read file"} = json_response(conn, 403)
+    end
+  end
+
   describe "remote forward" do
     test "forwards a remote-owned path to the owning daemon and relays bytes" do
       stub_forward(

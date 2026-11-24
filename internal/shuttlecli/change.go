@@ -253,15 +253,8 @@ the list of PRs.`,
 						return err
 					}
 					now := a.eventNow().UnixMilli()
-					event := struct {
-						eventLine
-						Files []string `json:"files"`
-					}{eventLine: eventLine{ID: f.UID + "-" + strconv.FormatInt(now, 10) + "-" + strconv.Itoa(a.eventRand()), Timestamp: now, Type: "file_sent", SessionID: f.UID, CWD: repo, OriginName: origin}, Files: []string{path}}
-					line, err := encodeJSONLine(event)
-					if err != nil {
-						return err
-					}
-					if err := a.appendEventLine(sink, line); err != nil {
+					line := eventLine{ID: f.UID + "-" + strconv.FormatInt(now, 10) + "-" + strconv.Itoa(a.eventRand()), Timestamp: now, SessionID: f.UID, CWD: repo, OriginName: origin}
+					if err := a.appendFileSent(sink, line, []string{path}, "", false); err != nil {
 						return fmt.Errorf("bundle saved but delivery receipt failed: %w", err)
 					}
 				}

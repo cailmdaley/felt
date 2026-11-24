@@ -9,7 +9,9 @@ defmodule Shuttle.SentFiles do
   `caption`. A harness's `SendUserFile` tool call, recorded by the hook, carries
   its paths in `toolInput.files` and its words in `toolInput.caption`. Each
   entry carries its send's `caption` when it had one; the key is absent
-  otherwise.
+  otherwise. Both kinds carry `copies`, each sent path's copy in the host's
+  copy store, taken by the sending process; `copy_for/2` reads them for the
+  file route.
   Paths are absolute or resolved against the owning host's recorded `cwd`.
   A worker's tmux-embedded ULID associates the delivery with its fiber. Native
   sessions without a tmux name use the session ledger's fiber claim; an
@@ -88,6 +90,7 @@ defmodule Shuttle.SentFiles do
             tmux_session: String.t() | nil,
             caption: String.t() | nil,
             show: boolean(),
+            copies: %{optional(String.t()) => String.t()},
             timestamp: term()
           }
           | %{cleared_uid: String.t(), cleared_path: String.t() | nil, timestamp: integer()}
@@ -147,6 +150,28 @@ defmodule Shuttle.SentFiles do
   end
 
   @doc """
+  The copy the newest send of `path` took, or `nil` when no retained send of
+  it carries one. `path` is absolute, as sends are projected.
+
+  The file route serves a path from this copy when the daemon cannot read the
+  path itself. A stream that is not running knows no copies.
+
+  Opts (for tests): `:stream`.
+  """
+  @spec copy_for(String.t(), keyword()) :: String.t() | nil
+  def copy_for(path, opts \\ []) when is_binary(path) do
+    opts
+    |> events()
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{copies: %{^path => stored}} -> stored
+      _event -> nil
+    end)
+  catch
+    :exit, _reason -> nil
+  end
+
+  @doc """
   One decoded event → the (possibly empty) list of projected events it
   contributes.
 
@@ -193,6 +218,7 @@ defmodule Shuttle.SentFiles do
                 tmux_session: copy(event["tmuxSession"]),
                 caption: caption(event),
                 show: event["show"] == true,
+                copies: copies(event),
                 timestamp: event["timestamp"]
               }
             ]
@@ -205,6 +231,15 @@ defmodule Shuttle.SentFiles do
 
   defp copy(value) when is_binary(value), do: :binary.copy(value)
   defp copy(value), do: value
+
+  # Each sent path's copy in the host's copy store, as the sender recorded it.
+  defp copies(%{"copies" => copies}) when is_map(copies) do
+    for {path, stored} <- copies, is_binary(path) and is_binary(stored), into: %{} do
+      {:binary.copy(path), :binary.copy(stored)}
+    end
+  end
+
+  defp copies(_event), do: %{}
 
   # The words a send came with, blank ones none.
   defp caption(event) do

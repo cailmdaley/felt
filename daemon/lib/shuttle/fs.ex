@@ -121,6 +121,35 @@ defmodule Shuttle.FS do
       else: []
   end
 
+  @doc """
+  Whether this process may open `path` for reading, answered within `timeout`
+  milliseconds: `:ok`, `{:error, posix}`, or `{:error, :timeout}`.
+
+  The open runs in a process of its own because it can block without bound:
+  macOS holds an open of a file in a folder it protects from launchd
+  processes while it waits on a consent prompt nobody may see. A timed-out
+  open is killed and left to finish on its own; the caller has its answer.
+  """
+  def readable(path, timeout) do
+    reply = Process.alias()
+
+    pid =
+      spawn(fn ->
+        send(reply, {reply, with({:ok, fd} <- open(path, [:read]), do: close(fd))})
+      end)
+
+    receive do
+      {^reply, result} ->
+        Process.unalias(reply)
+        result
+    after
+      timeout ->
+        Process.unalias(reply)
+        Process.exit(pid, :kill)
+        {:error, :timeout}
+    end
+  end
+
   def exists?(path), do: match?({:ok, _}, stat(path))
   def dir?(path), do: match?({:ok, %{type: :directory}}, stat(path))
   def regular?(path), do: match?({:ok, %{type: :regular}}, stat(path))

@@ -29,6 +29,22 @@ defmodule ShuttleWeb.FileController do
   validation. A relative path is a 400; `/file` returns 404 for a missing file,
   while `/file-info` reports `exists: false`; neither 500s the reader.
 
+  **A sent path falls back to its copy.** Sending a file copies it, from the
+  sender's own process, into the host's copy store (`Shuttle.SentFiles`
+  records each send's `copies`). A local path is served from the file itself
+  when this daemon can read it, so a sent report that is still being rewritten
+  stays live and its relative figures resolve; otherwise from the copy the
+  newest send of that path took. Only a path with neither answers 404, or 403
+  when the file is there but this daemon cannot read it.
+
+  **Reading is bounded.** A file this daemon cannot open answers 403 at once,
+  never a hung request: macOS keeps launchd processes out of `~/Documents`,
+  `~/Desktop` and `~/Downloads` (`Shuttle.FS.protected?/1`), and holds an open
+  of such a file while it waits on a consent prompt nobody may see. Those
+  folders are refused without an open, and any other open that has not
+  finished within `@open_timeout_ms` counts as unreadable
+  (`Shuttle.FS.readable/2`). The owner-routed leg relays the owner's answer.
+
   **Conditional and range reads on both owner legs.** Small GETs use a content
   digest. A whole GET of a larger document (up to 64 MiB, not media) uses its
   digest too, read once per settled version by `ShuttleWeb.FileDigests`;
@@ -56,6 +72,7 @@ defmodule ShuttleWeb.FileController do
   alias Shuttle.OriginRouter
 
   @digest_limit 1024 * 1024
+  @open_timeout_ms 5_000
   @hash_limit 64 * 1024 * 1024
   @range_limit 4 * 1024 * 1024
 
@@ -170,9 +187,8 @@ defmodule ShuttleWeb.FileController do
 
       :local ->
         with :absolute <- Path.type(path),
-             {:ok, %File.Stat{type: :regular, size: size}} when size <= @hash_limit <-
-               Shuttle.FS.stat(path, time: :posix),
-             {:ok, body} <- Shuttle.FS.read(path) do
+             {:ok, source, %File.Stat{size: size}} when size <= @hash_limit <- resolve(path),
+             {:ok, body} <- Shuttle.FS.read(source) do
           {:ok, body}
         else
           _ -> :error
@@ -251,8 +267,11 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp serve_info(conn, path) do
-    with_regular_file(conn, path,
-      found: fn stat ->
+    with_local_file(conn, path,
+      found: fn _source, stat ->
+        info_json(conn, %{exists: true, modified_at: stat.mtime, size: stat.size})
+      end,
+      unreadable: fn _reason, stat ->
         info_json(conn, %{exists: true, modified_at: stat.mtime, size: stat.size})
       end,
       missing: fn -> info_json(conn, %{exists: false}) end
@@ -266,25 +285,70 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp serve_local(conn, path) do
-    with_regular_file(conn, path,
-      found: fn stat -> serve_with_validators(conn, path, stat) end,
-      missing: fn -> conn |> put_status(404) |> json(%{error: "file not found"}) end
+    with_local_file(conn, path,
+      found: fn source, stat -> serve_with_validators(conn, source, stat) end,
+      unreadable: fn reason, _stat ->
+        conn
+        |> put_status(403)
+        |> json(%{error: "owner could not read file", detail: unreadable_detail(reason)})
+      end,
+      missing: fn -> file_not_found(conn) end
     )
   end
 
-  # The head both local legs share: reject a relative path, then stat it and
-  # dispatch on "is a regular file". Only what happens at each outcome differs
-  # (bytes + validators vs. a metadata JSON; 404 vs. `exists: false`).
-  defp with_regular_file(conn, path, found: found, missing: missing) do
+  # The head both local legs share: reject a relative path, then resolve where
+  # its bytes come from. Only what happens at each outcome differs (bytes +
+  # validators vs. a metadata JSON; 404 vs. `exists: false`).
+  defp with_local_file(conn, path, found: found, unreadable: unreadable, missing: missing) do
     if Path.type(path) != :absolute do
       conn |> put_status(400) |> json(%{error: "path must be absolute"})
     else
-      case Shuttle.FS.stat(path, time: :posix) do
-        {:ok, %File.Stat{type: :regular} = stat} -> found.(stat)
-        _ -> missing.()
+      case resolve(path) do
+        {:ok, source, stat} -> found.(source, stat)
+        {:unreadable, reason, stat} -> unreadable.(reason, stat)
+        :missing -> missing.()
       end
     end
   end
+
+  # Where an absolute local path's bytes come from: the regular file itself
+  # when this daemon can open it, else the copy the newest send of that path
+  # took (`Shuttle.SentFiles.copy_for/1`).
+  defp resolve(path) do
+    case Shuttle.FS.stat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular} = stat} ->
+        case readable(path) do
+          :ok -> {:ok, path, stat}
+          {:error, reason} -> sent_copy(path) || {:unreadable, reason, stat}
+        end
+
+      _ ->
+        sent_copy(path) || :missing
+    end
+  end
+
+  defp readable(path) do
+    if Shuttle.FS.protected?(path),
+      do: {:error, :protected},
+      else: Shuttle.FS.readable(path, @open_timeout_ms)
+  end
+
+  defp sent_copy(path) do
+    with stored when is_binary(stored) <- Shuttle.SentFiles.copy_for(path),
+         {:ok, %File.Stat{type: :regular} = stat} <- Shuttle.FS.stat(stored, time: :posix) do
+      {:ok, stored, stat}
+    else
+      _ -> nil
+    end
+  end
+
+  defp unreadable_detail(:protected),
+    do: "macOS keeps this host's daemon out of ~/Documents, ~/Desktop and ~/Downloads"
+
+  defp unreadable_detail(:timeout),
+    do: "opening it did not finish within #{div(@open_timeout_ms, 1000)} s"
+
+  defp unreadable_detail(reason), do: "opening it failed: #{reason}"
 
   defp serve_with_validators(conn, path, stat) do
     cond do

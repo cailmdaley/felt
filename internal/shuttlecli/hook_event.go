@@ -25,7 +25,7 @@ import (
 //   - daemon/lib/shuttle/session_binding.ex — `sessionId`, `harness`,
 //     `receiverPid` and `receiverBirth` identify receiver succession.
 //   - daemon/lib/shuttle/sent_files.ex — `tool == "SendUserFile"`, `toolInput.files`,
-//     `sessionId`, `cwd`, `timestamp`, `tmuxSession`; deduped by path.
+//     `copies`, `sessionId`, `cwd`, `timestamp`, `tmuxSession`; deduped by path.
 //
 // Activity also consumes event timestamps, types and machine-prompt flags.
 // Origin and terminal names provide context for operators and artifacts.
@@ -144,6 +144,10 @@ type eventLine struct {
 	BackgroundTasks int             `json:"backgroundTasks,omitempty"`
 	Tool            string          `json:"tool,omitempty"`
 	ToolInput       json.RawMessage `json:"toolInput,omitempty"`
+	// Copies names, for each sent file the sender could copy, its copy in the
+	// host's copy store (sent_copies.go). Carried by every send: `file_sent`
+	// lines and a harness's SendUserFile tool call.
+	Copies map[string]string `json:"copies,omitempty"`
 }
 
 // machinePromptPrefixes are the wrappers the harness puts around a prompt it
@@ -302,6 +306,9 @@ func (a *app) renderEvent(input eventHookInput) (string, bool) {
 		// makes a cross-harness event count look like two tool observations.
 		if eventType != "post_tool_use" {
 			line.ToolInput = normalizeToolInput(input.ToolInput)
+			if input.ToolName == "SendUserFile" {
+				line.Copies = a.copyToolFiles(input)
+			}
 		}
 	}
 

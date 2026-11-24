@@ -13,9 +13,14 @@ func (a *app) shuttleSendFileCmd() *cobra.Command {
 	shuttleSendFileCmd := &cobra.Command{
 		Use:   "send-file <path> [path...]",
 		Short: "Publish local artifacts to Shuttle's sent-files surface",
-		Long: `Record an explicit file delivery on this host. Files remain on their owning
-host and Shuttle serves them through its existing owner-routed file surface.
-All paths must be readable regular files; validation completes before recording.
+		Long: `Record an explicit file delivery on this host. Each file is copied into
+the host's copy store (sent-files/ beside the event stream) by this process,
+and the board opens it through the owner-routed file surface: from its
+original path while the host's daemon can read it there, else from the copy,
+so a file sent from a folder the daemon cannot read, or since deleted, still
+opens. All paths must be readable regular files; nothing is recorded unless
+every file was copied. Files over 256 MiB are not copied, and copies untouched
+for 30 days are removed by a later send.
 
 Session attribution uses --session; else the calling harness session (the
 nearest harness among this process's ancestors that registered a receiver,
@@ -117,25 +122,6 @@ func (a *app) recordSentFiles(paths []string, session, caption string, show bool
 		if err != nil {
 			return nil, err
 		}
-		info, err := os.Stat(abs)
-		if err != nil {
-			return nil, fmt.Errorf("stat artifact: %w", err)
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("artifact is not a regular file: %s", abs)
-		}
-		f, err := os.Open(abs)
-		if err != nil {
-			return nil, fmt.Errorf("read artifact: %w", err)
-		}
-		info, statErr := f.Stat()
-		f.Close()
-		if statErr != nil {
-			return nil, statErr
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("artifact is not a regular file: %s", abs)
-		}
 		if !seen[abs] {
 			files = append(files, abs)
 			seen[abs] = true
@@ -160,32 +146,49 @@ func (a *app) recordSentFiles(paths []string, session, caption string, show bool
 	if err != nil {
 		return nil, err
 	}
+	sink, enabled := a.eventsSink()
+	if !enabled {
+		return nil, fmt.Errorf("Shuttle event recording is disabled or its state directory is missing")
+	}
 	timestamp := a.eventNow().UnixMilli()
+	line := eventLine{
+		ID:        session + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
+		Timestamp: timestamp, SessionID: session,
+		CWD: cwd, TmuxSession: tmux, OriginName: origin,
+	}
+	if err := a.appendFileSent(sink, line, files, strings.TrimSpace(caption), show); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// appendFileSent records a send of files, which are absolute paths: it copies
+// each into the copy store beside sink, then appends the file_sent event that
+// names the files and their copies. Nothing is recorded unless every file was
+// read.
+func (a *app) appendFileSent(sink string, line eventLine, files []string, caption string, show bool) error {
+	copies, err := copySentFiles(sink, files)
+	if err != nil {
+		return err
+	}
+	line.Type, line.Copies = "file_sent", copies
 	event := struct {
 		eventLine
 		Files   []string `json:"files"`
 		Caption string   `json:"caption,omitempty"`
 		Show    bool     `json:"show,omitempty"`
-	}{eventLine: eventLine{
-		ID:        session + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
-		Timestamp: timestamp, Type: "file_sent", SessionID: session,
-		CWD: cwd, TmuxSession: tmux, OriginName: origin,
-	}, Files: files, Caption: strings.TrimSpace(caption), Show: show}
-	line, err := encodeJSONLine(event)
+	}{eventLine: line, Files: files, Caption: caption, Show: show}
+	encoded, err := encodeJSONLine(event)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if len(line) > eventMaxLineBytes {
-		return nil, fmt.Errorf("delivery exceeds %d bytes; send fewer files at once", eventMaxLineBytes)
+	if len(encoded) > eventMaxLineBytes {
+		return fmt.Errorf("delivery exceeds %d bytes; send fewer files at once", eventMaxLineBytes)
 	}
-	sink, enabled := a.eventsSink()
-	if !enabled {
-		return nil, fmt.Errorf("Shuttle event recording is disabled or its state directory is missing")
+	if err := a.appendEventLine(sink, encoded); err != nil {
+		return fmt.Errorf("record delivery: %w", err)
 	}
-	if err := a.appendEventLine(sink, line); err != nil {
-		return nil, fmt.Errorf("record delivery: %w", err)
-	}
-	return files, nil
+	return nil
 }
 
 // The newest session the ledger binds to this host's tmux session; cwd is not
