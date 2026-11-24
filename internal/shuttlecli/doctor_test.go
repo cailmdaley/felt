@@ -427,6 +427,137 @@ esac
 	}
 }
 
+func TestDoctorLinuxRexEmbeddedTailscaleReceipt(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name           string
+		whoami         string
+		wantState      string
+		wantURL        string
+		wantWarning    string
+		wantListener   bool
+		wantText       string
+		rejectText     string
+		expectProbeHit bool
+	}{
+		{
+			name:       "running with available https",
+			whoami:     `{"rex_version":"linux-test","tailscale":{"state":"running","dns_name":"rex-box.example.ts.net","https":{"state":"available","url":"https://rex-box.example.ts.net"}}}`,
+			wantState:  "running",
+			wantURL:    "https://rex-box.example.ts.net",
+			wantText:   "Rex: healthy (reachable=true, version=linux-test, tailscale=running https://rex-box.example.ts.net)",
+			rejectText: "tailnet listener",
+		},
+		{
+			name:        "running with pending https warns and omits url",
+			whoami:      `{"rex_version":"linux-test","tailscale":{"state":"running","dns_name":"rex-box.example.ts.net","https":{"state":"pending","url":"https://rex-box.example.ts.net"}}}`,
+			wantState:   "running",
+			wantWarning: "Rex embedded Tailscale HTTPS is not ready yet; check 'rex server status'",
+			wantText:    "Rex: healthy (reachable=true, version=linux-test, tailscale=running)",
+			rejectText:  "tailnet listener",
+		},
+		{
+			name:        "needs_login with auth_url",
+			whoami:      `{"rex_version":"linux-test","tailscale":{"state":"needs_login","auth_url":"https://login.tailscale.com/a/example"}}`,
+			wantState:   "needs_login",
+			wantWarning: "Rex embedded Tailscale needs sign-in: https://login.tailscale.com/a/example",
+			wantText:    "Rex: healthy (reachable=true, version=linux-test, tailscale=needs_login)",
+			rejectText:  "tailnet listener",
+		},
+		{
+			name:        "needs_login without auth_url",
+			whoami:      `{"rex_version":"linux-test","tailscale":{"state":"needs_login"}}`,
+			wantState:   "needs_login",
+			wantWarning: "Rex embedded Tailscale needs sign-in; run 'rex server tailscale login'",
+			wantText:    "Rex: healthy (reachable=true, version=linux-test, tailscale=needs_login)",
+			rejectText:  "tailnet listener",
+		},
+		{
+			name:        "needs_machine_approval",
+			whoami:      `{"rex_version":"linux-test","tailscale":{"state":"needs_machine_approval"}}`,
+			wantState:   "needs_machine_approval",
+			wantWarning: "Rex embedded Tailscale is waiting for tailnet machine approval",
+			wantText:    "Rex: healthy (reachable=true, version=linux-test, tailscale=needs_machine_approval)",
+			rejectText:  "tailnet listener",
+		},
+		{
+			name:        "disabled with error warns without probing port 7297",
+			whoami:      `{"rex_version":"linux-test","tailscale":{"state":"disabled","error":"tsnet failed to start"}}`,
+			wantState:   "disabled",
+			wantWarning: "Rex embedded Tailscale failed: tsnet failed to start",
+			wantText:    "Rex: healthy (reachable=true, version=linux-test, tailscale=disabled)",
+			rejectText:  "tailnet listener",
+		},
+		{
+			name:           "disabled without error falls back to port 7297 probe",
+			whoami:         `{"rex_version":"linux-test","tailscale":{"state":"disabled"}}`,
+			wantListener:   true,
+			wantText:       "Rex: healthy (reachable=true, version=linux-test, tailnet listener :7297=true)",
+			rejectText:     "tailscale=",
+			expectProbeHit: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			if err := os.WriteFile(env.Getenv("SHUTTLE_HOST_CONFIG_FILE"), []byte(`{"terminal":"rex"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(t.TempDir(), "rex")
+			script := "#!/bin/sh\ncase \"$*\" in\n *'whoami --json') printf '%s\\n' " + shellQuote(tc.whoami) + " ;;\n *) exit 99 ;;\nesac\n"
+			sysenvtest.LinkScript(t, bin, script)
+			env.Set("SHUTTLE_REX_BIN", bin)
+			a := newApp(env)
+			a.hostGOOS = "linux"
+			probed := false
+			a.rexTailnetListener = func() bool {
+				probed = true
+				return true
+			}
+			rec := a.collectRexReceipt()
+			if probed != tc.expectProbeHit {
+				t.Fatalf("rexTailnetListener called=%t, want %t", probed, tc.expectProbeHit)
+			}
+			if rec.Status != receiptHealthy || !rec.Reachable || rec.Version != "linux-test" {
+				t.Fatalf("unexpected receipt: %+v", rec)
+			}
+			if rec.TailscaleState != tc.wantState || rec.TailscaleURL != tc.wantURL || rec.Warning != tc.wantWarning {
+				t.Fatalf("tailscale = (state=%q, url=%q, warn=%q), want (%q, %q, %q)", rec.TailscaleState, rec.TailscaleURL, rec.Warning, tc.wantState, tc.wantURL, tc.wantWarning)
+			}
+			if tc.wantListener {
+				if rec.TailnetListener == nil || !*rec.TailnetListener {
+					t.Fatalf("want tailnet_listener=true, got %+v", rec.TailnetListener)
+				}
+			} else if rec.TailnetListener != nil {
+				t.Fatalf("want tailnet_listener=nil, got %v", *rec.TailnetListener)
+			}
+			var stdout bytes.Buffer
+			env.Stdout = &stdout
+			a.printRexReceipt(rec)
+			if !strings.Contains(stdout.String(), tc.wantText) || strings.Contains(stdout.String(), tc.rejectText) {
+				t.Fatalf("stdout = %q, want %q and not %q", stdout.String(), tc.wantText, tc.rejectText)
+			}
+			if tc.wantWarning != "" && !strings.Contains(stdout.String(), "warning: "+tc.wantWarning) {
+				t.Fatalf("stdout missing warning %q:\n%s", tc.wantWarning, stdout.String())
+			}
+			raw, err := json.Marshal(rec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := string(raw)
+			if (tc.wantState != "") != strings.Contains(s, `"tailscale_state"`) {
+				t.Fatalf("tailscale_state json mismatch: %s", s)
+			}
+			if (tc.wantURL != "") != strings.Contains(s, `"tailscale_url"`) {
+				t.Fatalf("tailscale_url json mismatch: %s", s)
+			}
+			if tc.wantListener != strings.Contains(s, `"tailnet_listener"`) {
+				t.Fatalf("tailnet_listener json mismatch: %s", s)
+			}
+		})
+	}
+}
+
 func TestRexTailnetListenerProbe(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

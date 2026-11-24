@@ -416,6 +416,38 @@ defmodule Shuttle.Host do
     end
   end
 
+  @dns_label_re ~r/\A[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\z/
+
+  @doc """
+  Hostname for a Linux Rex server's embedded Tailscale (`--tailscale --tailscale-hostname`),
+  read fresh from host.json `"rex_tailscale_hostname"` (a valid DNS label), or `nil` when
+  absent or invalid. Daemon-only (the Go reader ignores the key).
+  """
+  @spec rex_tailscale_hostname() :: String.t() | nil
+  def rex_tailscale_hostname do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, %{"rex_tailscale_hostname" => value}} ->
+        if is_binary(value) and Regex.match?(@dns_label_re, value) do
+          value
+        else
+          Logger.warning(
+            ~s(#{path}: "rex_tailscale_hostname" must be a valid DNS label, got #{inspect(value)}; ignoring)
+          )
+
+          nil
+        end
+
+      {:ok, _} ->
+        nil
+
+      {:error, _kind, message} ->
+        Logger.warning("#{message}; cannot read rex_tailscale_hostname; ignoring")
+        nil
+    end
+  end
+
   @doc "This host's class, read fresh. Raises on a malformed host.json."
   @spec class() :: class()
   def class, do: resolve!().class

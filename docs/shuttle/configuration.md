@@ -261,6 +261,28 @@ live worker's thread page beside it:
 `http://127.0.0.1:4000`. The daemon reads the key fresh. See
 [Thread pages beside workers](installation.md#thread-pages-beside-workers).
 
+## Rex embedded Tailscale
+
+On a Linux host whose terminal backend is Rex, `host.json`'s
+`rex_tailscale_hostname` key configures Rex's embedded Tailscale stack:
+
+```json
+{"terminal": "rex", "rex_tailscale_hostname": "rex-worker"}
+```
+
+When set to a valid DNS label (letters, digits, and internal hyphens, up to 63
+characters), the daemon starts a missing Linux Rex server with
+`--tailscale --tailscale-hostname <name>` instead of `--tailscaled-socket` and
+`--extra-listen tailnet://:7297`. If `rex server start` itself fails, the daemon
+logs a warning and retries once local-only. After first start, inspect
+enrollment with `rex server status` or `shuttle doctor`, sign in with
+`rex server tailscale login` when prompted, and approve the machine in your
+tailnet if required. To enable it on an already-running server without
+restarting, run `rex server tailscale on --hostname <name>` (runtime-only until
+the next server restart). The key is daemon-only and read fresh on server start;
+an invalid value or unreadable `host.json` logs a warning and is ignored. See
+[Rex terminal backend](installation.md#rex-terminal-backend).
+
 ## Ambient mode
 
 `host.json`'s `ambient` boolean lets a session you start yourself join Shuttle:

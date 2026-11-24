@@ -71,11 +71,12 @@ Uncertain tmux visibility holds rather than launching a duplicate; the missing-s
 For a Rex-held worker on macOS, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY.
 A tmux-held worker attaches in the calling TTY, including on a Rex-configured host.
 The board opens remote tmux workers over SSH; for a remote Rex worker, the owner selects the worker in an attached Rex app client and the macOS hub activates the app.
-First choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297`, using the owner daemon's configured URL host.
+First choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297` (using the owner daemon's configured URL host) or the `https://<name>.<tailnet>.ts.net` endpoint when the owner runs Rex with embedded Tailscale.
 `shuttle claim` inside a Rex block sends its native session and block references; the daemon binds them to the worker name.
 On Linux, install Rex rootlessly with `bin/rex-install` and select `"terminal": "rex"` in `~/.config/shuttle/host.json`.
-Shuttle starts a missing server on `unix://<data dir>/rex/server.sock`, keeps its state in `<data dir>/rex/state`, and requests the Tailscale-identified listener on port 7297.
-If Tailscale is unavailable at startup, the daemon logs the failure and starts local-only; `shuttle doctor` reports the running version and listener status without Apple checks.
+Shuttle starts a missing server on `unix://<data dir>/rex/server.sock`, keeps its state in `<data dir>/rex/state`, and requests either embedded Tailscale (`--tailscale --tailscale-hostname <name>` when `host.json` sets `"rex_tailscale_hostname"`) or the Tailscale-identified listener on port 7297.
+To enable embedded Tailscale on a running server without restarting it, run `rex server tailscale on --hostname <name>` (runtime-only until restart).
+If `rex server start` itself fails, the daemon logs the failure and starts local-only; `shuttle doctor` reports the running version and either embedded Tailscale state/URL/warnings or the `:7297` listener status without Apple checks.
 `SHUTTLE_REX_SERVER` overrides the endpoint for both the daemon and CLI, and workers inherit it.
 Shuttle never stops a Rex server: daemon restarts and CLI updates preserve sessions, while `rex server stop` ends every session.
 See [Rex setup](../shuttle/installation.md#rex-terminal-backend) for installation, endpoint and macOS privacy configuration.

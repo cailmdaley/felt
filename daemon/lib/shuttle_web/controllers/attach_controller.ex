@@ -52,9 +52,23 @@ defmodule ShuttleWeb.AttachController do
         json(conn, %{revealed: moved})
 
       {:error, :no_app_client} ->
+        payload = %{code: "no_app_client", error: "No Rex app client is attached"}
+
+        payload =
+          case Shuttle.Rex.tailscale_status() do
+            %{endpoint: url} when is_binary(url) ->
+              Map.put(payload, :endpoint, url)
+
+            %{state: state} ->
+              Map.put(payload, :tailscale_state, state)
+
+            nil ->
+              payload
+          end
+
         conn
         |> put_status(422)
-        |> json(%{code: "no_app_client", error: "No Rex app client is attached"})
+        |> json(payload)
 
       {:error, {:absent, name}} ->
         conn

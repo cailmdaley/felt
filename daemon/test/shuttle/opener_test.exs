@@ -455,6 +455,51 @@ defmodule Shuttle.OpenerTest do
     assert FakeRex.calls() == []
   end
 
+  test "remote Rex prefers a valid https endpoint, surfaces tailscale_state, and falls back otherwise" do
+    Env.put_app_env(:opener_version, {:ok, ~s({"terminal":"rex"})})
+    Env.put_app_env(:remotes, [%{name: "remote-a", url: "http://worker.example.test:4000"}])
+
+    Env.put_app_env(
+      :reveal_response,
+      {:ok, 422, ~s({"code":"no_app_client","endpoint":"https://rex-worker.example.ts.net"})}
+    )
+
+    assert {:error, reason} = Opener.open(@name, "remote-a")
+    assert reason =~ "Add Remote Host…"
+    assert reason =~ "https://rex-worker.example.ts.net"
+    refute reason =~ ":7297"
+
+    Env.put_app_env(
+      :reveal_response,
+      {:ok, 422, ~s({"code":"no_app_client","tailscale_state":"needs_login"})}
+    )
+
+    assert {:error, state_reason} = Opener.open(@name, "remote-a")
+
+    assert state_reason ==
+             "No Rex app client is attached to remote-a (embedded Tailscale is needs_login; run `shuttle doctor` on remote-a)"
+
+    refute state_reason =~ ":7297"
+
+    for bad <- [
+          "",
+          nil,
+          42,
+          "http://worker.example.test:7297",
+          "javascript:alert(1)",
+          "https://",
+          "https://bad host"
+        ] do
+      Env.put_app_env(
+        :reveal_response,
+        {:ok, 422, Jason.encode!(%{"code" => "no_app_client", "endpoint" => bad})}
+      )
+
+      assert {:error, fallback} = Opener.open(@name, "remote-a")
+      assert fallback =~ "http://worker.example.test:7297"
+    end
+  end
+
   test "kitty remote attach does not consult the remote daemon" do
     Env.put_app_env(:terminal_backend, Tmux)
 

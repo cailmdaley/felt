@@ -186,13 +186,27 @@ defmodule Shuttle.Opener do
 
   defp reveal_error({:forwarded, _, body}, remote) do
     case Jason.decode(body) do
-      {:ok, %{"code" => "no_app_client"}} ->
-        address =
-          %URI{scheme: "http", host: URI.parse(remote.url).host, port: 7297}
-          |> URI.to_string()
+      {:ok, %{"code" => "no_app_client"} = payload} ->
+        case valid_endpoint(payload["endpoint"]) do
+          address when is_binary(address) ->
+            {:error,
+             "No Rex app client is attached to #{remote.name}. Choose Add Remote Host… in the Rex app and enter #{address}"}
 
-        {:error,
-         "No Rex app client is attached to #{remote.name}. Choose Add Remote Host… in the Rex app and enter #{address}"}
+          nil ->
+            case payload["tailscale_state"] do
+              state when is_binary(state) and state != "" ->
+                {:error,
+                 "No Rex app client is attached to #{remote.name} (embedded Tailscale is #{state}; run `shuttle doctor` on #{remote.name})"}
+
+              _ ->
+                address =
+                  %URI{scheme: "http", host: URI.parse(remote.url).host, port: 7297}
+                  |> URI.to_string()
+
+                {:error,
+                 "No Rex app client is attached to #{remote.name}. Choose Add Remote Host… in the Rex app and enter #{address}"}
+            end
+        end
 
       {:ok, %{"code" => "absent", "name" => name}} when is_binary(name) ->
         {:error, {:absent, name}}
@@ -207,6 +221,18 @@ defmodule Shuttle.Opener do
 
   defp reveal_error({:error, _}, remote),
     do: {:error, "#{remote.name} could not be reached to reveal the Rex worker"}
+
+  defp valid_endpoint(value) when is_binary(value) do
+    case URI.new(value) do
+      {:ok, %URI{scheme: "https", host: host}} when is_binary(host) and host != "" ->
+        value
+
+      _ ->
+        nil
+    end
+  end
+
+  defp valid_endpoint(_), do: nil
 
   defp remote_fiber(name, remote) do
     client = Env.app(:opener_http_client, Shuttle.RemoteRegistry.Client.Default)

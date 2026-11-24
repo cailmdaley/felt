@@ -202,6 +202,127 @@ defmodule Shuttle.Terminal.RexTest do
     refute "--tailscaled-socket" in second
   end
 
+  test "Linux readiness uses embedded Tailscale when rex_tailscale_hostname is set", %{
+    tmp_dir: dir
+  } do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    Env.put_app_env(:tailscale_socket, "/private/tailscaled.sock")
+    host_file = Path.join(dir, "host.json")
+    File.write!(host_file, ~s({"terminal":"rex","rex_tailscale_hostname":"rex-worker"}))
+    Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
+    FakeRex.reply("whoami", {"server is not running", 4})
+
+    assert :ok = Rex.ensure_ready(FakeRex)
+    [{_, argv, _}] = Enum.filter(FakeRex.calls(), fn {_, args, _} -> "start" in args end)
+
+    assert argv ==
+             Shuttle.Rex.flags() ++
+               [
+                 "server",
+                 "start",
+                 "--state-dir",
+                 Path.join(dir, "rex/state"),
+                 "--restore=false",
+                 "--tailscale",
+                 "--tailscale-hostname",
+                 "rex-worker"
+               ]
+
+    refute "--tailscaled-socket" in argv
+    refute "--extra-listen" in argv
+  end
+
+  test "Linux embedded Tailscale falls back once to local-only on startup error", %{tmp_dir: dir} do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    host_file = Path.join(dir, "host.json")
+    File.write!(host_file, ~s({"terminal":"rex","rex_tailscale_hostname":"rex-worker"}))
+    Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
+    FakeRex.reply("whoami", {"server is not running", 4})
+
+    Env.put_app_env(:fake_rex_hook, fn
+      "server.start" ->
+        if Enum.any?(FakeRex.calls(), fn {_, args, _} -> "start" in args end),
+          do: FakeRex.clear_reply("server.start"),
+          else: FakeRex.reply("server.start", {"tsnet init failed", 1})
+
+      _ ->
+        :ok
+    end)
+
+    assert capture_log(fn -> assert :ok = Rex.ensure_ready(FakeRex) end) =~ "local-only"
+    [first, second] = for {_, args, _} <- FakeRex.calls(), "start" in args, do: args
+    assert "--tailscale" in first
+    assert "--tailscale-hostname" in first
+    assert "rex-worker" in first
+    refute "--extra-listen" in first
+    refute "--tailscale" in second
+    refute "--tailscale-hostname" in second
+  end
+
+  test "tailscale_status extracts state and requires https.state available for endpoint" do
+    base = FakeRex.fixture("whoami")
+
+    assert Shuttle.Rex.tailscale_status(FakeRex) == nil
+
+    running_available =
+      Map.put(base, "tailscale", %{
+        "state" => "running",
+        "dns_name" => "rex-worker.example.ts.net",
+        "https" => %{"state" => "available", "url" => "https://rex-worker.example.ts.net"}
+      })
+
+    FakeRex.reply("whoami", {Jason.encode!(running_available), 0})
+
+    assert Shuttle.Rex.tailscale_status(FakeRex) == %{
+             state: "running",
+             endpoint: "https://rex-worker.example.ts.net"
+           }
+
+    running_pending =
+      Map.put(base, "tailscale", %{
+        "state" => "running",
+        "dns_name" => "rex-worker.example.ts.net",
+        "https" => %{"state" => "pending", "url" => "https://rex-worker.example.ts.net"}
+      })
+
+    FakeRex.reply("whoami", {Jason.encode!(running_pending), 0})
+    assert Shuttle.Rex.tailscale_status(FakeRex) == %{state: "running", endpoint: nil}
+
+    needs_login =
+      Map.put(base, "tailscale", %{
+        "state" => "needs_login",
+        "auth_url" => "https://login.tailscale.com/a/example",
+        "dns_name" => "rex-worker.example.ts.net"
+      })
+
+    FakeRex.reply("whoami", {Jason.encode!(needs_login), 0})
+    assert Shuttle.Rex.tailscale_status(FakeRex) == %{state: "needs_login", endpoint: nil}
+
+    needs_approval =
+      Map.put(base, "tailscale", %{
+        "state" => "needs_machine_approval"
+      })
+
+    FakeRex.reply("whoami", {Jason.encode!(needs_approval), 0})
+
+    assert Shuttle.Rex.tailscale_status(FakeRex) == %{
+             state: "needs_machine_approval",
+             endpoint: nil
+           }
+
+    disabled_error =
+      Map.put(base, "tailscale", %{
+        "state" => "disabled",
+        "error" => "tsnet init failed"
+      })
+
+    FakeRex.reply("whoami", {Jason.encode!(disabled_error), 0})
+    assert Shuttle.Rex.tailscale_status(FakeRex) == %{state: "disabled", endpoint: nil}
+
+    FakeRex.reply("whoami", {"server is not running", 4})
+    assert Shuttle.Rex.tailscale_status(FakeRex) == nil
+  end
+
   test "Linux startup failure propagates, and uncertain liveness never starts a server" do
     Env.put_app_env(:os_type, {:unix, :linux})
     FakeRex.reply("whoami", {"request timed out", :timeout})
@@ -248,7 +369,54 @@ defmodule Shuttle.Terminal.RexTest do
       })
 
     assert conn.status == 422
-    assert %{"code" => "no_app_client"} = Jason.decode!(conn.resp_body)
+    body = Jason.decode!(conn.resp_body)
+    assert body == %{"code" => "no_app_client", "error" => "No Rex app client is attached"}
+
+    whoami_ts =
+      Map.put(FakeRex.fixture("whoami"), "tailscale", %{
+        "state" => "running",
+        "dns_name" => "rex-worker.example.ts.net",
+        "https" => %{"state" => "available", "url" => "https://rex-worker.example.ts.net"}
+      })
+
+    FakeRex.reply("whoami", {Jason.encode!(whoami_ts), 0})
+
+    conn =
+      ShuttleWeb.AttachController.reveal(Plug.Test.conn(:post, "/api/v1/terminal/reveal"), %{
+        "name" => @name
+      })
+
+    assert conn.status == 422
+
+    assert Jason.decode!(conn.resp_body) == %{
+             "code" => "no_app_client",
+             "error" => "No Rex app client is attached",
+             "endpoint" => "https://rex-worker.example.ts.net"
+           }
+
+    whoami_pending =
+      Map.put(FakeRex.fixture("whoami"), "tailscale", %{
+        "state" => "running",
+        "dns_name" => "rex-worker.example.ts.net",
+        "https" => %{"state" => "pending", "url" => "https://rex-worker.example.ts.net"}
+      })
+
+    FakeRex.reply("whoami", {Jason.encode!(whoami_pending), 0})
+
+    conn =
+      ShuttleWeb.AttachController.reveal(Plug.Test.conn(:post, "/api/v1/terminal/reveal"), %{
+        "name" => @name
+      })
+
+    assert conn.status == 422
+
+    assert Jason.decode!(conn.resp_body) == %{
+             "code" => "no_app_client",
+             "error" => "No Rex app client is attached",
+             "tailscale_state" => "running"
+           }
+
+    FakeRex.clear_reply("whoami")
 
     conn =
       ShuttleWeb.AttachController.reveal(Plug.Test.conn(:post, "/api/v1/terminal/reveal"), %{

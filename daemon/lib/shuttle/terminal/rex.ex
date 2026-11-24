@@ -257,17 +257,24 @@ defmodule Shuttle.Terminal.Rex do
         # Shuttle restores workers itself; a block Rex restored holds a bare
         # shell under the worker's label and would pass for the live worker.
         args = ["server", "start", "--state-dir", Path.join(dir, "state"), "--restore=false"]
-        socket = Shuttle.Remotes.tailscale_socket()
-        tailnet = if socket, do: ["--tailscaled-socket", socket], else: []
 
-        case Rex.command(runner, args ++ tailnet ++ ["--extra-listen", "tailnet://:7297"]) do
+        {extra, label} =
+          case Shuttle.Host.rex_tailscale_hostname() do
+            nil ->
+              socket = Shuttle.Remotes.tailscale_socket()
+              tailnet = if socket, do: ["--tailscaled-socket", socket], else: []
+              {tailnet ++ ["--extra-listen", "tailnet://:7297"], "Rex tailnet listener"}
+
+            hostname ->
+              {["--tailscale", "--tailscale-hostname", hostname], "Rex embedded Tailscale"}
+          end
+
+        case Rex.command(runner, args ++ extra) do
           {:ok, _} ->
             :ok
 
           {:error, reason} ->
-            Logger.warning(
-              "Rex tailnet listener unavailable; starting local-only server: #{inspect(reason)}"
-            )
+            Logger.warning("#{label} unavailable; starting local-only server: #{inspect(reason)}")
 
             case Rex.command(runner, args) do
               {:ok, _} -> :ok

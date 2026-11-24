@@ -177,6 +177,57 @@ defmodule Shuttle.HostTest do
     end
   end
 
+  describe "rex_tailscale_hostname/0" do
+    @describetag :tmp_dir
+    setup %{tmp_dir: dir} do
+      file = Path.join(dir, "host.json")
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+      %{host_file: file}
+    end
+
+    test "returns nil when absent and reads valid DNS labels fresh", %{host_file: file} do
+      assert Host.rex_tailscale_hostname() == nil
+      File.write!(file, ~s({"terminal":"rex"}))
+      assert Host.rex_tailscale_hostname() == nil
+
+      for valid <- ["a", "0", "rex-box", "Worker01", String.duplicate("a", 63)] do
+        File.write!(file, Jason.encode!(%{"rex_tailscale_hostname" => valid}))
+        assert Host.rex_tailscale_hostname() == valid
+      end
+
+      File.write!(file, "{}")
+      assert Host.rex_tailscale_hostname() == nil
+    end
+
+    test "warns naming path and returns nil for invalid present values", %{host_file: file} do
+      for invalid <- [
+            "",
+            nil,
+            true,
+            123,
+            %{},
+            "-leading",
+            "trailing-",
+            "has space",
+            "has/slash",
+            "dotted.name",
+            String.duplicate("a", 64)
+          ] do
+        File.write!(file, Jason.encode!(%{"rex_tailscale_hostname" => invalid}))
+        log = capture_log(fn -> assert Host.rex_tailscale_hostname() == nil end)
+        assert log =~ file
+        assert log =~ "rex_tailscale_hostname"
+      end
+    end
+
+    test "warns and returns nil on malformed host.json", %{host_file: file} do
+      File.write!(file, "{not json")
+      log = capture_log(fn -> assert Host.rex_tailscale_hostname() == nil end)
+      assert log =~ file
+      assert log =~ "rex_tailscale_hostname"
+    end
+  end
+
   describe "quarantine_auto_release?/0" do
     setup do
       dir = Path.join(System.tmp_dir!(), "shuttle-host-#{System.unique_integer([:positive])}")

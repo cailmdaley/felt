@@ -34,7 +34,7 @@ The board opens local Rex workers in the app and opens local or remote tmux work
 Workers and viewers share a session for their constitution family, even when its root has no live worker.
 Each worker has one tab, labelled with its fiber leaf and indented by constitution depth; remote viewer tabs also show ` @host`.
 Opening selects both the family's session and the worker's window.
-For a worker held by another host's Rex server, first choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297`; the owner then selects the worker in that attached client.
+For a worker held by another host's Rex server, first choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297` (or its `https://<name>.<tailnet>.ts.net` endpoint when the owner runs Rex with embedded Tailscale); the owner then selects the worker in that attached client.
 [Installation](installation.md#rex-terminal-backend) covers the required app settings and privacy grant.
 
 ## Kitty

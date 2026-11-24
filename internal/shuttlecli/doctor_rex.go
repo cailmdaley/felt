@@ -32,13 +32,16 @@ func (a *app) collectRexReceipt() *ReceiptRex {
 		return nil
 	}
 	rec := &ReceiptRex{Status: receiptHealthy, Privacy: map[string]string{}}
-	if a.hostGOOS != "darwin" {
-		up := a.rexTailnetListener()
-		rec.TailnetListener = &up
+	probeTailnet := func() {
+		if a.hostGOOS != "darwin" {
+			up := a.rexTailnetListener()
+			rec.TailnetListener = &up
+		}
 	}
 	r := &rexTerminal{a: a}
 	out, err := r.command("", "whoami", "--json")
 	if err != nil {
+		probeTailnet()
 		rec.Status = receiptPartial
 		if errors.Is(err, errRexAbsent) || errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
 			rec.Status = receiptMissing
@@ -51,15 +54,51 @@ func (a *app) collectRexReceipt() *ReceiptRex {
 		return rec
 	}
 	var server struct {
-		Version string `json:"rex_version"`
+		Version   string `json:"rex_version"`
+		Tailscale *struct {
+			State   string `json:"state"`
+			AuthURL string `json:"auth_url"`
+			Error   string `json:"error"`
+			HTTPS   *struct {
+				State string `json:"state"`
+				URL   string `json:"url"`
+			} `json:"https"`
+		} `json:"tailscale"`
 	}
 	if err := json.Unmarshal(out, &server); err != nil || server.Version == "" {
+		probeTailnet()
 		rec.Status, rec.Repair = receiptPartial, "Rex returned an invalid server identity; check the Rex installation"
 		return rec
 	}
 	rec.Reachable, rec.Version = true, server.Version
 
 	if a.hostGOOS != "darwin" {
+		if ts := server.Tailscale; ts != nil && ((ts.State != "" && ts.State != "disabled") || ts.Error != "") {
+			state := ts.State
+			if state == "" {
+				state = "disabled"
+			}
+			rec.TailscaleState = state
+			if state == "running" && ts.HTTPS != nil && ts.HTTPS.State == "available" && ts.HTTPS.URL != "" {
+				rec.TailscaleURL = ts.HTTPS.URL
+			}
+			switch {
+			case ts.Error != "":
+				rec.Warning = "Rex embedded Tailscale failed: " + ts.Error
+			case state == "needs_login":
+				if ts.AuthURL != "" {
+					rec.Warning = "Rex embedded Tailscale needs sign-in: " + ts.AuthURL
+				} else {
+					rec.Warning = "Rex embedded Tailscale needs sign-in; run 'rex server tailscale login'"
+				}
+			case state == "needs_machine_approval":
+				rec.Warning = "Rex embedded Tailscale is waiting for tailnet machine approval"
+			case rec.TailscaleURL == "":
+				rec.Warning = "Rex embedded Tailscale HTTPS is not ready yet; check 'rex server status'"
+			}
+		} else {
+			probeTailnet()
+		}
 		return rec
 	}
 
@@ -126,9 +165,16 @@ func (a *app) printRexReceipt(rec *ReceiptRex) {
 	if rec == nil {
 		return
 	}
-	if rec.TailnetListener != nil {
+	switch {
+	case rec.TailscaleState != "":
+		if rec.TailscaleURL != "" {
+			fmt.Fprintf(a.env.Stdout, "Rex: %s (reachable=%t, version=%s, tailscale=%s %s)\n", rec.Status, rec.Reachable, rec.Version, rec.TailscaleState, rec.TailscaleURL)
+		} else {
+			fmt.Fprintf(a.env.Stdout, "Rex: %s (reachable=%t, version=%s, tailscale=%s)\n", rec.Status, rec.Reachable, rec.Version, rec.TailscaleState)
+		}
+	case rec.TailnetListener != nil:
 		fmt.Fprintf(a.env.Stdout, "Rex: %s (reachable=%t, version=%s, tailnet listener :7297=%t)\n", rec.Status, rec.Reachable, rec.Version, *rec.TailnetListener)
-	} else {
+	default:
 		fmt.Fprintf(a.env.Stdout, "Rex: %s (reachable=%t, version=%s, app client=%t)\n", rec.Status, rec.Reachable, rec.Version, rec.AppClient)
 	}
 	if len(rec.Privacy) > 0 {

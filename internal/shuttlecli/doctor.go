@@ -121,6 +121,8 @@ type ReceiptRex struct {
 	Privacy         map[string]string `json:"privacy"`
 	ResponsiblePath string            `json:"responsible_path,omitempty"`
 	TailnetListener *bool             `json:"tailnet_listener,omitempty"`
+	TailscaleState  string            `json:"tailscale_state,omitempty"`
+	TailscaleURL    string            `json:"tailscale_url,omitempty"`
 	AppClient       bool              `json:"app_client"`
 	TitleHelper     string            `json:"title_helper,omitempty"`
 }

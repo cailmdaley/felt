@@ -804,17 +804,20 @@ On Linux, each dispatcher poll checks whether the Rex server is present and star
 The data directory is `$SHUTTLE_DATA_DIR`, defaulting to `~/.shuttle`; its `rex` directory has mode 0700.
 This socket does not depend on `$XDG_RUNTIME_DIR` surviving logout.
 Shuttle requests `--extra-listen tailnet://:7297` and passes the private tailscaled socket resolved from the remotes configuration, or uses the system tailscaled.
-The listener admits Tailscale-identified callers; an ordinary loopback caller is refused, including another user on a shared host.
-If that start fails, Shuttle logs the failure and tries once without the tailnet listener so local workers don't depend on Tailscale.
+That `:7297` listener admits Tailscale-identified callers and refuses ordinary loopback callers, including another user on a shared host.
+When `host.json` sets `"rex_tailscale_hostname"` to a valid DNS label, Shuttle instead starts Rex with `--tailscale --tailscale-hostname <name>` (omitting `--tailscaled-socket` and `--extra-listen`) so Rex joins the tailnet directly over HTTPS with its embedded Tailscale stack.
+After first start, check `rex server status` (or `shuttle doctor`): run `rex server tailscale login` when it reports `needs_login` and approve the machine in your tailnet when it reports `needs_machine_approval`, until HTTPS reports `available`.
+To turn embedded Tailscale on for an already-running server without restarting it, run `rex server tailscale on --hostname <name>` (runtime-only until the next server restart; set `"rex_tailscale_hostname"` in `host.json` to persist it).
+If `rex server start` itself fails, Shuttle logs the failure and tries once without the tailnet listener or embedded Tailscale flags so local workers don't depend on Tailscale; later embedded Tailscale enrollment or runtime errors do not restart the server.
 A running server retains its configuration; Shuttle never restarts it to add a listener.
 
-Run `shuttle doctor` to inspect server reachability, the running server's version, and the port 7297 listener.
-The listener check recognizes Rex's loopback refusal; it doesn't verify reachability from another tailnet host.
-A missing listener doesn't prevent local work.
+Run `shuttle doctor` to inspect server reachability, the running server's version, and either embedded Tailscale status (state, available HTTPS URL, and any login, approval, or error warnings) or the port 7297 listener.
+The `:7297` listener check recognizes Rex's loopback refusal; it doesn't verify reachability from another tailnet host.
+A missing listener or unready embedded Tailscale state doesn't prevent local work.
 Linux diagnostics don't check Apple privacy grants or require an app client.
-To open a remote Rex worker from the board, first choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297`, using the host from the hub's configured remote URL.
+To open a remote Rex worker from the board, first choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297` (or the `https://<name>.<tailnet>.ts.net` endpoint reported once embedded Tailscale HTTPS is `available`).
 The owner selects the worker in the attached app client, and the macOS hub activates Rex unless the open was quiet.
-The Rex server must have a reachable tailnet listener; a local-only fallback cannot accept that connection.
+The Rex server must have a reachable tailnet listener or available embedded Tailscale HTTPS endpoint; a local-only fallback cannot accept that connection.
 
 ### macOS
 

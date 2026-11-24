@@ -115,6 +115,40 @@ defmodule Shuttle.Rex do
 
   def whoami(runner), do: json_command(runner, ["whoami", "--json"])
 
+  @doc "Embedded Tailscale state and ready HTTPS endpoint reported by `rex whoami --json`, or `nil`."
+  @spec tailscale_status(module()) :: %{state: String.t(), endpoint: String.t() | nil} | nil
+  def tailscale_status(runner \\ Env.app(:rex_runner, Shuttle.Runner.Default)) do
+    case whoami(runner) do
+      {:ok, %{"tailscale" => %{} = ts}} ->
+        state = ts["state"]
+        error = ts["error"]
+        has_error? = is_binary(error) and error != ""
+
+        cond do
+          is_binary(state) and state != "" and state != "disabled" ->
+            %{state: state, endpoint: available_https_url(state, ts)}
+
+          has_error? ->
+            %{
+              state: if(is_binary(state) and state != "", do: state, else: "disabled"),
+              endpoint: nil
+            }
+
+          true ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp available_https_url("running", %{"https" => %{"state" => "available", "url" => url}})
+       when is_binary(url) and url != "",
+       do: url
+
+  defp available_https_url(_, _), do: nil
+
   def sessions(runner, opts \\ []),
     do: collection(call(runner, "session.list", %{}, opts), "sessions", "session_id")
 

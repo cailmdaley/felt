@@ -930,7 +930,7 @@ Revealing a worker needs the Rex terminal backend (`terminal: rex` in `GET /vers
 
 | Route | Routing | Purpose |
 |---|---|---|
-| `POST /terminal/reveal` | host-addressed | `{name, select_only?}`: select this host's Rex-held worker in an attached Rex app client; another host's opener forwards here. 422 `no_app_client` when no client is attached |
+| `POST /terminal/reveal` | host-addressed | `{name, select_only?}`: select this host's Rex-held worker in an attached Rex app client; another host's opener forwards here. 422 `no_app_client` when no client is attached, optionally carrying `endpoint` (available embedded Tailscale HTTPS URL) or `tailscale_state` (active or errored embedded Tailscale state before HTTPS is available) |
 
 ### remote-control
 
