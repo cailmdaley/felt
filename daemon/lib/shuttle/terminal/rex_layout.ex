@@ -175,6 +175,7 @@ defmodule Shuttle.Terminal.RexLayout do
     family_rows = if family_fibers_input, do: normalize_fiber_rows(family_fibers_input), else: rows
     rows_by_path = fiber_uid_by_path(rows, family_rows)
     host_by_path = fiber_host_by_path(rows, family_rows)
+    host_by_uid = fiber_host_by_uid(rows, family_rows)
     live_by_uid = live_family_bindings(bindings, rows_by_path, places, sessions)
 
     closed_verdict_uids =
@@ -274,6 +275,9 @@ defmodule Shuttle.Terminal.RexLayout do
 
           not fibers_loaded? ->
             keep_existing_place(acc, uid, place, base, own_host_id)
+
+          owned_elsewhere?(host_by_uid[uid], own_host_id) ->
+            acc
 
           not MapSet.member?(fiber_uids, uid) and recently_asked?(place, now, grace) ->
             keep_existing_place(acc, uid, place, base, own_host_id)
@@ -393,6 +397,15 @@ defmodule Shuttle.Terminal.RexLayout do
         is_binary(path) and path != "" and is_binary(host) and host != "",
         into: %{},
         do: {path, host}
+  end
+
+  defp fiber_host_by_uid(rows, family_rows) do
+    for fiber <- family_rows ++ rows,
+        uid = fiber["uid"] || fiber["id"],
+        host = get_in(fiber, ["shuttle", "host"]),
+        is_binary(uid) and uid != "" and is_binary(host) and host != "",
+        into: %{},
+        do: {uid, host}
   end
 
   defp owned_elsewhere?(host, own_host_id) do

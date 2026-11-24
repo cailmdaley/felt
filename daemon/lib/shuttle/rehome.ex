@@ -6,19 +6,20 @@ defmodule Shuttle.Rehome do
   a failure on the destination never leaves the source stopped and homeless:
 
     1. **Takeover on `target_host` (authoritative)**: optionally carries the
-       freshest fiber document (exported best-effort from `origin`, falling back
-       to this host's local store), adopts it if `target_host` does not already
-       own it, and runs `shuttle set-host <fiber> <target_host> [--project-dir]`
-       serialized inside `target_host`'s Poller. If `target_host` is unreachable
-       or rejects `project_dir`, the move fails without touching `origin`.
+       freshest fiber document exported directly from `origin` (never from a
+       stale hub mirror), and runs a single locked `shuttle set-host --local`
+       call inside `target_host`'s Poller that validates `project_dir`, applies
+       the carried document, and sets `shuttle.host: target_host`. If
+       `target_host` is unreachable or rejects `project_dir`, the move fails
+       without touching `origin`.
     2. **Release on `origin` (best-effort)**: when `origin` is known and differs
        from `target_host`, tells `origin` to write `shuttle.host: target_host`,
        stop any live worker, and drop its Rex place. If `origin` is down or
-       unreachable, takeover still succeeds and reports a non-fatal warning.
+       unreachable, takeover still succeeds and reports a non-fatal warning;
+       other release errors report their actual reason.
   """
 
   alias Shuttle.{
-    CarriedDocument,
     FeltStores,
     FS,
     LifecycleService,
@@ -28,7 +29,7 @@ defmodule Shuttle.Rehome do
   }
 
   @export_timeout_ms 5_000
-  @release_timeout_ms 8_000
+  @release_timeout_ms 15_000
 
   @doc "Execute a rehome request (orchestrated, or a single phase when forwarded)."
   def handle(%{"phase" => "export"} = params), do: handle_export(params)
@@ -66,8 +67,10 @@ defmodule Shuttle.Rehome do
   end
 
   defp run_orchestrated(fiber, origin, target_host, target_route, project_dir, fiber_path) do
+    # Only carry a document exported directly from `origin` — never fall back to
+    # a potentially stale hub mirror that could overwrite a newer copy on target.
     {doc, exported_uid, exported_path} =
-      best_effort_export(fiber, origin, fiber_path)
+      best_effort_export_from_origin(fiber, origin, fiber_path)
 
     effective_fiber = exported_uid || fiber
     effective_path = exported_path || fiber_path
@@ -90,16 +93,21 @@ defmodule Shuttle.Rehome do
       resolved_fiber = taken["fiber"] || effective_fiber
 
       {released?, warning} =
-        if origin != nil and origin != target_host do
-          release_previous_host(
-            origin,
-            resolved_uid || resolved_fiber,
-            target_host,
-            resolved_project_dir,
-            effective_path
-          )
-        else
-          {true, nil}
+        cond do
+          origin == nil ->
+            {false, nil}
+
+          origin == target_host ->
+            {true, nil}
+
+          true ->
+            release_previous_host(
+              origin,
+              resolved_uid || resolved_fiber,
+              target_host,
+              resolved_project_dir,
+              effective_path
+            )
         end
 
       body =
@@ -118,9 +126,11 @@ defmodule Shuttle.Rehome do
     end
   end
 
-  defp best_effort_export(fiber, origin, fiber_path) do
-    from_origin =
-      case origin && OriginRouter.route_host(origin) do
+  defp best_effort_export_from_origin(_fiber, nil, _fiber_path), do: {nil, nil, nil}
+
+  defp best_effort_export_from_origin(fiber, origin, fiber_path) do
+    result =
+      case OriginRouter.route_host(origin) do
         :local ->
           read_local_document(fiber, fiber_path)
 
@@ -149,13 +159,9 @@ defmodule Shuttle.Rehome do
           nil
       end
 
-    case from_origin do
-      {doc, uid, path} when is_binary(doc) ->
-        {doc, uid, path}
-
-      _ ->
-        # Origin was unreachable or lacked the file; fall back to this host's local store.
-        read_local_document(fiber, fiber_path) || {nil, nil, nil}
+    case result do
+      {doc, uid, path} when is_binary(doc) -> {doc, uid, path}
+      _ -> {nil, nil, nil}
     end
   end
 
@@ -204,28 +210,27 @@ defmodule Shuttle.Rehome do
          %{ok: false, error: "takeover target_host #{target_host} does not match #{own}"}}
 
       true ->
-        with {:ok, _carried} <- adopt_if_carried(params, fiber),
-             {:ok, output} <-
-               LifecycleService.transition(
-                 :set_host,
-                 fiber,
-                 set_host_args(target_host, project_dir),
-                 fiber_path
-               ) do
-          resolved = resolve_after_write(fiber, fiber_path)
+        with_carried_file(params["document"], fn doc_args ->
+          args = set_host_args(target_host, project_dir) ++ doc_args
 
-          {:ok,
-           %{
-             "ok" => true,
-             "host" => own,
-             "fiber" => (resolved && resolved.fiber_id) || fiber,
-             "uid" => resolved && resolved.uid,
-             "project_dir" => parse_project_dir_from_output(output) || trim(project_dir),
-             "output" => output
-           }}
-        else
-          error -> format_cli_error(error, own)
-        end
+          case LifecycleService.transition(:set_host, fiber, args, fiber_path) do
+            {:ok, output} ->
+              resolved = resolve_after_write(fiber, fiber_path)
+
+              {:ok,
+               %{
+                 "ok" => true,
+                 "host" => own,
+                 "fiber" => (resolved && resolved.fiber_id) || fiber,
+                 "uid" => resolved && resolved.uid,
+                 "project_dir" => parse_project_dir_from_output(output) || trim(project_dir),
+                 "output" => output
+               }}
+
+            error ->
+              format_cli_error(error, own, fiber)
+          end
+        end)
     end
   end
 
@@ -254,11 +259,10 @@ defmodule Shuttle.Rehome do
             {:ok, %{"ok" => true, "released" => true, "output" => output}}
 
           {:error, :not_found, _reason} ->
-            # Old host doesn't even have the fiber; nothing left to release.
             {:ok, %{"ok" => true, "released" => true}}
 
           error ->
-            format_cli_error(error, own)
+            format_cli_error(error, own, fiber)
         end
     end
   end
@@ -284,9 +288,15 @@ defmodule Shuttle.Rehome do
             refresh_remote_cache(route)
             {true, nil}
 
-          {:error, _status, _body} ->
+          {:error, 502, _body} ->
             {false,
              "#{origin} was unreachable; sync stores when it returns so it drops its stale copy."}
+
+          {:error, status, body} ->
+            detail = (is_map(body) && (body["error"] || body[:error])) || "HTTP #{status}"
+
+            {false,
+             "#{origin} did not release cleanly (#{detail}); stop any lingering worker on #{origin} and sync stores."}
         end
     end
   end
@@ -329,15 +339,24 @@ defmodule Shuttle.Rehome do
 
   defp refresh_remote_cache(_), do: :ok
 
-  defp adopt_if_carried(%{"document" => doc} = params, fiber) when is_binary(doc) do
-    case CarriedDocument.adopt(params, fiber) do
-      {:ok, output} -> {:ok, output}
-      {:error, :not_found, _} -> {:ok, ""}
-      other -> other
+  defp with_carried_file(document, fun) when is_binary(document) and document != "" do
+    path =
+      Path.join(System.tmp_dir!(), "shuttle-rehome-#{System.unique_integer([:positive])}.md")
+
+    case FS.write_private(path, document) do
+      :ok ->
+        try do
+          fun.(["--document-file", path])
+        after
+          FS.rm(path)
+        end
+
+      {:error, reason} ->
+        {:error, 500, %{ok: false, error: "writing carried document: #{FS.format_error(reason)}"}}
     end
   end
 
-  defp adopt_if_carried(_, _), do: {:ok, ""}
+  defp with_carried_file(_, fun), do: fun.([])
 
   defp set_host_args(target_host, project_dir) do
     if is_binary(project_dir) and String.trim(project_dir) != "" do
@@ -355,27 +374,37 @@ defmodule Shuttle.Rehome do
   end
 
   defp parse_project_dir_from_output(output) when is_binary(output) do
-    case Regex.run(~r/project_dir=(\S+)/, output) do
-      [_, dir] -> dir
+    case Regex.run(~r/project_dir=(.+)$/m, output) do
+      [_, dir] -> String.trim(dir)
       _ -> nil
     end
   end
 
   defp parse_project_dir_from_output(_), do: nil
 
-  defp format_cli_error({:error, :not_found, reason}, host) do
-    {:error, 404, %{ok: false, error_code: "fiber_not_found", host: host, error: reason}}
+  defp format_cli_error({:error, :not_found, _reason}, host, fiber) do
+    {:error, 404,
+     %{
+       ok: false,
+       error_code: "fiber_not_found",
+       host: host,
+       error: "#{fiber} is not in #{host}'s felt store yet — sync stores (felt sync) on #{host} first."
+     }}
   end
 
-  defp format_cli_error({:error, :timeout, reason}, host) do
-    {:error, 503, %{ok: false, host: host, error: reason, retryable: true}}
+  defp format_cli_error({:error, tag, reason}, host, _fiber)
+       when tag in [:timeout, :unavailable] do
+    msg = if is_binary(reason), do: reason, else: inspect(reason)
+    {:error, 503, %{ok: false, host: host, error: msg, retryable: true}}
   end
 
-  defp format_cli_error({:command_error, _status, output}, host) do
+  defp format_cli_error({:command_error, _status, output}, host, _fiber) do
     msg = String.trim(to_string(output))
+    down = String.downcase(msg)
 
-    if String.contains?(msg, "project_dir") or String.contains?(msg, "does not exist") or
-         String.contains?(msg, "not a directory") do
+    if String.contains?(down, "project_dir") or String.contains?(down, "project dir") or
+         String.contains?(down, "no such file") or String.contains?(down, "does not exist") or
+         String.contains?(down, "not a directory") do
       {:error, 422,
        %{
          ok: false,
@@ -389,8 +418,9 @@ defmodule Shuttle.Rehome do
     end
   end
 
-  defp format_cli_error({:error, reason}, host) do
-    {:error, 500, %{ok: false, host: host, error: to_string(reason)}}
+  defp format_cli_error({:error, reason}, host, _fiber) do
+    msg = if is_binary(reason), do: reason, else: inspect(reason)
+    {:error, 500, %{ok: false, host: host, error: msg}}
   end
 
   defp trim(val) when is_binary(val) do

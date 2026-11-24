@@ -130,6 +130,20 @@ func SetRuntimeField(f *felt.Felt, key, value string) error {
 	return nil
 }
 
+// ClearRuntimeField removes one key from shuttle.runtime only if the runtime
+// mapping already exists, avoiding creating an empty `runtime: {}` block.
+func ClearRuntimeField(f *felt.Felt, key string) {
+	facet, ok := facetNode(f)
+	if !ok {
+		return
+	}
+	existing := felt.MappingValueNode(facet, RuntimeKey)
+	if existing == nil || existing.Kind != yaml.MappingNode {
+		return
+	}
+	felt.RemoveMappingKey(existing, key)
+}
+
 var configKeys = map[string]bool{
 	"kind": true, "host": true, "project_dir": true, "agent": true,
 	"effort": true, "chrome": true, "schedule": true, "pulse": true,

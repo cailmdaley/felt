@@ -50,6 +50,7 @@ The routing column names one of the patterns in [How a route is routed](#how-a-r
 | `POST /deliver` | owner-routed | Enqueue agent text in a fiber's inbox, then consume it (`consumed` reports the live action); a dormant or fresh launch obeys its gates. Human lines are recorded before typed paste or a From User launch. `message_id` deduplicates. See [inbox internals](../dev/inbox.md) |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
+| `POST /rehome` | orchestrated | Move a constitution to another host (`fiber`, `target_host`, optional `origin`, `project_dir`, `fiber_path`); takes over on `target_host` first and releases `origin` best-effort |
 | `POST /kill` | owner-routed | Hard-kill a fiber's live worker session; writes no lifecycle verdict |
 
 ### Version and boot

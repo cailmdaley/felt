@@ -142,4 +142,21 @@ defmodule ShuttleWeb.RehomeControllerTest do
     refute_received {:forward_post, "http://source-host.local:4000/api/v1/rehome",
                      %{"phase" => "release"}}
   end
+
+  defmodule FakeCLIRunner do
+    def cmd(_exe, args, _opts) do
+      send(Application.get_env(:shuttle, :rehome_test_pid), {:cli_args, args})
+      {"set host for 01U → host-b\n", 0}
+    end
+  end
+
+  test "Shuttle.CLI.run_lifecycle passes --local for set-host" do
+    assert {:ok, _} =
+             Shuttle.CLI.run_lifecycle("set-host", "01U", ["host-b"],
+               felt_store: "/tmp/store",
+               runner: FakeCLIRunner
+             )
+
+    assert_received {:cli_args, ["-C", "/tmp/store", "set-host", "01U", "host-b", "--local"]}
+  end
 end

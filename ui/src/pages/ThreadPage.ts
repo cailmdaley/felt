@@ -261,7 +261,7 @@ export class ThreadPage {
     this.dockBand.className = 'ws-stage-band'
     this.dockBand.dataset.part = 'thread-dock'
     this.dockBand.hidden = true
-    this.hostMismatch.className = 'pg-host-mismatch'
+    this.hostMismatch.className = 'pg-host-mismatch ws-dock'
     this.hostMismatch.setAttribute('role', 'status')
     this.hostMismatch.hidden = true
     this.hostMismatchText.className = 'pg-host-mismatch-text'
@@ -278,7 +278,7 @@ export class ThreadPage {
       const card = this.feed.card()
       if (!paneHost || !card) return
       this.ensureDockControls(card)
-      this.settings?.openHostMove(paneHost, this.hostMismatchMove, this.el)
+      this.settings?.openHostMove(paneHost, this.hostMismatchMove, this.hostMismatch)
     })
     const mismatchActs = document.createElement('div')
     mismatchActs.className = 'pg-host-mismatch-acts'
@@ -372,8 +372,9 @@ export class ThreadPage {
       }
 
       const paneHost = this.opts.route.fiber?.host
-      const hostMismatch = Boolean(paneHost && card.originId && paneHost !== card.originId)
-      const showDock = isAgentCard(card) && !hostMismatch
+      const agentCard = isAgentCard(card)
+      const hostMismatch = Boolean(agentCard && this.opts.route.inRex && paneHost && card.originId && paneHost !== card.originId)
+      const showDock = agentCard && !hostMismatch
       this.hostMismatch.hidden = !hostMismatch
       if (hostMismatch && paneHost) {
         this.hostMismatchText.textContent = `Runs on ${card.originId} (this pane is on ${paneHost}).`
@@ -623,7 +624,7 @@ export class ThreadPage {
         else this.say(`Moved to ${result.host}.`)
         this.feed.refresh()
         const current = this.feed.card()
-        if (!this.opts.route.inRex && current) {
+        if (!this.opts.route.inRex && !result.warning && current) {
           this.opts.navigate(threadHref(window.location.href, { uid: current.uid ?? current.id, host: result.host }))
         }
       },

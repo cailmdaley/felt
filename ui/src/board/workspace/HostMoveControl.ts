@@ -1,4 +1,4 @@
-import { getDaemonJson } from '../daemonApi.js'
+import { daemonFetch, getDaemonJson } from '../daemonApi.js'
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { anchorSelect } from './selectPicker.js'
 
@@ -153,7 +153,11 @@ export class HostMoveControl {
         this.selectTarget(wanted)
       }
     } catch {
-      if (!this.disposed) this.state = 'idle'
+      if (!this.disposed) {
+        this.state = 'idle'
+        this.pendingTarget = null
+        this.opts.onError?.('Could not load fleet hosts.')
+      }
     }
   }
 
@@ -271,10 +275,11 @@ export class HostMoveControl {
       needs?: string
     }
     const responseBox: { body: RehomeApiResponse | null } = { body: null }
+    let needsProjectDirFocus = false
 
     try {
       const ok = await this.opts.withSaveStatus(async () => {
-        const res = await fetch(`${this.opts.base}/api/v1/rehome`, {
+        const res = await daemonFetch(`${this.opts.base}/api/v1/rehome`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -303,8 +308,7 @@ export class HostMoveControl {
         if (result.warning) this.opts.onWarning?.(result.warning)
         this.opts.onMoved(result)
       } else if (body?.needs === 'project_dir') {
-        this.dirInput.focus()
-        this.dirInput.select()
+        needsProjectDirFocus = true
       }
     } finally {
       if (!this.disposed) {
@@ -314,6 +318,10 @@ export class HostMoveControl {
         this.hostSelect.disabled = false
         this.dirInput.disabled = false
         this.moveBtn.textContent = 'Move'
+        if (needsProjectDirFocus) {
+          this.dirInput.focus()
+          this.dirInput.select()
+        }
       }
     }
   }

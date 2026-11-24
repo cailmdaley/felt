@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -1415,6 +1416,7 @@ or replace a worker.`,
 // frontmatter write (used by the daemon inside its Poller and for offline edits).
 func (a *app) setHostCmd() *cobra.Command {
 	var projectDir string
+	var documentFile string
 	cmd := &cobra.Command{
 		Use:   "set-host <fiber> <host>",
 		Short: "Move a constitution to another host",
@@ -1422,10 +1424,12 @@ func (a *app) setHostCmd() *cobra.Command {
 project directory (shuttle.project_dir) on the destination host.
 
 Without --local, routes through the local daemon's POST /api/v1/rehome so the
-destination host takes over first (carrying the document if needed and
-validating --project-dir there) and the previous host stops any running worker
-and drops its Rex place. If the previous host is unreachable, takeover on the
-destination still succeeds and reports a warning.
+destination host takes over first (carrying updated content from the previous
+host when reachable, and validating --project-dir on the destination) and the
+previous host stops any running worker and drops its Rex place. The fiber must
+already exist in the destination host's felt store (run felt sync first if it
+does not). If the previous host is unreachable, takeover on the destination
+still succeeds and reports a warning.
 
 With --local, writes the fiber file directly on this host and clears host-local
 runtime session markers when the host changes.`,
@@ -1437,6 +1441,9 @@ runtime session markers when the host changes.`,
 			}
 
 			if !localOnly(cmd) {
+				if cmd.Flags().Changed("document-file") {
+					return fmt.Errorf("--document-file requires --local")
+				}
 				var fiberArg = args[0]
 				var origin string
 				var fiberPath string
@@ -1459,7 +1466,20 @@ runtime session markers when the host changes.`,
 					reqBody["fiber_path"] = fiberPath
 				}
 				if cmd.Flags().Changed("project-dir") {
-					reqBody["project_dir"] = strings.TrimSpace(projectDir)
+					trimmedDir := strings.TrimSpace(projectDir)
+					if trimmedDir != "" && !filepath.IsAbs(trimmedDir) && !strings.HasPrefix(trimmedDir, "~") {
+						ownHost, _ := a.resolveOwnHost("")
+						if targetHost == ownHost {
+							resolved, err := a.resolveProjectDirFlag(trimmedDir)
+							if err != nil {
+								return err
+							}
+							trimmedDir = resolved
+						} else {
+							return fmt.Errorf("--project-dir %q must be an absolute path when targeting remote host %q", trimmedDir, targetHost)
+						}
+					}
+					reqBody["project_dir"] = trimmedDir
 				}
 				payload, err := json.Marshal(reqBody)
 				if err != nil {
@@ -1469,7 +1489,11 @@ runtime session markers when the host changes.`,
 				if err != nil {
 					return err
 				}
-				raw, err := a.postDaemon(endpoint, payload, a.daemonLifecycleTimeout)
+				timeout := a.daemonLifecycleTimeout
+				if timeout < 60*time.Second {
+					timeout = 60 * time.Second
+				}
+				raw, err := a.postDaemon(endpoint, payload, timeout)
 				if err != nil {
 					return err
 				}
@@ -1514,52 +1538,93 @@ runtime session markers when the host changes.`,
 			ownHost, _ := a.resolveOwnHost("")
 			oldHost := strings.TrimSpace(block.Host)
 
+			// If carrying an updated document from the previous host, parse and verify
+			// it before mutating anything on disk.
+			var targetFiber = f
+			var targetBlock = block
+			if documentFile != "" {
+				data, readErr := os.ReadFile(a.env.Resolve(documentFile))
+				if readErr != nil {
+					return fmt.Errorf("reading carried document: %w", readErr)
+				}
+				carried, parseErr := felt.Parse("", data)
+				if parseErr != nil {
+					return fmt.Errorf("parsing carried document: %w", parseErr)
+				}
+				carriedBlock, ok, blockErr := shuttle.BlockOf(carried)
+				if blockErr != nil {
+					return fmt.Errorf("carried document: %w", blockErr)
+				}
+				if !ok {
+					return fmt.Errorf("carried document for %s has no shuttle: block", args[0])
+				}
+				if carried.UID != "" && f.UID != "" && carried.UID != f.UID {
+					return fmt.Errorf("carried document for %s has id %s; this host's copy has id %s", f.ID, carried.UID, f.UID)
+				}
+				carried.ID, carried.Path = f.ID, f.Path
+				if carried.UID == "" {
+					carried.UID = f.UID
+				}
+				targetFiber = carried
+				targetBlock = carriedBlock
+			}
+
+			// Validate and normalize project_dir BEFORE writing.
 			if cmd.Flags().Changed("project-dir") {
 				if targetHost == ownHost {
-					if err := a.setProjectDirFlag(cmd, projectDir, f, block); err != nil {
+					if err := a.setProjectDirFlag(cmd, projectDir, targetFiber, targetBlock); err != nil {
 						return err
 					}
 				} else {
-					if err := setRemoteProjectDirFlag(cmd, projectDir, f, block); err != nil {
+					if err := setRemoteProjectDirFlag(cmd, projectDir, targetFiber, targetBlock); err != nil {
 						return err
 					}
 				}
-			} else if targetHost == ownHost && f.Status == felt.StatusActive {
-				// Armed takeover on this host requires a valid local project_dir.
-				if strings.TrimSpace(block.ProjectDir) == "" {
-					return fmt.Errorf("project_dir is required on %s for an active constitution (pass --project-dir)", ownHost)
+			} else if targetHost == ownHost && oldHost != targetHost {
+				existing := strings.TrimSpace(targetBlock.ProjectDir)
+				if existing == "" {
+					if targetFiber.Status == felt.StatusActive {
+						return fmt.Errorf("project_dir is required on %s for an active constitution (pass --project-dir)", ownHost)
+					}
+				} else if resolvedDir, dirErr := a.resolveProjectDirFlag(existing); dirErr == nil {
+					if err := shuttle.SetField(targetFiber, "project_dir", resolvedDir); err != nil {
+						return err
+					}
+					targetBlock.ProjectDir = resolvedDir
+				} else if targetFiber.Status == felt.StatusActive {
+					return dirErr
+				} else {
+					// Non-active takeover: drop the old host's non-existent path.
+					if err := shuttle.SetNodeField(targetFiber, "project_dir", nil); err != nil {
+						return err
+					}
+					targetBlock.ProjectDir = ""
 				}
-				resolvedDir, err := a.resolveProjectDirFlag(block.ProjectDir)
-				if err != nil {
-					return err
-				}
-				if err := shuttle.SetField(f, "project_dir", resolvedDir); err != nil {
-					return err
-				}
-				block.ProjectDir = resolvedDir
 			}
 
-			if err := shuttle.SetNodeField(f, "host", targetHost); err != nil {
+			if err := shuttle.SetNodeField(targetFiber, "host", targetHost); err != nil {
 				return err
 			}
 			if oldHost != targetHost {
 				// Host-local session coordinates cannot resume across hosts.
-				_ = shuttle.SetRuntimeField(f, "session_uuid", "")
-				_ = shuttle.SetRuntimeField(f, "tmux_session", "")
+				shuttle.ClearRuntimeField(targetFiber, "session_uuid")
+				shuttle.ClearRuntimeField(targetFiber, "tmux_session")
 			}
-			if err := a.writeFiber(st, f); err != nil {
+			if err := a.writeFiber(st, targetFiber); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "set host for %s%s → %s", args[0], ref.Location(), targetHost)
-			if block.ProjectDir != "" {
-				fmt.Fprintf(a.env.Stdout, " project_dir=%s", block.ProjectDir)
+			if targetBlock.ProjectDir != "" {
+				fmt.Fprintf(a.env.Stdout, " project_dir=%s", targetBlock.ProjectDir)
 			}
 			fmt.Fprintln(a.env.Stdout)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "Working directory on the destination host")
-	cmd.Flags().Bool("local", false, localFlagUsage)
+	cmd.Flags().StringVar(&documentFile, "document-file", "", "Carried fiber file from the previous host (--local only)")
+	_ = cmd.Flags().MarkHidden("document-file")
+	cmd.Flags().Bool("local", false, "Write the fiber file directly on this host without calling the daemon")
 	return cmd
 }
 

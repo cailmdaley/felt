@@ -104,7 +104,7 @@ defmodule Shuttle.Terminal.RexLayoutRehomeTest do
 
     desired =
       RexLayout.desired(%{
-        fibers: [rehomed],
+        fibers: [],
         family_fibers: [rehomed],
         places: places,
         chosen_roots: ["felt"],

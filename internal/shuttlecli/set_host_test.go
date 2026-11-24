@@ -90,6 +90,59 @@ func TestSetHostLocalTakeoverAndRelease(t *testing.T) {
 	if relBlock.Host != "host-c" || relBlock.ProjectDir != "/remote/host-c/proj" {
 		t.Fatalf("released block = %+v", relBlock)
 	}
+
+	// Carried document takeover writes body + host + project_dir with spaces in one locked pass.
+	spacedDir := filepath.Join(dir, "proj with spaces")
+	if err := os.MkdirAll(spacedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	carriedFile := filepath.Join(dir, "carried.md")
+	carriedContent := "---\nid: " + released.UID + "\nname: Task Updated\nstatus: active\nshuttle:\n  kind: oneshot\n  host: host-c\n  project_dir: /remote/host-c/proj\n  agent: claude-opus\n---\nFresh body from origin.\n"
+	if err := os.WriteFile(carriedFile, []byte(carriedContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, err = executeIn(t, env, dir, "set-host", "task", "host-b", "--project-dir", spacedDir, "--document-file", carriedFile, "--local")
+	if err != nil {
+		t.Fatalf("carried set-host failed: %v", err)
+	}
+	if !strings.Contains(stdout, "project_dir=") || !strings.Contains(stdout, "proj with spaces") {
+		t.Fatalf("expected spaced project_dir in stdout, got %q", stdout)
+	}
+	carriedUpdated := mustRead(t, storage, "task")
+	if !strings.Contains(carriedUpdated.Body, "Fresh body from origin.") {
+		t.Fatalf("expected carried body, got %q", carriedUpdated.Body)
+	}
+
+	// Non-active takeover clears a stale remote project_dir and does not create an empty runtime block.
+	draft, err := felt.New("draft", "Draft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft.Status = felt.StatusOpen
+	if err := shuttle.SetConfig(draft, &shuttle.Block{Kind: "oneshot", Host: "host-a", ProjectDir: "/old/nonexistent", Agent: "claude-opus"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Write(draft); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := executeIn(t, env, dir, "set-host", "draft", "host-b", "--local"); err != nil {
+		t.Fatalf("non-active set-host failed: %v", err)
+	}
+	draftAfter := mustRead(t, storage, "draft")
+	draftBlock, ok, err := shuttle.BlockOf(draftAfter)
+	if err != nil || !ok {
+		t.Fatalf("draft BlockOf: ok=%v err=%v", ok, err)
+	}
+	if draftBlock.Host != "host-b" || draftBlock.ProjectDir != "" {
+		t.Fatalf("expected host-b and cleared project_dir, got %+v", draftBlock)
+	}
+	draftRaw, err := os.ReadFile(filepath.Join(dir, ".felt", "draft", "draft.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(draftRaw), "runtime:") {
+		t.Fatalf("expected no empty runtime block, got:\n%s", string(draftRaw))
+	}
 }
 
 func TestSetHostOrchestratedCallsRehomeEndpoint(t *testing.T) {
