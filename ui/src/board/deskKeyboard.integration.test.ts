@@ -238,6 +238,20 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector('.ws-verdict-undo, .kbn-rest-popover')).toBeNull()
   })
 
+  // A verdict keyed on a live member's line was queued with no undo line drawn anywhere on the Desk.
+  it('t on a live member\'s line draws its undo window on that line', () => {
+    const top = card({ id: 'career-futures', uid: 'career-uid', status: 'closed', closedAt: '2026-11-24T18:00:00Z' })
+    const seminar = card({ id: 'career-futures/ice-seminar', uid: 'seminar-uid', orchestrator: 'career-uid', status: 'active', workerState: 'running', runtimePhase: 'working', shuttleKind: 'oneshot' })
+    draw(response({ now: { drafts: [], inFlight: [], awaitingReview: [top] }, threads: [seminar] }))
+    inside.deskKeyboard.select({ uid: 'seminar-uid', origin: 'local' })
+    expect(selected()).toBe('seminar-uid')
+    // Stopping a live worker asks first.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    expect(press('t').defaultPrevented).toBe(true)
+    confirm.mockRestore()
+    expect(document.querySelector('[data-card-uid="seminar-uid"] .ws-verdict-undo, [data-card-uid="seminar-uid"] + .ws-verdict-undo')?.textContent).toContain('undo')
+  })
+
   it('t tempers the selected draft through the undo window, and s opens Rest for it', () => {
     draw(response({ now: { drafts: [card({ id: 'd1', uid: 'draft-uid', shuttleKind: 'oneshot' })], inFlight: [], awaitingReview: [] } }))
     inside.deskKeyboard.select({ uid: 'draft-uid', origin: 'local' })

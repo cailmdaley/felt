@@ -246,14 +246,14 @@ export class KanbanSurfaceRenderer {
 
   /**
    * A member as a thread row (elements/threadRow.ts: dot, slug, what it wants
-   * or is doing, how long ago); one that waits carries a post's ✓ and the
-   * member's undo window.
+   * or is doing, how long ago) that carries the member's undo window; one that
+   * waits carries a post's ✓ too.
    */
   private row({ card, want }: FamilyMember): HTMLElement {
     const line = threadRow(card, { waits: this.o.waits(), now: Date.now() })
+    markVerdictHost(line, card)
     if (!want) return line
     line.dataset.kind = want.kind
-    markVerdictHost(line, card)
     if (clearable(want)) {
       const clear = document.createElement('button')
       clear.type = 'button'
