@@ -124,8 +124,11 @@
   .ws-band-head { gap: 6px; min-height: 0; padding: 2px 4px 0 12px; }
   .ws-dock .ws-worker-acts { --ws-box-line: var(--ws-phone-target); margin: 4px 8px 6px; }
   .ws-dock .ws-worker-tools .listen-dropdown { width: 32px; }
-  /* Held muted speech stands in for the strip, as its amount and Recover. */
-  .ws-dock .listen-held-words, .ws-dock .listen-control:has(.listen-held:not([hidden])) + .ws-voice-strip { display: none; }
+  /* Held muted speech, while muted, stands in for the strip, as its amount and Recover, a full touch target;
+     unmuted, the strip stays and Recover waits in ▾. */
+  .ws-dock .listen-held-words, .ws-dock .listen-control.listen-muted:has(.listen-held:not([hidden])) + .ws-voice-strip,
+  .ws-dock .listen-control:not(.listen-muted) .listen-held { display: none; }
+  .ws-dock .listen-recover { min-height: var(--ws-phone-target); padding: 0 12px; }
 }
 
 .ws-dock {

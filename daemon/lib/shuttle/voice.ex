@@ -145,11 +145,12 @@ defmodule Shuttle.Voice do
     {:reply, plan, state}
   end
 
-  def handle_call(:recover, _from, %{launch: nil} = state),
-    do: {:reply, {:error, "Listen is not recording"}, state}
+  def handle_call(:recover, _from, %{launch: launch, snapshot: %{state: "listening"}} = state)
+      when is_binary(launch),
+      do: {:reply, Recorder.recover_voice(launch, state.capture_opts), state}
 
   def handle_call(:recover, _from, state),
-    do: {:reply, Recorder.recover_voice(state.capture_opts), state}
+    do: {:reply, {:error, "Listen is not recording"}, state}
 
   def handle_call(:discard, _from, %{launch: nil} = state), do: {:reply, {:ok, 0}, state}
 
@@ -361,11 +362,17 @@ defmodule Shuttle.Voice do
     snapshot
     |> Map.put(:preview, preview)
     |> Map.put(:level, Recorder.mic_level(view.capture_opts))
-    |> Map.put(:muted_speech, view.launch && Recorder.held_speech(view.launch, view.capture_opts))
+    |> Map.put(:muted_speech, muted_speech(snapshot, view))
     |> Map.update!(:error, &(&1 || view.focus_error))
     |> put_mode()
     |> put_pending_words(view)
   end
+
+  # Only a recorder listening now, whose process a tick has just seen alive.
+  defp muted_speech(%{state: "listening"}, %{launch: launch} = view) when is_binary(launch),
+    do: Recorder.held_speech(launch, view.capture_opts)
+
+  defp muted_speech(_snapshot, _view), do: nil
 
   # What the live recording's relay holds unsent, read from the relay each time:
   # the words of its finished lines, and how long until the quiet gap sends them.

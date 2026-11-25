@@ -1269,8 +1269,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     File.write!(c.path, "")
     parent = self()
 
-    send_file = fn path, uid, caption ->
-      send(parent, {:sent, path, uid, caption})
+    send_file = fn path, card, session, caption ->
+      send(parent, {:sent, path, card["fiber_id"], session, caption})
       :ok
     end
 
@@ -1280,7 +1280,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     recovered(c.path, "2026-11-06T10:00:30Z", "and the last one")
     record(c.path, "2026-11-06T10:00:40Z", "live words. Send.")
     poll(c)
-    refute_receive {:sent, _, _, _}, 20
+    refute_receive {:sent, _, _, _, _}, 20
 
     jsonl(c.path, %{
       "wall" => "2026-11-06T10:01:00Z",
@@ -1293,7 +1293,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{text: text}}
     assert text =~ "live words"
     refute_receive {:delivery, _}, 20
-    assert_receive {:sent, path, "fiber-b", caption}
+    assert_receive {:sent, path, "fiber-b", "voice-recovered-launch", caption}
     assert caption == "Said while muted, 10:00–10:00 (3 min held): nothing was delivered"
 
     assert File.read!(path) == """
@@ -1315,9 +1315,81 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert {:ok, %{rows: [%{"text" => "live words. Send."}]}} =
              Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
 
-    # A replayed batch is not sent twice.
+    # A replayed batch is not sent twice, and a batch without words sends nothing.
     send(worker(c), :poll)
-    refute_receive {:sent, _, _, _}, 20
+
+    jsonl(c.path, %{
+      "wall" => "2026-11-06T10:02:00Z",
+      "recovery" => %{"utterances" => 0, "seconds" => 4.0}
+    })
+
+    poll(c)
+    refute_receive {:sent, _, _, _, _}, 50
+    assert File.ls!(Path.dirname(path)) == [Path.basename(path)]
+  end
+
+  test "a recovered document is filed under a card this host owns, and unaddressed for another host's",
+       c do
+    path = Path.join(c.root, "said-while-muted.md")
+    File.write!(path, "# Said while muted\n")
+    uid = "01KTCA2CG0FB27BDJX3K8G21FP"
+    own = Shuttle.Poller.own_host_id()
+
+    assert :ok =
+             Shuttle.Voice.Recovered.send_file(
+               path,
+               %{"fiber_id" => uid, "origin" => own},
+               "voice-recovered-a",
+               "mine"
+             )
+
+    assert :ok =
+             Shuttle.Voice.Recovered.send_file(
+               path,
+               %{"fiber_id" => uid, "origin" => "elsewhere"},
+               "voice-recovered-b",
+               "theirs"
+             )
+
+    sends =
+      Path.join(c.root, "events.jsonl")
+      |> File.stream!()
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&(&1["type"] == "file_sent"))
+      |> Map.new(&{&1["caption"], &1})
+
+    # The uid the board files a send under: its terminal's ULID, else its session.
+    filed = fn send -> Shuttle.ULID.from_tmux(send["tmuxSession"]) || send["sessionId"] end
+    assert filed.(sends["mine"]) == uid
+    assert filed.(sends["theirs"]) == "voice-recovered-b"
+    assert sends["mine"]["files"] == [path]
+  end
+
+  test "a recovered document groups by card and host, in spoken order across offsets" do
+    routes = [
+      %{"t" => "2026-11-06T10:00:00Z", "fiber_id" => "f", "origin" => "here", "name" => "Here"},
+      %{"t" => "2026-11-06T10:00:10Z", "fiber_id" => "f", "origin" => "there", "name" => "There"},
+      %{"t" => "2026-11-06T10:00:20Z", "fiber_id" => "f", "origin" => "here", "name" => "Here"}
+    ]
+
+    rows = [
+      %{"t" => "2026-11-06T11:00:05+01:00", "speaker" => "mic", "text" => "first here"},
+      %{"t" => "2026-11-06T10:00:12+00:00", "speaker" => "mic", "text" => "there"},
+      %{"t" => "2026-11-06T11:00:25+01:00", "speaker" => "mic", "text" => "here again"}
+    ]
+
+    {_name, markdown} =
+      Shuttle.Voice.Recovered.document(
+        "launch",
+        rows,
+        routes,
+        %{"seconds" => 30.0},
+        "2026-11-06T11:01:00+01:00"
+      )
+
+    assert [_, here, there] = String.split(markdown, "## ")
+    assert here =~ "first here" and here =~ "here again" and not (here =~ "there")
+    assert there =~ "There" and there =~ "**10:00:12** there"
   end
 
   defp recovered(path, at, text),

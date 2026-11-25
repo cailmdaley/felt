@@ -86,3 +86,24 @@ it('speech said into the muted mic shows how much, marked while it grows, and Re
   ;(voice as unknown as { notify(): void }).notify()
   expect(held().hidden).toBe(true)
 })
+
+it('a mount over speech already held does not mark it arriving', () => {
+  control.dispose(); document.body.replaceChildren()
+  voice.status = { ...voice.status!, muted: true, muted_speech: { seconds: 300, since: null, recovering: false } }
+  control = new ListenControl({ card: () => card({ id: 'swg', name: 'SWG meeting', originId: 'far-host' }), voice, shuttleBase: '', fiberSlug: id => id })
+  document.body.append(control.el)
+  const held = control.el.querySelector<HTMLElement>('.listen-held')!
+  expect(held.hidden).toBe(false)
+  expect(held.hasAttribute('data-arriving')).toBe(false)
+  voice.status = { ...voice.status!, muted_speech: { seconds: 303, since: null, recovering: false } }
+  ;(voice as unknown as { notify(): void }).notify()
+  expect(held.hasAttribute('data-arriving')).toBe(true)
+})
+
+it('the menu offers Recover too, where the phone keeps it while unmuted', async () => {
+  voice.status = { ...voice.status!, muted: false, muted_speech: { seconds: 42, since: null, recovering: false } }
+  ;(voice as unknown as { notify(): void }).notify()
+  opener().click()
+  item('Recover 42 s said while muted').click(); await settle()
+  expect(posts.at(-1)).toEqual({ url: '/api/v1/voice/recover', body: { recorder: 'near-host' } })
+})

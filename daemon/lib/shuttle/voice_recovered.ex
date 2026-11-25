@@ -10,13 +10,11 @@ defmodule Shuttle.Voice.Recovered do
   module writes them as one Markdown document under
   `<data_dir>/voice-recovered/`, grouped by the card that was in view when each
   was said (the route journal's history), and sends it with `shuttle send-file`
-  as a send of the card in view now, so it reaches the human's board in that
-  card's channel and sent files; a send whose session is a fiber uid belongs to
-  that fiber.
+  (`send_file/4`).
   """
 
   @doc """
-  The document for `rows` (`%{"t", "speaker", "text"}`, oldest first), as
+  The document for nonempty `rows` (`%{"t", "speaker", "text"}`, oldest first), as
   `{file name, markdown}`, given the capture's `routes` and the batch's
   `summary` and closing `wall`.
   """
@@ -26,11 +24,11 @@ defmodule Shuttle.Voice.Recovered do
     groups =
       rows
       |> Enum.map(&{route_at(routes, &1["t"]), &1})
-      |> Enum.group_by(fn {route, _row} -> route && route["fiber_id"] end)
-      |> Enum.map(fn {_fiber, [{route, _} | _] = said} ->
+      |> Enum.group_by(fn {route, _row} -> route && {route["fiber_id"], route["origin"]} end)
+      |> Enum.map(fn {_card, [{route, _} | _] = said} ->
         {route, Enum.map(said, &elem(&1, 1))}
       end)
-      |> Enum.sort_by(fn {_route, [first | _]} -> first["t"] end)
+      |> Enum.sort_by(fn {_route, [first | _]} -> instant(first["t"]) end, DateTime)
 
     body =
       Enum.map_join(groups, "\n", fn {route, said} ->
@@ -43,11 +41,7 @@ defmodule Shuttle.Voice.Recovered do
         heading(route) <> "\n\n" <> lines <> "\n"
       end)
 
-    said =
-      case rows do
-        [] -> ""
-        _ -> ", said #{day(hd(rows)["t"])} #{clock(hd(rows)["t"])}–#{clock(List.last(rows)["t"])}"
-      end
+    said = ", said #{day(hd(rows)["t"])} #{clock(hd(rows)["t"])}–#{clock(List.last(rows)["t"])}"
 
     markdown = """
     # Said while muted
@@ -68,25 +62,55 @@ defmodule Shuttle.Voice.Recovered do
 
   @doc "The route in force at spoken time `t`, or nil before the first."
   def route_at(routes, t) do
-    {:ok, at, _} = DateTime.from_iso8601(t)
+    at = instant(t)
 
-    Enum.find(Enum.reverse(routes), fn route ->
-      {:ok, from, _} = DateTime.from_iso8601(route["t"])
-      DateTime.compare(at, from) != :lt
-    end)
+    Enum.find(Enum.reverse(routes), &(DateTime.compare(at, instant(&1["t"])) != :lt))
     |> case do
       nil -> nil
       route -> Map.take(route, ~w(fiber_id origin name slug))
     end
   end
 
-  @doc "Put `path` on the board as a send of fiber `uid`."
-  def send_file(path, uid, caption) do
-    case Shuttle.CLI.run(["send-file", path, "--session", uid, "--caption", caption]) do
+  @doc """
+  Put `path` on the board for `card`, the route in view now. A card this host
+  owns takes it the way its own worker's send arrives: the send's terminal is
+  named for the card's uid (`<leaf>-<ULID>-shuttle`, which a worker's
+  dispatch environment carries), so the card's channel, its Sent Files and the
+  Library all file it under the card. Another host's card lists only its own
+  host's sends in its Sent Files, so there the document goes unaddressed, as
+  this host's own file.
+  """
+  def send_file(path, card, session, caption) do
+    terminal =
+      case card do
+        %{"fiber_id" => uid} = card ->
+          if card["origin"] in [nil, Shuttle.Poller.own_host_id()] and Shuttle.ULID.valid?(uid),
+            do: "voice-#{uid}-shuttle",
+            else: ""
+
+        nil ->
+          ""
+      end
+
+    env = [
+      {"SHUTTLE_TMUX_SESSION", terminal},
+      {"TMUX", ""},
+      {"REX_SESSION", ""},
+      {"REX_BLOCK", ""}
+    ]
+
+    case Shuttle.CLI.run(["send-file", path, "--session", session, "--caption", caption],
+           env: env
+         ) do
       {:ok, _} -> :ok
       {:command_error, _status, output} -> {:error, String.trim(output)}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp instant(iso) do
+    {:ok, at, _} = DateTime.from_iso8601(iso)
+    at
   end
 
   defp heading(nil), do: "## No card in view"
@@ -109,5 +133,4 @@ defmodule Shuttle.Voice.Recovered do
     do: "#{round(seconds / 60)} min"
 
   defp minutes(seconds) when is_number(seconds), do: "#{round(seconds)} s"
-  defp minutes(_), do: "some"
 end

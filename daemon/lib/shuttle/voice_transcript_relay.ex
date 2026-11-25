@@ -411,7 +411,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       played: Keyword.get(opts, :played, &Shuttle.Speaker.played/0),
       thresholds: Keyword.get(opts, :thresholds, &Shuttle.Voice.Config.thresholds/0),
       cold: Keyword.get(opts, :cold, &Shuttle.Voice.cold?/1),
-      send_file: Keyword.get(opts, :send_file, &Shuttle.Voice.Recovered.send_file/3),
+      send_file: Keyword.get(opts, :send_file, &Shuttle.Voice.Recovered.send_file/4),
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:millisecond) end),
       tasks: %{},
       task_handles: %{},
@@ -705,7 +705,9 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   end
 
   # Words recovered from a mute are never routed: they go before the human as
-  # one document, sent as a send of the card in view now.
+  # one document, sent apart from the poll as a send of the card in view now.
+  defp put_recovered(%{"recovered" => []} = config, _wall, _summary, _state), do: config
+
   defp put_recovered(config, wall, summary, state) do
     rows = config["recovered"]
 
@@ -714,23 +716,20 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
     path = Path.join([Shuttle.data_dir(), "voice-recovered", name])
 
-    if rows != [] and not Shuttle.FS.exists?(path) do
+    unless Shuttle.FS.exists?(path) do
       :ok = Shuttle.FS.mkdir_p(Path.dirname(path))
       :ok = Shuttle.FS.write_atomic(path, markdown)
+      caption = Shuttle.Voice.Recovered.caption(rows, summary)
+      card = List.last(config["routes"])
+      session = "voice-recovered-" <> config["launch"]
 
-      case List.last(config["routes"]) do
-        %{"fiber_id" => uid} ->
-          caption = Shuttle.Voice.Recovered.caption(rows, summary)
-
-          with {:error, reason} <- state.send_file.(path, uid, caption),
-               do:
-                 Logger.warning(
-                   "voice: could not send recovered speech #{path}: #{inspect(reason)}"
-                 )
-
-        nil ->
-          Logger.warning("voice: recovered speech has no card in view to go to: #{path}")
-      end
+      Task.start(fn ->
+        with {:error, reason} <- state.send_file.(path, card, session, caption),
+             do:
+               Logger.warning(
+                 "voice: could not send recovered speech #{path}: #{inspect(reason)}"
+               )
+      end)
     end
 
     Map.put(config, "recovered", [])

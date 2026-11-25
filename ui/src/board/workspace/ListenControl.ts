@@ -54,8 +54,11 @@ export class ListenControl {
   private readonly said = document.createElement('span')
   private readonly amount = document.createElement('span')
   private readonly words = document.createElement('span')
+  private readonly more = document.createElement('span')
   private readonly recoverButton = document.createElement('button')
   private speech: MutedSpeech | null = null
+  /** Whether a reading of the voice state came before the one painted now. */
+  private read = false
   private arriving = false
   private recovering = false
   private readonly disposers: Array<() => void> = []
@@ -79,7 +82,7 @@ export class ListenControl {
     this.dropdown.addEventListener('click', () => this.showMenu())
     this.button.addEventListener('click', () => { void this.press() })
     this.held.className = 'listen-held'
-    this.said.append(this.amount, this.words)
+    this.said.append(this.amount, this.words, this.more)
     this.words.className = 'listen-held-words'
     this.recoverButton.type = 'button'; this.recoverButton.className = 'listen-recover'
     this.recoverButton.textContent = 'Recover'
@@ -140,6 +143,7 @@ export class ListenControl {
     finally { this.starting = false; this.paint() }
   }
   private recover(): void {
+    if (this.recovering) return
     this.localError = null; this.recovering = true; this.paint()
     void this.opts.voice.recover().catch(error => this.fail(error)).finally(() => { this.recovering = false; this.paint() })
   }
@@ -155,7 +159,7 @@ export class ListenControl {
   /** What the open menu shows; it closes only when this changes. A route pushed with its `cold`, which the read omits, is the same route. */
   private signature(): string {
     const state = this.opts.voice.status, target = state?.target
-    return JSON.stringify([state?.enabled, state?.muted, state?.follow, state?.system_audio, target?.origin, target?.fiber_id, this.route(), state?.recorder, state?.source, this.failure()])
+    return JSON.stringify([state?.enabled, state?.muted, state?.follow, state?.system_audio, target?.origin, target?.fiber_id, this.route(), state?.recorder, state?.source, this.failure(), !state?.muted_speech, state?.muted_speech?.recovering])
   }
   private paint(): void {
     const state = this.opts.voice.status
@@ -180,19 +184,25 @@ export class ListenControl {
     this.el.classList.toggle('listen-muted', muted)
     this.button.classList.toggle('listen-on', on)
     this.paintHeld(on ? state?.muted_speech ?? null : null, muted)
+    this.read ||= !!state
   }
 
-  /** What the recording holds from the muted mic; each new reading that grew, while muted, marks speech arriving. */
+  /**
+   * What the recording holds from the muted mic. A reading that grew on the one
+   * before, while muted, marks speech arriving; the first reading a mount sees
+   * has nothing to grow on.
+   */
   private paintHeld(speech: MutedSpeech | null, muted: boolean): void {
-    if (speech !== this.speech) this.arriving = muted && !!speech && speech.seconds > (this.speech?.seconds ?? 0)
+    if (speech !== this.speech) this.arriving = muted && this.read && !!speech && speech.seconds > (this.speech?.seconds ?? 0)
     this.speech = speech
     this.held.hidden = !speech
     if (!speech) return
     // The phone shows the amount alone.
     const amount = `${speech.recovering ? 'Recovering ' : ''}${mutedAmount(speech.seconds)}`
-    const words = ` said while muted${speech.recovering ? '…' : ''}`
+    const more = speech.recovering ? '…' : ''
     if (this.amount.textContent !== amount) this.amount.textContent = amount
-    if (this.words.textContent !== words) this.words.textContent = words
+    if (this.words.textContent !== ' said while muted') this.words.textContent = ' said while muted'
+    if (this.more.textContent !== more) this.more.textContent = more
     this.recoverButton.hidden = speech.recovering
     this.recoverButton.disabled = this.recovering
     this.held.toggleAttribute('data-arriving', this.arriving)
@@ -253,6 +263,8 @@ export class ListenControl {
     if (mode === 'pinned') this.item('Follow me', () => this.change({ follow: true }))
     if (mode === 'following' || (mode === 'pinned' && !here)) this.item('Pin to this card', () => this.change({ follow: false, target: thisCard }))
     if (mode !== 'meeting' && meetings) this.item('Start meeting on this card', () => this.change({ meeting: true, target: thisCard }))
+    const speech = state?.enabled ? state.muted_speech : null
+    if (speech && !speech.recovering) this.item(`Recover ${mutedAmount(speech.seconds)} said while muted`, () => this.recover())
     const quiet = this.cadence(state?.follow ?? true)
     menu.append(quiet)
     this.item("Today's transcript", () => {

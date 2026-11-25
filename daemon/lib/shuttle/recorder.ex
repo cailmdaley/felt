@@ -225,14 +225,16 @@ defmodule Shuttle.Recorder do
   end
 
   @doc """
-  The speech said into the muted mic that `launch`'s hark holds, as
-  `%{seconds, since, recovering}` from its `held.json`, or nil when it holds none.
+  The speech said into the muted mic that `launch`'s recorder holds, as
+  `%{seconds, since, recovering}`, or nil when it holds none. Hark registers
+  each recording process in `held/<pid>.json`; only the one `meeting.json`
+  names for `launch` is read, and a recover request it has not yet taken up
+  counts as recovering.
   """
   def held_speech(launch, opts \\ []) do
-    with {:ok, bytes} <- Shuttle.FS.read(Path.join(hark_dir(opts), "held.json")),
-         {:ok, %{"launch" => ^launch, "seconds" => seconds} = held} when is_number(seconds) <-
-           Jason.decode(bytes),
-         recovering = held["recovering"] == true,
+    with {:ok, %{"seconds" => seconds} = held, request} when is_number(seconds) <-
+           held_status(launch, opts),
+         recovering = held["recovering"] == true or Shuttle.FS.exists?(request),
          true <- seconds > 0 or recovering do
       %{seconds: seconds, since: held["since"], recovering: recovering}
     else
@@ -241,15 +243,34 @@ defmodule Shuttle.Recorder do
   end
 
   @doc """
-  Asks the live hark to transcribe the muted speech it holds, through the
-  `recover` flag file `hark recover` also creates.
+  Asks `launch`'s recorder to transcribe the muted speech it holds, through
+  the request file `hark recover` also creates. A request while one is
+  pending or running changes nothing.
   """
-  def recover_voice(opts \\ []) do
-    with :ok <- Shuttle.FS.mkdir_p(hark_dir(opts)),
-         :ok <- Shuttle.FS.write(Path.join(hark_dir(opts), "recover"), "") do
-      :ok
-    else
-      {:error, reason} -> {:error, "could not ask hark to recover: #{inspect(reason)}"}
+  def recover_voice(launch, opts \\ []) do
+    case held_status(launch, opts) do
+      {:ok, %{"recovering" => true}, _request} ->
+        :ok
+
+      {:ok, %{"seconds" => seconds}, request} when is_number(seconds) and seconds > 0 ->
+        case Shuttle.FS.exists?(request) || Shuttle.FS.write(request, "") do
+          {:error, reason} -> {:error, "could not ask hark to recover: #{inspect(reason)}"}
+          _ -> :ok
+        end
+
+      _ ->
+        {:error, "the recorder holds no muted speech"}
+    end
+  end
+
+  defp held_status(launch, opts) do
+    with %{"launch" => ^launch} = capture <- read_capture_json(opts),
+         pid when is_binary(pid) <- valid_pid(capture),
+         dir = Path.join(hark_dir(opts), "held"),
+         {:ok, bytes} <- Shuttle.FS.read(Path.join(dir, pid <> ".json")),
+         {:ok, %{"launch" => ^launch} = held} <- Jason.decode(bytes),
+         true <- to_string(held["pid"]) == pid do
+      {:ok, held, Path.join(dir, pid <> ".recover")}
     end
   end
 
