@@ -8,6 +8,7 @@ HTML reader pages execute JavaScript in an opaque-origin sandbox, without access
 Their preferences live only in their retained document, and their history state cannot change the board's address.
 Sibling images, CSS and classic scripts use the owner-routed `/file-assets` route; it grants no CORS access for report fetch/XHR requests.
 Raw HTML, XHTML and SVG file responses carry a CSP sandbox too, so a report's popup or an “Open in new tab” action cannot regain the board's origin.
+A page that declares a public page published elsewhere (`<meta name="shuttle-page" content="https://…">` in its head) is shown as that address instead, framed at its own origin with its own storage, as a browser tab would hold it; it cannot navigate the board's window and is sent no referrer. Only a public `https` host qualifies: the board's own host, an IP address, and loopback, private and tailnet names keep the served file in its sandbox.
 Do not expose a daemon containing untrusted reports publicly; the daemon's trusted-user boundary applies to files as well as API writes.
 
 **Every restart arms a boot quarantine.** On every (re)start the daemon parks

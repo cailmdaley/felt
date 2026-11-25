@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl, pinViewportUnits, pageWeight } from './FileViewerPanel.js'
 import { envelope } from './workspace/DocumentBridge.js'
-import { resetDocumentResources } from './documentResources.js'
+import { fileTabUrl, resetDocumentResources } from './documentResources.js'
 const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
 const responseWithBlob = (content: string): Response => new Response(content)
 const pdfRenderer = vi.hoisted(() => ({ mount: vi.fn() }))
@@ -305,6 +305,20 @@ describe('workspace file viewer hooks', () => {
     expect(viewer.querySelector('.kbn-thumbnail-name')?.textContent).toBe('paper.pdf')
     await vi.waitFor(() => expect(onThumbnailSource).toHaveBeenCalled())
     expect(onState).toHaveBeenCalledWith({ status: 'ready' })
+    disposeFileViewer(viewer)
+  })
+  it('draws a page declared remote as a card naming its site, in no frame, and opens it in a tab at that page', async () => {
+    const source = '<!doctype html><html><head><title>Deck</title><meta name="shuttle-page" content="https://talks.example.org/deck/"></head><body><iframe src="https://talks.example.org/deck/"></iframe></body></html>'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(source, { headers: { ETag: 'remote-preview' } })))
+    const onState = vi.fn()
+    const viewer = buildFileViewer('', '/tapestry.html', 'host-a', undefined, undefined, { thumbnail: true, onState })
+    await vi.waitFor(() => expect(onState).toHaveBeenCalledWith({ status: 'ready' }))
+    expect(viewer.querySelector('iframe')).toBeNull()
+    expect(viewer.classList.contains('kbn-thumbnail-remote')).toBe(true)
+    expect(viewer.querySelector('.kbn-thumbnail-kind')?.textContent).toBe('▣')
+    expect(viewer.querySelector('.kbn-thumbnail-duration')?.textContent).toBe('talks.example.org')
+    expect(fileTabUrl('', '/tapestry.html', 'host-a')).toBe('https://talks.example.org/deck/')
+    expect(fileTabUrl('', '/other.html', 'host-a')).toBe('/api/v1/file?path=%2Fother.html&origin=host-a')
     disposeFileViewer(viewer)
   })
   it('sends full thumbnail source to title metadata but only lightweight markup to the frame', async () => {

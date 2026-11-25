@@ -20,6 +20,8 @@ let browser: { window: Window & typeof globalThis; close: () => void }
 const messages = vi.fn()
 const app = vi.fn()
 const select = vi.fn()
+/** A few turns of the event loop, for reads that would have landed. */
+const settle = async (): Promise<void> => { for (let turn = 0; turn < 4; turn++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const documents: WorkspaceDocument[] = [0, 1].map(n => ({
   key: `host-a:/report-${n}.html`, owner: 'host-a', path: `/report-${n}.html`,
   name: `report-${n}.html`, kind: 'html', provenance: [],
@@ -33,7 +35,7 @@ beforeAll(async () => {
   const result = await build({
     stdin: {
       contents: `export { DocumentHost, withWorkspaceKeyBridge } from './src/board/workspace/DocumentHost.js';
-        export { buildFileViewer, disposeFileViewer } from './src/board/FileViewerPanel.js';
+        export { buildFileViewer, disposeFileViewer, suspendFileViewer, resumeFileViewer } from './src/board/FileViewerPanel.js';
         export { keyIntent } from './src/board/keymap.js';`,
       resolveDir: new URL('../../../', import.meta.url).pathname,
       sourcefile: 'workspace-bridge-test-entry.ts', loader: 'ts',
@@ -97,7 +99,7 @@ async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
   let iframe: HTMLIFrameElement
   await vi.waitFor(() => {
     iframe = host.get(doc.key)!.viewer!.querySelector('iframe')!
-    expect(iframe?.srcdoc).not.toBe('')
+    expect(iframe?.srcdoc ?? '').not.toBe('')
   })
   const frame = iframe!
   const win = frame.contentWindow!
@@ -592,6 +594,82 @@ describe('minified production document keyboard bridge', () => {
     ;(content.querySelector('#load-owned') as HTMLElement).click()
     expect(select).not.toHaveBeenCalled()
     expect(content.querySelector('a[href="https://example.com"]')?.classList.contains('ws-channel-reference')).toBe(false)
+  })
+
+  it('runs a document in one frame: the viewer shown holds it, and a hidden one waits until it is shown again', async () => {
+    const frames = (viewer: Element | null | undefined): HTMLIFrameElement[] => [...viewer?.querySelectorAll('iframe') ?? []].filter(frame => frame.isConnected)
+    const neighbour = (): HTMLElement | null => host.get(documents[1].key)!.viewer
+    // A page unfolded in place, as a constitution's view shows it.
+    const inline = production.buildFileViewer('', documents[1].path, 'host-a', undefined, undefined, { kind: 'html', fit: true, active: true })
+    document.body.append(inline)
+    await vi.waitFor(() => expect(frames(inline)).toHaveLength(1))
+    // The reader opens beside it with the same page as a hidden neighbour, which waits.
+    host.setChannel(documents, documents[0].key)
+    await vi.waitFor(() => expect(host.get(documents[0].key)!.viewer?.querySelector('iframe')?.srcdoc ?? '').not.toBe(''))
+    await settle()
+    expect(neighbour()?.isConnected).toBe(true)
+    expect(frames(neighbour())).toHaveLength(0)
+    // Full screen: the view beneath is hidden and the reader shows the page.
+    production.suspendFileViewer(inline)
+    host.select(documents[1].key)
+    await vi.waitFor(() => expect(frames(neighbour())).toHaveLength(1))
+    expect(frames(inline)).toHaveLength(0)
+    // Back: the view takes the page again.
+    host.select(documents[0].key)
+    production.resumeFileViewer(inline)
+    await vi.waitFor(() => expect(frames(inline)).toHaveLength(1))
+    expect(frames(neighbour())).toHaveLength(0)
+    // Gone from the view, the page is free for the reader's next look.
+    production.disposeFileViewer(inline)
+    inline.remove()
+    host.select(documents[1].key)
+    await vi.waitFor(() => expect(frames(neighbour())).toHaveLength(1))
+  })
+
+  it('gives a page back to a viewer still shown once the reader that took it lets it go', async () => {
+    const frames = (viewer: Element | null | undefined): HTMLIFrameElement[] => [...viewer?.querySelectorAll('iframe') ?? []].filter(frame => frame.isConnected)
+    // A page unfolded in a stream that stays shown under the reader.
+    const inline = production.buildFileViewer('', documents[1].path, 'host-a', undefined, undefined, { kind: 'html', fit: true, active: true })
+    document.body.append(inline)
+    await vi.waitFor(() => expect(frames(inline)).toHaveLength(1))
+    host.setChannel(documents, documents[1].key)
+    await vi.waitFor(() => expect(frames(host.get(documents[1].key)!.viewer)).toHaveLength(1))
+    expect(frames(inline)).toHaveLength(0)
+    host.parkAll()
+    await vi.waitFor(() => expect(frames(inline)).toHaveLength(1))
+    expect(frames(host.get(documents[1].key)!.viewer)).toHaveLength(0)
+    production.disposeFileViewer(inline)
+    inline.remove()
+  })
+
+  it('frames a page that declares itself a public page as that page, at its own origin, only while it is shown', async () => {
+    const deck = 'https://talks.example.org/deck/'
+    reportHtml = `<!doctype html><html><head><title>Deck</title><meta name="shuttle-page" content="${deck}"></head><body><iframe src="${deck}"></iframe></body></html>`
+    const frames = (key: string): HTMLIFrameElement[] => [...host.get(key)!.viewer?.querySelectorAll('iframe') ?? []].filter(frame => frame.isConnected)
+    host.setChannel(documents, documents[0].key)
+    await vi.waitFor(() => expect(frames(documents[0].key)).toHaveLength(1))
+    const [frame] = frames(documents[0].key)
+    expect(frame.getAttribute('src')).toBe(deck)
+    expect(frame.hasAttribute('srcdoc')).toBe(false)
+    expect(frame.getAttribute('sandbox')!.split(' ').sort()).toEqual(['allow-downloads', 'allow-forms', 'allow-modals', 'allow-popups', 'allow-popups-to-escape-sandbox', 'allow-same-origin', 'allow-scripts'])
+    expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+    expect(frame.getAttribute('allow')).toBe('fullscreen')
+    // The board cannot pause a page it cannot reach: hidden, it runs nowhere.
+    expect(frames(documents[1].key)).toHaveLength(0)
+    host.select(documents[1].key)
+    await vi.waitFor(() => expect(frames(documents[1].key)).toHaveLength(1))
+    expect(frames(documents[0].key)).toHaveLength(0)
+    host.select(documents[0].key)
+    await vi.waitFor(() => expect(frames(documents[0].key).map(each => each.getAttribute('src'))).toEqual([deck]))
+    expect(frames(documents[1].key)).toHaveLength(0)
+  })
+
+  it('keeps a page that declares the board\'s own host in the served sandbox', async () => {
+    reportHtml = '<!doctype html><html><head><meta name="shuttle-page" content="https://workspace.test/"></head><body><p>Here</p></body></html>'
+    const frame = await report()
+    expect(frame.hasAttribute('src')).toBe(false)
+    expect(frame.srcdoc).toContain('<p>Here</p>')
+    expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin')
   })
 
   it('never applies the HTML transform to PDF, image, or audio viewers', async () => {

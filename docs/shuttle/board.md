@@ -117,6 +117,7 @@ Documents of a fiber the board does not hold are read from their owner; a fiber 
 ### The reader
 
 Opening a file, a line or a constitution enters the reader: one selected page, its neighbours waiting hidden, and no column beside it.
+On a phone a neighbouring HTML page waits unloaded until it is opened. A page runs in one frame at a time: opened in the reader, it leaves the preview it was opened from, which takes it back when the reader lets it go. A page that declares a public page published elsewhere (`<meta name="shuttle-page">`) shows that page at its own origin, and a hidden neighbour in the reader does not run it.
 The reader is one frame: beneath the board's bar, the selected page fills the window, with its header line on top and the document below it. The header line holds back, the page's name, its arrival, the sent files toggle, Expand, a file's download and the document menu.
 The download (an arrow onto a tray) saves the file under its own name, its bytes read through the owner-routed file route, so a file on another host downloads the same way; on the phone it lives in the document menu as Download.
 The sent files toggle appears at every width when the constitution has sent files, on the phone in the top bar, and its first bullet swells while one is unread; it opens the list of sent files.

@@ -81,8 +81,8 @@ describe('native media documents', () => {
 
   it('also pauses players inside HTML reports and includes them in exclusive playback', async () => {
     const report = viewer('/listening-room.html')
+    await vi.waitFor(() => expect(report.querySelector('iframe')?.srcdoc).toContain('Listening room'))
     const iframe = report.querySelector('iframe')!
-    await vi.waitFor(() => expect(iframe.srcdoc).toContain('Listening room'))
     const command = vi.spyOn(iframe.contentWindow!, 'postMessage')
     const send = (type: string) => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: envelope(type) }))
     send('ready')
@@ -179,7 +179,7 @@ describe('native media documents', () => {
     expect(pdf.querySelector('iframe')).toBeNull()
     expect(pdf.querySelector('.kbn-thumbnail-kind')?.textContent).toBe('▧')
     expect(pdf.inert).toBe(true)
-    const html = viewer('/report.html', { thumbnail: true }).querySelector('iframe')!
-    expect(html.getAttribute('sandbox')).toBe('')
+    const html = viewer('/report.html', { thumbnail: true })
+    await vi.waitFor(() => expect(html.querySelector('iframe')?.getAttribute('sandbox')).toBe(''))
   })
 })

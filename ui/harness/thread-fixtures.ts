@@ -163,6 +163,23 @@ function addLoneFixture(example: WorkspaceExample, now: number): void {
   example.files.push({ owner: WORKSPACE_HOST, path: `${dir}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
 }
 
+/** Two constitutions whose tapestries are one link to a talk: `talk` declares it a public page published elsewhere, `talk-notes` does not. */
+export function addRemotePageFixture(example: WorkspaceExample, now: number): void {
+  for (const [id, declared] of [['talk', true], ['talk-notes', false]] as const) {
+    const dir = `/fixture-store/workspace/${id}`
+    example.feed.fibers.push({
+      origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${id}/${id}.md`, dir,
+      fiber: { id, uid: id, name: declared ? 'The talk' : 'Notes on the talk', status: 'active', outcome: 'The deck is published.', created_at: new Date(now - 3600000).toISOString(),
+        shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'claude-opus', project_dir: '/fixture-project' } },
+      runtime: null,
+    })
+    example.bodies[id] = '## Desired State\n\nThe talk, published.\n\n## Status\n\nRemote page fixture.'
+    const meta = declared ? '<meta name="shuttle-page" content="https://example.org/">' : ''
+    const page = `<!doctype html><html><head><meta charset="utf-8"><title>The talk</title>${meta}</head><body><h1>The talk</h1><p><a href="https://example.org/">Open the talk</a></p></body></html>`
+    example.files.push({ owner: WORKSPACE_HOST, path: `${dir}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
+  }
+}
+
 /** The hub threads that carry a tapestry in their fiber directory. */
 const HUB_TAPESTRIES: readonly string[] = ['hub/pipeline-steward', 'hub/pipeline-steward/rebuild', 'hub/cosmology', 'hub/psf-coupling']
 

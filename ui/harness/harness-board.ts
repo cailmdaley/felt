@@ -16,6 +16,7 @@
  * `?page=thread&f=<uid>@<host>` mounts a page (src/pages/) instead of the board, over the same mocked daemon:
  * `?example=threads&page=thread&f=01KVBR1F9BWBVKF97473PV67K8@umber-workstation` is a thread with every kind of
  * sub-thread; add `&in=rex` for a page in a Rex pane, whose clicks post `/api/v1/go`.
+ * `?example=threads&page=thread&f=talk@umber-workstation` is a constitution whose tapestry declares a public page, and `f=talk-notes@…` its twin that does not.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -33,7 +34,7 @@ import { addChannelsFixtures, addDeskFixtures } from './channels-fixtures.js'
 import { addChangeFixtures, bakeFixtureChange, listFixturePRs } from './change-fixtures.js'
 import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
-import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures, addThreadReviewFixtures } from './thread-fixtures.js'
+import { addFamilyFixtures, addFrontierFixtures, addRemotePageFixture, addThreadFixtures, addThreadReviewFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { mountPage } from '../src/pages/mount.js'
 import { parsePageRoute } from '../src/pages/route.js'
@@ -100,7 +101,7 @@ if (workspaceFixture && transcriptScenario === 'live') {
 }
 if (workspaceFixture && example === 'change') addChangeFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'nav-back') addNavigationFixtures(workspaceFixture, now)
-if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
+if (workspaceFixture && example === 'threads') { addThreadFixtures(workspaceFixture, now, search.has('manyThreads')); addRemotePageFixture(workspaceFixture, now) }
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'families') addFamilyFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'thread-review') addThreadReviewFixtures(workspaceFixture, now)

@@ -1,5 +1,6 @@
 import { bakeOf, isBaked, isDrawn, type WorkspaceDocument, type DocKey } from './documents.js'
 import { keyIntent } from '../keymap.js'
+import { isMobileViewport } from '../mobile.js'
 import { forwardDocumentKey, frameBridge, type DocumentKey } from './DocumentBridge.js'
 import type { SwipeSignal } from './PhoneGestures.js'
 export { withWorkspaceKeyBridge } from './DocumentBridge.js'
@@ -163,6 +164,8 @@ export class DocumentHost {
     const visible = [index - 1, index + 1, index]
       .filter((i) => i >= 0 && i < this.documents.length)
       .filter((i) => i === index || !['change', 'family'].includes(this.documents[i].kind))
+      // A phone runs an HTML page only once it is opened: every page it shows shares one web process.
+      .filter((i) => i === index || this.documents[i].kind !== 'html' || !isMobileViewport())
       .map((i) => this.documents[i].key)
     for (const id of visible) {
       const state = this.frames.get(id)!

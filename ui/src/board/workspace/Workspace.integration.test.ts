@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { slug } from '../threadOutline.js'
+import { MOBILE_MEDIA } from '../mobile.js'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { consoleActs, pressConsoleAct } from './testActs.js'
 import { card, servedFeed, settle } from '../testFixtures.js'
@@ -1373,6 +1374,23 @@ describe('workspace reader integration', () => {
     await settle()
     expect(workspace.reader.host.get(reportKey)?.content.querySelector('iframe')).toBe(iframe)
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
+  })
+
+  it.each([false, true])('loads a neighbouring HTML page ahead of the reader only on a desktop (phone: %s)', async phone => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query === MOBILE_MEDIA, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const original = cards[0]
+    cards[0] = { ...original, shuttleKind: 'oneshot' }
+    onTestFinished(() => { cards[0] = original })
+    await feedNamesReport()
+    workspace.open(cards[0])
+    await settle()
+    const key = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    const page = workspace.reader.host.get(key)!
+    expect(workspace.reader.document?.kind).toBe('family')
+    expect(!!page.content.querySelector('iframe')).toBe(!phone)
+    workspace.reader.openDocument(key)
+    await settle()
+    expect(page.content.querySelector('iframe')).not.toBeNull()
   })
 
   it('opens a constitution\'s report under the band, and keeps body links and embeds on its fiber page', async () => {

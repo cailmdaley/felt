@@ -1,6 +1,8 @@
 import { inLane } from './requestLanes.js'
 import { normalizeAbsolutePath } from './workspace/documents.js'
+import { fileKind } from './attachments.js'
 import { fileBytesUrl } from './utils.js'
+import { remotePage } from '../sdk/remotePage.js'
 
 /**
  * The document cache: the one reader of document content. Every surface that
@@ -421,6 +423,16 @@ export function forgetText(src: string): void {
 /** The text held for a document, however old, without a request. */
 export function recallText(src: string): TextBody | undefined {
   return entries.get(resourceKey(src))?.text?.value
+}
+
+/**
+ * Where a file opens in a tab of its own: an HTML page held here that declares
+ * itself a public page elsewhere opens at that page, anything else at its bytes.
+ */
+export function fileTabUrl(base: string, fullPath: string, owner: string): string {
+  const src = fileBytesUrl(base, fullPath, owner)
+  const html = fileKind(fullPath) === 'html' ? recallText(src)?.text : undefined
+  return (html && remotePage(html, [location.href, src])) || src
 }
 
 /**

@@ -81,7 +81,7 @@ All return an element except `createActionMenu`, which returns a controller, `{ 
 | `createActionMenu(fiber, client, options)` | `shuttle-action-menu` | the actions that fit the fiber, as a menu |
 | `createLifecycleBar(fiber, client, options)` | `shuttle-lifecycle-bar` | the main actions, as a toolbar |
 | `createComposer(fiber, client, options)` | `shuttle-composer` | a message box for the fiber |
-| `createTapestryFrame(fiber, client, options)` | `shuttle-tapestry-frame` | the fiber's report page, sandboxed |
+| `createTapestryFrame(fiber, client, options)` | `shuttle-tapestry-frame` | the fiber's report page, sandboxed, or the public page it declares |
 | `createTime(atMs, nowMs, options)` | `shuttle-time` | an age; `retimeAll(root, nowMs)` keeps a page's ages current |
 
 Style the parts with `data-slot`, and state with the attributes beside it: `data-attention`, `data-turn`, `data-kind`, `data-waiting`, `data-grouped` and `data-density`.

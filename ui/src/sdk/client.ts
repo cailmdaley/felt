@@ -217,6 +217,13 @@ export class ShuttleClient {
     return origin && origin !== 'local' ? `${url}&origin=${encodeURIComponent(origin)}` : url
   }
 
+  /** `GET /file`: a file's text on its owner. */
+  async fileText(path: string, origin?: string): Promise<string> {
+    const res = await this.#send(this.fileUrl(path, origin))
+    if (!res.ok) throw new DaemonRequestError(await responseError(res, 'File unavailable'), res.status)
+    return await res.text()
+  }
+
   /**
    * The URL of a file's bytes on its owner under a path-shaped address
    * (`GET /file-assets/{origin}/{path}`), from which a page's relative figures,

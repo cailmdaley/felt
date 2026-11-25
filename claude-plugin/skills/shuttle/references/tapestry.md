@@ -2,7 +2,7 @@
 
 The tapestry is the constitution's one page: what this work is, whole, as it stands. It says what was built or found, how the parts fit, how it is used and where it stands. It describes the work, never the latest stretch of it: a reader who has never seen the fiber should leave with the mental model, and one back after a week should find the same picture with its present state. Its form follows the work: a visual index to sub-fibers and findings, the slides of a talk being built, PDFs side by side for a paper review. The constitution's chat header shows its thumbnail; clicking opens it full-size.
 
-**When the human asks for a page to be embedded, the tapestry is that page and nothing else.** "Embed the slides", "make it the deck" or "just show the PDF" means pass the page through unchanged, filling the frame: no header, caption, strip of thumbnails, status or stamp above or below it, since each one takes space from the thing they asked to see. A deck built as one HTML file becomes `tapestry.html` itself; anything else gets a bare full-frame iframe. The rest of this reference applies when you compose the page, not when the human has named it.
+**When the human asks for a page to be embedded, the tapestry is that page and nothing else.** "Embed the slides", "make it the deck" or "just show the PDF" means pass the page through unchanged, filling the frame: no header, caption, strip of thumbnails, status or stamp above or below it, since each one takes space from the thing they asked to see. A deck built as one HTML file becomes `tapestry.html` itself; a page published elsewhere, such as a deck on GitHub Pages, is [declared as a public page](#a-page-published-elsewhere), never wrapped in an iframe; anything else gets a bare full-frame iframe. The rest of this reference applies when you compose the page, not when the human has named it.
 
 ## The first screen
 
@@ -122,6 +122,25 @@ A sibling `tapestry.html` is the page a constitution opens on, without a directi
 An explicit `:::{embed} tapestry.html` in the fiber body also declares it there. Existing `:::{embed} report.html` declarations continue to resolve.
 
 Reference a sibling page with `href="./name.mp3"` or its unique basename in `<code>`; the reader makes it a page link with inline play for audio ([companion references](https://cailmdaley.github.io/felt/concepts/companions/#references-between-pages)).
+
+### A page published elsewhere
+
+Shuttle shows `tapestry.html` in a sandbox with no origin of its own: its scripts run, but it has no cookies or storage, and every frame inside it inherits the same seal.
+A page that lives at a public address and needs storage, an origin of its own, or speed (a Reveal.js deck, which reads `sessionStorage` on a phone and stops navigating without it, a notebook, a dashboard) fails inside that seal, so declare it instead of wrapping it in an iframe:
+
+```html
+<!doctype html>
+<html><head>
+  <title>The conference talk</title>
+  <meta name="shuttle-page" content="https://example.github.io/talks/deck/">
+</head><body>
+  <p><a href="https://example.github.io/talks/deck/">Open the talk →</a></p>
+</body></html>
+```
+
+Wherever the board would show the tapestry (a thread, the reader, a thread's own page, Open in new tab), it shows that address instead, at the page's own origin, as a browser tab would; its thumbnail is a card naming the site. A sent HTML file can declare a page the same way.
+The `<meta>` goes in `<head>`. Only a public `https` address counts: an IP address, the board's own host, or a loopback, private or tailnet name (`localhost`, a single-label name, `*.local`, `*.internal`, `*.ts.net`) is ignored, and the file shows sealed as usual.
+The page has to allow being framed (GitHub Pages does). Keep a body for anyone who opens the file outside Shuttle; a link to the page is enough.
 
 ## Copy-paste primitives
 

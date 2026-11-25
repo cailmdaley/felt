@@ -2,8 +2,9 @@
  * Shared renderer for document workspace pages and their thumbnails.
  *
  * Images and audio use native elements, markdown and text render in a scrolling
- * pane, HTML renders in a scrollable iframe, and PDF uses the lazy PDF.js
- * viewer. HTML, markdown, and text subscribe to the
+ * pane, HTML renders in a scrollable iframe (a page that declares itself a
+ * public page elsewhere, at that page's address: `remotePage`), and PDF uses
+ * the lazy PDF.js viewer. HTML, markdown, and text subscribe to the
  * shared conditional file poller; their DOM changes only when the body does.
  *
  * Native elements stream owner-routed `GET /api/v1/file` by URL; every other
@@ -15,6 +16,7 @@
 import './FileViewerPanel.css'
 import './prose.css'
 import { mediaTime } from '../sdk/civilDay.js'
+import { remotePage, remotePageFrame } from '../sdk/remotePage.js'
 import { thumbnailPreviews } from './workspace/thumbnailPreview.js'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
@@ -277,9 +279,17 @@ export function buildFileViewer(
 type MediaState = { media: HTMLMediaElement; active: boolean; inline: boolean }
 const mediaViewers = new WeakMap<HTMLElement, MediaState>()
 const players = new Set<HTMLMediaElement>()
-type EmbeddedMediaState = { active: boolean; bridge: FrameBridge | null }
+type EmbeddedMediaState = { active: boolean; bridge: FrameBridge | null; shown(active: boolean): void }
 const embeddedMediaViewers = new WeakMap<HTMLElement, EmbeddedMediaState>()
 const embeddedPlayers = new Set<EmbeddedMediaState>()
+/**
+ * Each HTML document runs in one frame at a time. Its viewers, by its URL:
+ * the one shown holds the frame, and a hidden one holds it only while no
+ * other viewer does. A remote page runs only while shown, since the board
+ * cannot reach into it to pause it.
+ */
+type DocumentHolder = { readonly active: boolean; readonly live: boolean; release(): void; restore(): void }
+const documentHolders = new Map<string, Set<DocumentHolder>>()
 function pauseOtherPlayers(except?: EmbeddedMediaState): void {
   for (const media of players) media.pause()
   for (const state of embeddedPlayers) if (state !== except) state.bridge?.command('pause')
@@ -403,11 +413,19 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       if (disposed) return
       if (!body) { finish(false); return }
       options.onThumbnailSource?.(body.text, body.etag)
+      // A page declared remote is not loaded for a preview: its card names it and its site.
+      const remote = remotePage(body.text, [location.href, src])
+      if (remote) {
+        wrap.className = 'kbn-fileview-thumbnail kbn-thumbnail-remote'
+        duration.textContent = new URL(remote).host
+        finish(true)
+        return
+      }
       // An empty frame has already loaded about:blank; only the page's own load counts.
       frame.addEventListener('load', () => finish(true), { once: true })
       frame.srcdoc = htmlWithBase(thumbnailPreviews.get(src, body.text, body.etag, options.keepMedia), src)
+      wrap.append(frame)
     })
-    wrap.append(frame)
   } else if (kind === 'audio') {
     // A recording is its face: the title and the duration its peek declares, with no media element.
     void peek(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(first => {
@@ -581,7 +599,7 @@ export function suspendFileViewer(viewer: HTMLElement | null): void {
     const state = mediaViewers.get(viewer)
     if (state) { state.active = false; state.inline = false; state.media.pause() }
     const embedded = embeddedMediaViewers.get(viewer)
-    if (embedded) { embedded.active = false; embedded.bridge?.command('active', { active: false }) }
+    if (embedded) { embedded.active = false; embedded.bridge?.command('active', { active: false }); embedded.shown(false) }
   }
 }
 
@@ -593,7 +611,7 @@ export function resumeFileViewer(viewer: HTMLElement | null): void {
     const state = mediaViewers.get(viewer)
     if (state) state.active = true
     const embedded = embeddedMediaViewers.get(viewer)
-    if (embedded) { embedded.active = true; embedded.bridge?.command('active', { active: true }) }
+    if (embedded) { embedded.active = true; embedded.bridge?.command('active', { active: true }); embedded.shown(true) }
   }
 }
 
@@ -612,7 +630,7 @@ function buildHtmlViewer(
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
-  const embedded: EmbeddedMediaState = { active: options.active !== false, bridge: null }
+  const embedded: EmbeddedMediaState = { active: options.active !== false, bridge: null, shown: () => {} }
   embeddedMediaViewers.set(wrap, embedded)
   embeddedPlayers.add(embedded)
   const veil = loadingVeil(fullPath, options)
@@ -764,7 +782,8 @@ function buildHtmlViewer(
     fitted = height
     wrap.style.height = `${height}px`
   }
-  let iframe = createFrame((frame, bridge) => {
+  /** The first page a served frame shows, ready: the veil lifts and the host binds to it. */
+  const firstReady = (frame: HTMLIFrameElement, bridge: FrameBridge): void => {
     if (!hasContent || initialLoadHandled || iframe !== frame) return
     initialLoadHandled = true
     embedded.bridge = bridge
@@ -775,83 +794,154 @@ function buildHtmlViewer(
     veil.remove()
     onFrameLoad?.(frame, false)
     options.onState?.({ status: 'ready' })
-  })
+  }
+  // The served frame joins the wrap with the first page it shows.
+  let iframe = createFrame(firstReady)
   let currentBridge = frameBridge(iframe)!
-  wrap.append(iframe, pdfLayer, veil)
+  wrap.append(pdfLayer, veil)
+  /** A page declared remote, framed as itself in the served frame's place. */
+  let remote: { url: string; frame: HTMLIFrameElement } | null = null
+  /** The page as last read, shown again when this viewer takes the document back. */
+  let latest: string | null = null
+  const holders = documentHolders.get(src) ?? documentHolders.set(src, new Set()).get(src)!
+  const holder: DocumentHolder = {
+    get active() { return embedded.active },
+    get live() { return !!remote || iframe.parentNode === wrap },
+    release: () => { dropServed(); remote?.frame.remove(); remote = null },
+    restore: () => { if (latest !== null) show(latest) },
+  }
+  holders.add(holder)
+  /** A viewer of the document still shown that another took it from. */
+  const heir = (): DocumentHolder | undefined => [...holders].find(other => other !== holder && other.active && !other.live)
+  embedded.shown = active => {
+    if (active) { if (!holder.live) holder.restore(); return }
+    if (!holder.live) return
+    // Hidden, it gives the document back to a viewer still shown, and keeps no remote page.
+    const next = heir()
+    if (next || remote) holder.release()
+    next?.restore()
+  }
+  /** The served frame and whatever was staged for it leave; a fresh one waits, unattached, for the next page. */
+  const dropServed = (): void => {
+    generation++
+    stagingBridge?.dispose()
+    stagingFrame?.remove()
+    stagingFrame = null
+    stagingBridge = null
+    for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove() }
+    pdfs.clear()
+    pdfWeights.clear()
+    if (iframe.parentNode === wrap) {
+      currentBridge.command('pause')
+      currentBridge.dispose()
+      iframe.remove()
+      iframe = createFrame(firstReady)
+      currentBridge = frameBridge(iframe)!
+    }
+    embedded.bridge = null
+    hasContent = false
+    initialLoadHandled = false
+  }
+  const showRemote = (url: string): void => {
+    if (remote?.url === url) return
+    dropServed()
+    remote?.frame.remove()
+    const frame = remotePageFrame(url, basename(fullPath))
+    frame.className = 'kbn-fileview-frame'
+    remote = { url, frame }
+    frame.addEventListener('load', () => {
+      if (disposed || remote?.frame !== frame) return
+      initialLoadHandled = true
+      failed = false
+      veil.remove()
+      onFrameLoad?.(frame, false)
+      options.onState?.({ status: 'ready' })
+    }, { once: true })
+    wrap.prepend(frame)
+  }
+
+  const show = (html: string): void => {
+    options.onThumbnailSource?.(html, recallText(src)?.etag)
+    veil.classList.remove('kbn-fileview-loading-error')
+    latest = html
+    const url = remotePage(html, [location.href, src])
+    // Hidden, it waits while another viewer runs the document, and runs no remote page.
+    if (!embedded.active && (url || [...holders].some(other => other !== holder && other.live))) { holder.release(); return }
+    for (const other of holders) if (other !== holder) other.release()
+    if (url) { showRemote(url); return }
+    if (remote) { remote.frame.remove(); remote = null; initialLoadHandled = false }
+    const withBase = htmlWithBase(html, src)
+    const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(options.fit ? pinViewportUnits(withBase, window.innerHeight) : withBase)
+    const weight = pageWeight(html)
+    if (!hasContent) {
+      hasContent = true
+      byteWeights.set(iframe, weight)
+      wrap.prepend(iframe)
+      iframe.srcdoc = srcdoc
+      return
+    }
+
+    stagingBridge?.dispose()
+    stagingFrame?.remove()
+    // The page on show measures where its passages stand, for the rewrite to keep the reader beside theirs.
+    currentBridge.command('anchors')
+    const currentGeneration = ++generation
+    let loaded = false
+    const next = createFrame((frame, bridge) => {
+      if (loaded || currentGeneration !== generation) return
+      loaded = true
+      const position = initialLoadHandled ? currentBridge.position : undefined
+      // The reader stays beside the passage they were reading, whatever the rewrite changed around it.
+      const before = currentBridge.anchors
+      const scroller = options.fit && initialLoadHandled ? scrollingAncestor(wrap) : null
+      if (scroller) {
+        const y = scroller.getBoundingClientRect().top - wrap.getBoundingClientRect().top
+        const top = scroller.scrollTop + carryReading(before, bridge.anchors, y) - y
+        carried = y > 0 && top !== scroller.scrollTop ? { scroller, top, at: 0 } : null
+      }
+      currentBridge.command('pause')
+      currentBridge.dispose()
+      for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove() }
+      pdfs.clear()
+      pdfWeights.clear()
+      currentBridge = bridge
+      embedded.bridge = bridge
+      bridge.command('active', { active: embedded.active })
+      if (options.fit) bridge.command('fit')
+      // The staged page has loaded at the size it will show at: a shorter one clamps.
+      if (position) bridge.command('restore', { x: position.x, y: carryReading(before, bridge.anchors, position.y), clamp: true })
+      // Moving a frame reloads its document, so the staged frame already sits
+      // where it will stay and the swap only removes its predecessor.
+      iframe.remove()
+      iframe = frame
+      if (carried) { carried.scroller.scrollTop = carried.top; carried.at = carried.scroller.scrollTop }
+      htmlWeight = frameWeights.get(frame) ?? byteWeights.get(frame) ?? 1
+      publishWeight()
+      bridge.command('pdf:scan')
+      stagingFrame = null
+      stagingBridge = null
+      frame.style.cssText = ''
+      const firstVisibleContent = !initialLoadHandled
+      if (firstVisibleContent) { initialLoadHandled = true; veil.remove() }
+      failed = false
+      onFrameLoad?.(iframe, !firstVisibleContent)
+      options.onState?.({ status: 'ready' })
+    })
+    next.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none'
+    stagingFrame = next
+    byteWeights.set(next, weight)
+    stagingBridge = frameBridge(next) ?? null
+    iframe.before(next)
+    next.srcdoc = srcdoc
+  }
 
   const stop = watchLiveFile(
     src,
-    (html) => {
-      if (disposed) return
-      options.onThumbnailSource?.(html, recallText(src)?.etag)
-      veil.classList.remove('kbn-fileview-loading-error')
-      const withBase = htmlWithBase(html, src)
-      const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(options.fit ? pinViewportUnits(withBase, window.innerHeight) : withBase)
-      const weight = pageWeight(html)
-      if (!hasContent) {
-        hasContent = true
-        byteWeights.set(iframe, weight)
-        iframe.srcdoc = srcdoc
-        return
-      }
-
-      stagingBridge?.dispose()
-      stagingFrame?.remove()
-      // The page on show measures where its passages stand, for the rewrite to keep the reader beside theirs.
-      currentBridge.command('anchors')
-      const currentGeneration = ++generation
-      let loaded = false
-      const next = createFrame((frame, bridge) => {
-        if (loaded || currentGeneration !== generation) return
-        loaded = true
-        const position = initialLoadHandled ? currentBridge.position : undefined
-        // The reader stays beside the passage they were reading, whatever the rewrite changed around it.
-        const before = currentBridge.anchors
-        const scroller = options.fit && initialLoadHandled ? scrollingAncestor(wrap) : null
-        if (scroller) {
-          const y = scroller.getBoundingClientRect().top - wrap.getBoundingClientRect().top
-          const top = scroller.scrollTop + carryReading(before, bridge.anchors, y) - y
-          carried = y > 0 && top !== scroller.scrollTop ? { scroller, top, at: 0 } : null
-        }
-        currentBridge.command('pause')
-        currentBridge.dispose()
-        for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove() }
-        pdfs.clear()
-        pdfWeights.clear()
-        currentBridge = bridge
-        embedded.bridge = bridge
-        bridge.command('active', { active: embedded.active })
-        if (options.fit) bridge.command('fit')
-        // The staged page has loaded at the size it will show at: a shorter one clamps.
-        if (position) bridge.command('restore', { x: position.x, y: carryReading(before, bridge.anchors, position.y), clamp: true })
-        // Moving a frame reloads its document, so the staged frame already sits
-        // where it will stay and the swap only removes its predecessor.
-        iframe.remove()
-        iframe = frame
-        if (carried) { carried.scroller.scrollTop = carried.top; carried.at = carried.scroller.scrollTop }
-        htmlWeight = frameWeights.get(frame) ?? byteWeights.get(frame) ?? 1
-        publishWeight()
-        bridge.command('pdf:scan')
-        stagingFrame = null
-        stagingBridge = null
-        frame.style.cssText = ''
-        const firstVisibleContent = !initialLoadHandled
-        if (firstVisibleContent) { initialLoadHandled = true; veil.remove() }
-        failed = false
-        onFrameLoad?.(iframe, !firstVisibleContent)
-        options.onState?.({ status: 'ready' })
-      })
-      next.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none'
-      stagingFrame = next
-      byteWeights.set(next, weight)
-      stagingBridge = frameBridge(next) ?? null
-      iframe.before(next)
-      next.srcdoc = srcdoc
-    },
+    html => { if (!disposed) show(html) },
     (error) => {
       if (disposed) return
       failed = true
-      if (!hasContent) showLoadError(veil, wrap, fullPath, error)
+      if (!hasContent && !remote) showLoadError(veil, wrap, fullPath, error)
       options.onState?.({ status: 'error', error, hasContent: initialLoadHandled })
     },
     {
@@ -872,10 +962,14 @@ function buildHtmlViewer(
     stagingFrame?.remove()
     currentBridge.command('pause')
     currentBridge.dispose()
+    remote?.frame.remove()
     for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.() }
     pdfs.clear()
     embeddedPlayers.delete(embedded)
     embeddedMediaViewers.delete(wrap)
+    holders.delete(holder)
+    if (!holders.size) documentHolders.delete(src)
+    else if (holder.live) heir()?.restore()
   })
   return wrap
 }

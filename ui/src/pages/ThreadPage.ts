@@ -6,6 +6,7 @@ import { conversationDestinations, conversationDevice, conversationOpening, CONV
 import { getDaemonJson, postDaemonJson } from '../board/daemonApi.js'
 import type { MapFile } from '../board/family/model.js'
 import { buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../board/FileViewerPanel.js'
+import { fileTabUrl } from '../board/documentResources.js'
 import { HumanMessageIds, repeatNotice } from '../board/humanMessageId.js'
 import { dispatchFailureMessage, isAgentCard, postForceDispatch, type DispatchFailureBody } from '../board/KanbanModalShared.js'
 import { hasLiveWorker, type KanbanCard } from '../board/KanbanTypes.js'
@@ -247,7 +248,7 @@ export class ThreadPage {
         const file = parseDocKey(key)
         if (!file) return
         if (isChangeFile(file.path)) { this.openChangeFile(file); return }
-        openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
+        openFloating(fileTabUrl(this.opts.base, file.path, file.owner))
       },
       lead: card => this.leads.of(card),
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
@@ -774,7 +775,7 @@ export class ThreadPage {
         const file = parseDocKey(doc)
         if (!file) return
         if (isChangeFile(file.path)) { this.openChangeFile(file); return }
-        openFloating(fileBytesUrl(this.opts.base, file.path, file.owner))
+        openFloating(fileTabUrl(this.opts.base, file.path, file.owner))
       },
       edits: false,
     }

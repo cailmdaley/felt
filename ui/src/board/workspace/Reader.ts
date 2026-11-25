@@ -14,6 +14,7 @@ import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { announce, prepareAnnouncements } from '@ui-sdk/core'
 import { fileBytesUrl, showToast } from '../utils.js'
+import { fileTabUrl } from '../documentResources.js'
 import { instantStamp } from '../../sdk/civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
@@ -592,10 +593,10 @@ export class Reader {
   private fillMenu(doc: WorkspaceDocument): void {
     const menu = this.menuContent
     menu.replaceChildren()
-    const url = isDrawn(doc) ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
+    const url = isDrawn(doc) ? window.location.href : fileTabUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of (doc.kind === 'family' ? [['Open in new tab', false]] : [['Open in new tab', false], ['Download', true]]) as Array<[string, boolean]>) {
       const a = element('a', 'ws-menu-item', label)
-      a.href = isDrawn(doc) && download ? fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner) : url
+      a.href = download ? fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner) : url
       if (download) a.download = doc.name
       else { a.target = '_blank'; a.rel = 'noopener' }
       menu.append(a)

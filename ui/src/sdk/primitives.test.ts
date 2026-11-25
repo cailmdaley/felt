@@ -184,18 +184,37 @@ describe('createFilePreview', () => {
 })
 
 describe('createTapestryFrame', () => {
-  it('frames the tapestry its owner found, sandboxed, or says there is none', () => {
-    const client = new ShuttleClient({ base: 'http://hub:4000' })
+  it('frames the tapestry its owner found, sandboxed, once it is read, or says there is none', async () => {
+    const fetch = vi.fn(async () => new Response('<!doctype html><title>Fit</title><p>The fit</p>')) as unknown as typeof globalThis.fetch
+    const client = new ShuttleClient({ base: 'http://hub:4000', fetch })
     const framed = createTapestryFrame(fiber({ report_path: '/s/work/fit-model/tapestry.html' }), client)
+    expect(framed.hasAttribute('data-empty')).toBe(false)
+    await vi.waitFor(() => expect(framed.querySelector('iframe[data-slot="frame"]')).not.toBeNull())
     const frame = framed.querySelector<HTMLIFrameElement>('iframe[data-slot="frame"]')!
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('http://hub:4000/api/v1/file?path=%2Fs%2Fwork%2Ffit-model%2Ftapestry.html&origin=remote', undefined)
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
     expect(frame.src).toBe('http://hub:4000/api/v1/file-assets/remote/s/work/fit-model/tapestry.html')
     expect(new URL('fig.png', frame.src).href).toBe('http://hub:4000/api/v1/file-assets/remote/s/work/fit-model/fig.png')
-    expect(framed.hasAttribute('data-empty')).toBe(false)
     const empty = createTapestryFrame(fiber(), client, { emptyText: 'Nothing yet' })
     expect(empty.hasAttribute('data-empty')).toBe(true)
     expect(empty.querySelector('[data-slot="empty"]')!.textContent).toBe('Nothing yet')
     unskinned(framed)
+  })
+
+  it('frames a tapestry that declares itself a public page as that page, at its own origin', async () => {
+    const declared = (url: string): Response => new Response(`<!doctype html><head><meta name="shuttle-page" content="${url}"></head><body></body>`)
+    const at = (url: string): ShuttleClient => new ShuttleClient({ base: 'http://hub.example.org:4000', fetch: (async () => declared(url)) as unknown as typeof globalThis.fetch })
+    const remote = createTapestryFrame(fiber({ report_path: '/s/work/talk/tapestry.html' }), at('https://talks.example.org/deck/'), { title: 'The talk' })
+    await vi.waitFor(() => expect(remote.querySelector('iframe[data-slot="frame"]')).not.toBeNull())
+    const frame = remote.querySelector<HTMLIFrameElement>('iframe[data-slot="frame"]')!
+    expect(frame.getAttribute('src')).toBe('https://talks.example.org/deck/')
+    expect(frame.getAttribute('sandbox')).toContain('allow-same-origin')
+    expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+    expect(frame.title).toBe('The talk')
+    expect(remote.querySelectorAll('iframe')).toHaveLength(1)
+    // The daemon's own host is never a remote page.
+    const served = createTapestryFrame(fiber({ report_path: '/s/work/talk/tapestry.html' }), at('https://hub.example.org/deck/'))
+    await vi.waitFor(() => expect(served.querySelector('iframe[data-slot="frame"]')?.getAttribute('sandbox')).toBe('allow-scripts'))
   })
 })
 
