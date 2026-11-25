@@ -9,6 +9,7 @@ import { PageFeed, POLL_MS, SENDS_POLL_MS } from './feed.js'
 import { mountPage } from './mount.js'
 import { deskHref, parsePageRoute, threadHref } from './route.js'
 import { AUTO_ADVANCE_IDLE_MS, ThreadPage } from './ThreadPage.js'
+import { LANDING_MS } from '../board/workspace/DocumentBridge.js'
 
 const dialogIn = (): HTMLElement | null => document.querySelector<HTMLElement>('.kbn-confirm')
 /** Presses the confirmation's Cancel or its own word. */
@@ -926,6 +927,72 @@ describe('the thread page', () => {
     expect(changesPane.hidden).toBe(false)
     expect(changesPane.querySelector('.pg-changes-name')!.textContent).toBe('pr-7.change.json')
     expect(requests.some(req => decodeURIComponent(req.url).includes('/pr-7.change.json'))).toBe(true)
+  })
+
+  it('on a phone a file shown full screen closes on the browser\'s back after a reload left a stale entry under it; its bar\'s back goes on through the file\'s own history, and a change linked from it opens on the page', async () => {
+    vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} unobserve() {} })
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('max-width'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as unknown as MediaQueryList)
+    const report = '<!doctype html><a href="pr-7.change.json">PR 7</a>'
+    sentFiles = [{ fullPath: '/tmp/report.html', basename: 'report.html', timestamp: now - 1_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: true }]
+    serveFiles = url => {
+      const decoded = decodeURIComponent(url), html = decoded.includes('report.html') ? report : decoded.includes('tapestry.html') ? '<!doctype html><p>Tapestry</p>' : null
+      if (html !== null) {
+        if (url.startsWith('/api/v1/file-info')) return new Response(JSON.stringify({ exists: true, size: html.length, modified_at: Math.floor(now / 1000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+      }
+      if (decoded.includes('pr-7.change.json')) return new Response(JSON.stringify({ version: 2, title: 'PR 7', repo: { name: 'spectra', dir: '/fixture-project', forge_url: null }, base: 'c'.repeat(40), head: 'd'.repeat(40), base_ref: 'main', head_ref: 'pr', commits: [], files: [], story: null }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response('{}', { status: 404 })
+    }
+    // The page reloaded on the entry a layer had pushed, the layer gone with the reload.
+    window.history.pushState({ threadPageFull: true }, '')
+    const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    await filesTab(page)
+    const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
+    unfold.querySelectorAll<HTMLButtonElement>('.uf-steps .uf-control')[2].click()
+    await waitUntil(() => unfold.querySelector('.uf-name')?.textContent === 'report.html')
+    const showFull = async (): Promise<HTMLElement> => {
+      unfold.querySelector<HTMLButtonElement>('.uf-full')!.click()
+      const layer = page.el.querySelector<HTMLElement>('.pg-full')!
+      expect(layer).not.toBeNull()
+      return layer
+    }
+    // jsdom steps its history on a timer, which this suite fakes.
+    const popped = async (): Promise<void> => {
+      let heard = false
+      window.addEventListener('popstate', () => { heard = true }, { once: true })
+      for (let ms = 0; !heard && ms < 100; ms++) await vi.advanceTimersByTimeAsync(1)
+      expect(heard).toBe(true)
+    }
+    const fromLayer = (layer: HTMLElement, type: string, payload: Record<string, unknown> = {}): void => {
+      window.dispatchEvent(new MessageEvent('message', { data: { protocol: 'shuttle-document', version: 1, type, payload }, source: layer.querySelector('iframe')!.contentWindow }))
+    }
+
+    // The browser's back lands on the stale entry, and the layer closes all the same.
+    await showFull()
+    window.history.back()
+    await popped()
+    expect(page.el.querySelector('.pg-full')).toBeNull()
+
+    // A change linked from the file opens on the page, the layer going back to show it.
+    let layer = await showFull()
+    fromLayer(layer, 'ready')
+    fromLayer(layer, 'navigate', { href: 'pr-7.change.json' })
+    await popped()
+    expect(page.el.querySelector('.pg-full')).toBeNull()
+    await waitUntil(() => page.el.querySelector('.pg-changes-name')?.textContent === 'pr-7.change.json')
+    expect(page.el.querySelector<HTMLElement>('.pg-changes')!.hidden).toBe(false)
+
+    // The bar's back goes on through a deck's own steps, and closes the layer once it hears nothing more.
+    await filesTab(page)
+    await waitUntil(() => !!unfold.querySelector('.uf-full'))
+    layer = await showFull()
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+    layer.querySelector<HTMLButtonElement>('.pg-back')!.click()
+    fromLayer(layer, 'popped')
+    fromLayer(layer, 'popped')
+    expect(back).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(LANDING_MS)
+    expect(page.el.querySelector('.pg-full')).toBeNull()
   })
 
   describe('its lifecycle acts', () => {

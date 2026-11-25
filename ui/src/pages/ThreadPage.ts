@@ -18,6 +18,7 @@ import { ChannelStream, withdraws } from '../board/views/ChannelStream.js'
 import { Voice } from '../board/voice.js'
 import { createWorkerStarter } from '../board/workerStart.js'
 import { parseRoute } from '../board/workspace/boardRoute.js'
+import { FRAME_STEPS, LANDING_MS, onFramePopped } from '../board/workspace/DocumentBridge.js'
 import { changeReviewTarget } from '../board/workspace/changeReviewTarget.js'
 import { markSeen, unseenSince } from '../board/workspace/DocumentSeen.js'
 import { changeKey, docKey, fiberKey, isExternalHref, linkedFile, parseDocKey, type DocKey } from '../board/workspace/documents.js'
@@ -31,7 +32,7 @@ import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } fro
 import { VoiceStrip, voiceLine } from '../board/workspace/voiceStrip.js'
 import { WorkerActions, type StartWorker } from '../board/workspace/workerActions.js'
 import '../board/workspace/dock.css'
-import { MOBILE_MEDIA } from '../board/mobile.js'
+import { isMobileViewport } from '../board/mobile.js'
 import type { PageFeed } from './feed.js'
 import { go } from './go.js'
 import { PageActions, pageActLabel, pageActsFor } from './pageActions.js'
@@ -67,9 +68,6 @@ const fiberPath = (card: KanbanCard): string => {
   if (card.fiberDir) return `${card.fiberDir}/${card.path.endsWith('.md') ? card.path.split('/').at(-1) : `${card.id.split('/').at(-1)}.md`}`
   return card.path.startsWith('/') ? card.path : `${card.feltStore ?? ''}/${card.path}`
 }
-
-/** The history entry of a file shown full screen over the page. */
-const FULL_STATE = 'threadPageFull'
 
 /**
  * Opens a file in a 3/4-screen floating window (RexWeb Popup on Mac, normal
@@ -151,8 +149,8 @@ export class ThreadPage {
   private mode: ThreadMode = 'files'
   private modeCardUid: string | null = null
   private selectedChangeFile: { path: string; owner: string } | null = null
-  /** The file shown full screen over the page on a phone. */
-  private full: { layer: HTMLElement; viewer: HTMLElement } | null = null
+  /** The file shown full screen over the page on a phone; `steps` counts the back its bar asked for through the file's own history. */
+  private full: { layer: HTMLElement; viewer: HTMLElement; steps?: number; landing?: number } | null = null
   private changesViewer: HTMLElement | null = null
   private changesKey: string | null = null
   private usage: TranscriptUsage | null = null
@@ -420,12 +418,14 @@ export class ThreadPage {
   /**
    * A file shown full: a window of its own, or on a phone a layer over the
    * page with one history entry, whose back (the bar's or the browser's)
-   * returns to the page as it was.
+   * returns to the page as it was. Any step the browser takes off that entry
+   * closes the layer, a reloaded one's included; the bar's back goes on
+   * through the file's own history (a deck's slides) to the page.
    */
   private showFull(key: DocKey): void {
     const file = parseDocKey(key)
     if (!file) return
-    if (!window.matchMedia(MOBILE_MEDIA).matches) { void fileTabUrl(this.opts.base, file.path, file.owner).then(openFloating); return }
+    if (!isMobileViewport()) { void fileTabUrl(this.opts.base, file.path, file.owner).then(openFloating); return }
     this.closeFull()
     const card = this.feed.card(), name = card ? slug(card) : 'thread'
     const layer = document.createElement('section'), bar = document.createElement('nav'), back = document.createElement('button'), title = document.createElement('span')
@@ -435,7 +435,7 @@ export class ThreadPage {
     back.className = 'pg-back'
     back.textContent = `← ${name}`
     back.setAttribute('aria-label', `Back to ${name}`)
-    back.addEventListener('click', () => window.history.back())
+    back.addEventListener('click', () => this.backFull())
     title.className = 'pg-bar-title'
     title.textContent = basename(file.path)
     title.title = file.path
@@ -444,16 +444,28 @@ export class ThreadPage {
     layer.append(bar, viewer)
     this.el.append(layer)
     this.full = { layer, viewer }
-    window.history.pushState({ ...window.history.state, [FULL_STATE]: true }, '')
-    window.addEventListener('popstate', this.leaveFull)
+    window.history.pushState(window.history.state, '')
+    // The page itself moves no history, so the browser leaving the layer's entry is the only step this page hears.
+    window.addEventListener('popstate', this.closeFull)
+    onFramePopped(this.framePopped)
   }
-  /** The browser moved off the full file's entry: the page shows again. */
-  private readonly leaveFull = (event: PopStateEvent): void => {
-    if (!(event.state as Record<string, unknown> | null)?.[FULL_STATE]) this.closeFull()
+  /** The layer's back: one step, and on through the file's own history until it leaves the layer's entry; one it never hears land closes the layer. */
+  private backFull(): void {
+    const full = this.full
+    if (!full) return
+    full.steps ??= 0
+    window.history.back()
+    clearTimeout(full.landing)
+    full.landing = window.setTimeout(this.closeFull, LANDING_MS)
   }
-  private closeFull(): void {
-    window.removeEventListener('popstate', this.leaveFull)
+  private readonly framePopped = (): void => {
+    if (this.full?.steps !== undefined && ++this.full.steps <= FRAME_STEPS) this.backFull()
+  }
+  private readonly closeFull = (): void => {
+    window.removeEventListener('popstate', this.closeFull)
+    onFramePopped(null)
     if (!this.full) return
+    clearTimeout(this.full.landing)
     disposeFileViewer(this.full.viewer)
     this.full.layer.remove()
     this.full = null
@@ -998,7 +1010,8 @@ export class ThreadPage {
     const from = parseDocKey(source)
     const file = from && linkedFile(from, href, window.location.href)
     if (file) {
-      if (isChangeFile(file.path)) { this.openChangeFile(file); return }
+      // A change opens in the page's own place: from the full-screen layer, the layer goes back to show it.
+      if (isChangeFile(file.path)) { if (this.full) this.backFull(); this.openChangeFile(file); return }
       void fileTabUrl(this.opts.base, file.path, file.owner, file.hash).then(url => window.open(url, '_blank', 'noopener,noreferrer'))
     } else if (isExternalHref(href)) window.open(href, '_blank', 'noopener')
   }

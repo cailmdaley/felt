@@ -63,9 +63,11 @@ path, so the bundle's relative asset base holds:
   and after a Rex restart, respects manual tab closure on subsequent
   reconciles, and reopens it on `POST /api/v1/go {"target": "map"}`.
 
-A page never touches the history API, voice, Rex focus or swipe handling. It
-moves Rex with one verb, [`POST /api/v1/go`](../reference/api.md#board), and
-only when its address carries `in=rex`; without it, going to another fiber
+A page never touches voice, Rex focus or swipe handling, and touches the
+history API only for the thread page's one entry, a file shown full screen on a
+phone ([Where back goes](navigation.md)). It moves Rex with one verb,
+[`POST /api/v1/go`](../reference/api.md#board), and only when its address
+carries `in=rex`; without it, going to another fiber
 opens that fiber's page in place. `ui/test/pagesImports.test.ts` fails if the
 pages entry ever loads the workspace, the board shell, its history or voice.
 

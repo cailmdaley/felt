@@ -125,15 +125,24 @@ export function registerMapViewJourneys(test) {
     await page.waitForTimeout(100)
     const [barTop, scrollTop] = await Promise.all([bar.boundingBox(), scroller.boundingBox()]).then(([b, s]) => [Math.round(b.y), Math.round(s.y)])
     assert.equal(barTop, scrollTop, 'the bar is pinned to the top of the scroll')
-    // → and ← step from the page; the board takes neither as back.
+    // → and ← step, from the page and from inside the file; the board takes neither as back.
     const at = page.url()
     await page.keyboard.press('ArrowRight')
     assert.deepEqual(await where(), ['report.html', '2 / 6'])
     // The report itself shows, not a frame left empty.
     assert.equal(await page.frameLocator('.ws-page.ws-selected .uf-page iframe').locator('h1').textContent(), 'Report: Pipeline repository steward')
     await view(page).locator('.uf-page iframe').waitFor()
-    // A press on the page opens it full screen; the keys reach the unfolded page by focus.
-    await view(page).locator('.uf-page').focus()
+    if (device === 'desktop') {
+      // On a computer the unfolded page is live: a press inside it is the page's, and its keys come back to the bar.
+      assert.equal(await view(page).locator('.uf-cover').count(), 0)
+      await page.frameLocator('.ws-page.ws-selected .uf-page iframe').locator('body').click()
+    } else {
+      // On a phone a pane over the page takes the press for full screen; the page under it is inert, the bar's full screen named for it.
+      assert.equal(await view(page).locator('.uf-cover').getAttribute('aria-hidden'), 'true')
+      assert.equal(await view(page).locator('.uf-page > :first-child').evaluate(el => el.inert), true)
+      assert.equal(await bar.locator('.uf-full').getAttribute('aria-label'), 'Open report.html full screen')
+      await view(page).locator('.uf-page').focus()
+    }
     await page.keyboard.press('ArrowLeft')
     await until(page, () => document.querySelector('.ws-page.ws-selected .uf-bar .uf-count')?.textContent === '1 / 6')
     await page.keyboard.press('ArrowLeft')

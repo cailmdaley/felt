@@ -82,6 +82,26 @@ describe('files that unfold in place', () => {
     unfold.dispose()
   })
 
+  it('leaves a framed page unfolded on a computer live; on a phone a pane over it takes the press to full screen, the page under it inert, the bar\'s full screen its one named control', () => {
+    const matchMedia = vi.spyOn(window, 'matchMedia')
+    for (const phone of [false, true]) {
+      matchMedia.mockImplementation(query => ({ matches: phone, media: query }) as MediaQueryList)
+      const full = vi.fn(), unfold = new Unfold({ shuttleBase: '', full })
+      document.body.append(unfold.el)
+      unfold.update(files)
+      unfold.unfold('host:/w/a.html')
+      const cover = unfold.el.querySelector<HTMLElement>('.uf-page > .uf-cover'), viewer = unfold.el.querySelector<HTMLElement>('.uf-page > :first-child')!
+      expect([!!cover, viewer.inert]).toStrictEqual([phone, phone])
+      expect(unfold.el.querySelector('.uf-full')!.getAttribute('aria-label')).toBe('Open a.html full screen')
+      if (!cover) continue
+      expect(cover.getAttribute('aria-hidden')).toBe('true')
+      expect(cover.matches('button, [tabindex], [aria-label]')).toBe(false)
+      cover.click()
+      expect(full).toHaveBeenCalledExactlyOnceWith('host:/w/a.html')
+      unfold.dispose()
+    }
+  })
+
   it('keeps its cards in place across an update with the same files, focus included, and folds when the unfolded file is gone without taking the focus', () => {
     const { unfold } = made()
     const first = unfold.el.querySelector<HTMLElement>('.uf-card')!

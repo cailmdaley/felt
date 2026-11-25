@@ -78,7 +78,7 @@ export interface ViewContext {
   /** The board's document reader and the fleet's documents. */
   workspace?: {
     readonly isActive: boolean
-    /** Leaves the reader for the view beneath it, as its back does (`Workspace.returnToOrigin`). */
+    /** Leaves the reader for the view beneath it, from any page, full screen included (`Workspace.returnToOrigin`). */
     returnToOrigin(): void
     /** The view beneath the reader that owns its page swipe: true when it took the swipe. */
     swipeBeneath: ((signal: SwipeSignal) => boolean) | null

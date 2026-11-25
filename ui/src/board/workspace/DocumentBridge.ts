@@ -528,6 +528,10 @@ export function frameBridge(frame: HTMLIFrameElement): FrameBridge | undefined {
 const connected = new Set<FrameBridge>()
 let sidewaysTaken = false
 let popped: (() => void) | null = null
+/** A back goes on through at most this many entries of framed pages' own history. */
+export const FRAME_STEPS = 8
+/** A back whose landing the board has not heard of in this long is taken as landed. */
+export const LANDING_MS = 500
 /** Hears each step back that lands in a framed page's own history rather than the board's. */
 export function onFramePopped(listen: (() => void) | null): void { popped = listen }
 /**

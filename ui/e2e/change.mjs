@@ -144,7 +144,7 @@ export function registerChangeJourneys(test) {
     await overview.locator('.change-mermaid svg').waitFor()
     await overview.locator('img[alt="The response figure"]').evaluate(img => img.complete && img.naturalWidth > 0 || new Promise((done, fail) => { img.onload = done; img.onerror = fail }))
   }, viewport)
-  test('A tapestry relative link opens by keyboard in the reader, and Back returns to the Desk', async page => {
+  test('A tapestry relative link opens by keyboard in the reader, and Back returns to the view, then the Desk', async page => {
     page.setDefaultTimeout(30_000)
     await page.addInitScript(() => {
       window.addEventListener('message', event => {

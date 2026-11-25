@@ -5,6 +5,7 @@ import { forwardDocumentKey } from '../workspace/DocumentBridge.js'
 import { documentKind, KIND_GLYPH, parseDocKey, type DocKey } from '../workspace/documents.js'
 import { Thumbnail } from '../workspace/Thumbnail.js'
 import { timeEl } from './time.js'
+import { isMobileViewport } from '../mobile.js'
 import './filePreview.css'
 
 /**
@@ -225,11 +226,12 @@ function scroller(el: HTMLElement): HTMLElement | null {
  * unfolds that file at its natural height in the same place, the same card
  * grown, under a quiet bar pinned to the top of whatever scrolls it: the
  * file's name, ‹ i / n › when there are several (the count opening the list
- * of them, {@link openFileList}), full screen, and the fold chevron. A framed page (a tapestry, a report) unfolded with full screen
- * offered opens full screen when pressed. The bar has no ground of its own until it pins over the file, when
+ * of them, {@link openFileList}), full screen, and the fold chevron. The bar has no ground of its own until it pins over the file, when
  * it takes its page's ground and a hairline. While one is unfolded, ← and →
  * step to its neighbours, from the page or from inside the file, and Escape
- * folds it, returning to the preview.
+ * folds it, returning to the preview. On a computer an unfolded framed page
+ * (a tapestry, a report) is live where it stands; on a phone, where a frame
+ * keeps every touch, a pane over it takes the press and opens it full screen.
  */
 export class Unfold {
   readonly el = document.createElement('div')
@@ -241,6 +243,7 @@ export class Unfold {
   private readonly prev = document.createElement('button')
   private readonly next = document.createElement('button')
   private readonly foldBtn: HTMLButtonElement
+  private readonly fullBtn: HTMLButtonElement | undefined
   private readonly page = document.createElement('div')
   private files: UnfoldFile[] = []
   private readonly cards = new Map<DocKey, { el: HTMLButtonElement; thumbnail?: Thumbnail }>()
@@ -268,7 +271,7 @@ export class Unfold {
     control(this.count, '', 'List the files', () => { this.list = openFileList(this.count, this.files, key => this.unfold(key), this.open?.key) })
     this.count.classList.add('uf-count')
     this.steps.append(this.prev, this.count, this.next)
-    const full = opts.full && control(document.createElement('button'), glyph('full'), 'Full screen', () => { if (this.open) opts.full!(this.open.key) })
+    const full = this.fullBtn = opts.full ? control(document.createElement('button'), glyph('full'), 'Full screen', () => { if (this.open) opts.full!(this.open.key) }) : undefined
     const fold = this.foldBtn = control(document.createElement('button'), glyph('fold'), 'Collapse (Esc)', () => this.fold())
     fold.classList.add('uf-fold')
     full?.classList.add('uf-full')
@@ -332,8 +335,12 @@ export class Unfold {
     this.page.dataset.kind = kind
     this.page.dataset.key = key
     this.page.replaceChildren(viewer)
-    // A framed page keeps every press for itself, so a pane over it takes the press: it opens full screen, where the page is the reader's to use.
-    if (kind === 'html' && this.opts.full && !this.isPinned(key)) this.page.append(this.cover(key))
+    // On a phone a framed page keeps every touch, so a pane over it takes the press and opens it full screen, where the page
+    // is the reader's to use; the page under it is inert, so keys and pointers agree that the bar is where it is used.
+    if (kind === 'html' && this.opts.full && !this.isPinned(key) && isMobileViewport()) {
+      viewer.inert = true
+      this.page.append(this.cover(key))
+    }
     this.el.setAttribute('data-unfolded', '')
     this.el.replaceChildren(this.bar, this.page)
     // Grown first, so a fold elsewhere that the page then answers has room to scroll.
@@ -396,14 +403,11 @@ export class Unfold {
     this.open.viewer.remove()
     this.open = null
   }
-  /** The pane over an unfolded framed page: a press opens the page full screen; a drag scrolls what holds it. */
-  private cover(key: DocKey): HTMLButtonElement {
-    const cover = document.createElement('button')
-    cover.type = 'button'
+  /** The pane over a framed page unfolded on a phone: a press opens the page full screen; a drag scrolls what holds it. Its bar's full screen is the control it stands for. */
+  private cover(key: DocKey): HTMLElement {
+    const cover = document.createElement('div')
     cover.className = 'uf-cover'
-    cover.tabIndex = -1
-    cover.title = 'Full screen'
-    cover.setAttribute('aria-label', cover.title)
+    cover.setAttribute('aria-hidden', 'true')
     cover.addEventListener('click', event => { event.stopPropagation(); this.opts.full!(key) })
     return cover
   }
@@ -419,6 +423,7 @@ export class Unfold {
     this.bar.hidden = pinned && this.files.length < 2
     this.name.textContent = file.name
     this.name.title = parseDocKey(file.key)?.path ?? file.name
+    if (this.fullBtn) { this.fullBtn.title = `Open ${file.name} full screen`; this.fullBtn.setAttribute('aria-label', this.fullBtn.title) }
     this.steps.hidden = this.files.length < 2
     this.count.textContent = `${at + 1} / ${this.files.length}`
     this.count.title = `File ${at + 1} of ${this.files.length}: list them`

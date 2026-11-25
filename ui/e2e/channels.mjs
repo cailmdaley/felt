@@ -161,10 +161,22 @@ try {
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
     await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'kappa-tsz')
-    // The same link in the tapestry its view unfolds goes to the same place.
+    // The same link in the tapestry its view unfolds goes to the same place: in place on a computer, full screen on a phone, where a press on the page opens it.
     await page.locator('.ws-selected .ov-unfold .uf-card').click()
-    await page.frameLocator('.ws-selected .ov-unfold[data-unfolded] iframe').locator('a[href^="#/board/"]').click()
+    if (phone) {
+      await page.locator('.ws-selected .ov-unfold[data-unfolded] .uf-cover').click()
+      await page.waitForFunction(() => /tapestry\.html$/.test(decodeURIComponent(location.hash)))
+      await page.frameLocator('.ws-selected iframe').locator('a[href^="#/board/"]').click()
+    } else await page.frameLocator('.ws-selected .ov-unfold[data-unfolded] iframe').locator('a[href^="#/board/"]').click()
     await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'foregrounds')
+    // A link followed full screen moves full screen: back is the page it was sent from, its tapestry unfolded with the keys,
+    // which Escape folds first; then the channel.
+    if (phone) {
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(() => document.querySelector('.ws-selected .ov-name')?.textContent === 'kappa-tsz' && document.querySelector('.ws-selected .ov-unfold[data-unfolded]'))
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(() => !document.querySelector('.ws-selected .ov-unfold[data-unfolded]'))
+    }
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name')?.textContent === 'cmbx' && document.querySelector('.kbn-ch').offsetParent)
     await page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"] .kbn-ch-who').click()

@@ -122,6 +122,7 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private backDestination = 'Desk'
+  private backToPage = false
   /** The console docked under the stage, seated by the workspace for a fiber on the Desk's lifecycle. */
   private readonly band = element('div', 'ws-stage-band')
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
@@ -198,8 +199,9 @@ export class Reader {
       onNavigate: (source, href) => this.opts.onNavigate?.(source, href),
       onFrame: frame => this.prepareFrame(frame),
       onViewerReady: () => this.layout(false),
-      // Review navigation stays visible while diff windows change their measured heights.
-      onScroll: (key, y) => { if (this.document?.kind !== 'change') this.topbar.scroll(key, y) },
+      // The phone's bar steps aside only over the board's own pages, whose scroll back up the board always holds; over a file
+      // (a framed page that may keep every touch, a review whose windows resize) the way back stays on screen.
+      onScroll: (key, y) => { const doc = this.document; if (doc && isDrawn(doc)) this.topbar.scroll(key, y) },
       onSwipe: signal => this.swipe(signal),
     })
     this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
@@ -218,13 +220,24 @@ export class Reader {
 
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
-  setBackDestination(label: string): void {
+  /** Where back goes, by name; `page` when that is a page of the constitution shown (from full screen over it). */
+  setBackDestination(label: string, page = false): void {
     this.backDestination = label
+    this.backToPage = page
     for (const button of this.el.querySelectorAll<HTMLElement>('.ws-return, .ws-document-back')) {
       button.replaceChildren(element('span', 'ws-back-label', label))
       button.title = `Back to ${label}`
       button.setAttribute('aria-label', button.title)
     }
+    this.paintTitle()
+  }
+  /** The phone bar's centre names the constitution, or the file shown when the back beside it already names the constitution. */
+  private paintTitle(): void {
+    const ch = this.channel, doc = this.document
+    if (!ch) return
+    const file = this.backToPage && doc && !isDrawn(doc) ? doc : null
+    this.title.textContent = file ? documentLabelMetadata(file, ch.labels[ch.documents.indexOf(file)], ch.owner).title : this.currentCard ? slug(this.currentCard) : ch.name
+    this.title.title = file ? file.path : ch.name
   }
 
   /** Show the selected page; settled body and receipt reads enable the files list. */
@@ -245,10 +258,7 @@ export class Reader {
     if (arriving) this.arrive()
     this.el.inert = false
     this.el.removeAttribute('aria-hidden')
-    this.setBackDestination(this.backDestination)
-    // A fiber is named by its slug, its full name in the tooltip.
-    this.title.textContent = this.currentCard ? slug(this.currentCard) : channel.name
-    this.title.title = channel.name
+    this.setBackDestination(this.backDestination, this.backToPage)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
@@ -428,6 +438,7 @@ export class Reader {
     if (doc) {
       this.topbar.select(doc.key)
     }
+    this.paintTitle()
     const announcement = ch.labels[index] ?? ''
     // A provisional run's count goes unannounced; the final one is read once it lands.
     if (this.runSettled && this.announcement !== announcement) {

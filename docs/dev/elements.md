@@ -88,7 +88,8 @@ The grammar's arithmetic (`relativeAge`) lives in `civilDay.ts` with every other
 ### File preview — `filePreview.ts`
 
 A file as a card. In a constitution's view it unfolds in place to the whole file, with ‹ i / n › between the files, Esc to fold and full screen; in a channel's post (`open`) pressing it opens the file in the reader instead.
-A link in an unfolded page goes where it goes in the reader (`Workspace.openLink`): a board route opens that fiber, and a file beside the page opens in the reader as one of the constitution's pages.
+On a computer an unfolded framed page (a tapestry, a report, a deck) is live where it stands, and a link in it goes where it goes in the reader (`Workspace.openLink`): a board route opens that fiber, and a file beside the page opens in the reader as one of the constitution's pages.
+On a phone a frame keeps every touch, so a transparent pane over an unfolded framed page (`.uf-cover`) takes the press and opens it full screen, where its links are followed; a drag on the pane scrolls what holds it. The page under the pane is inert and the pane hidden from assistive technology, so keys and pointers agree: the bar's full screen, named for the file, is the one control. Under a finger the bar's controls are 44 px touch targets.
 Its density sets its box: **figure** (images, SVG plots), **page** (HTML, tapestries, decks), **card** (everything else, drawn from its name alone with nothing loaded) at the sizes above.
 A fifth density, **row** (`fileRow`), lists a file rather than previewing it: the card's kind glyph, name and age in one line, and its caption under them (why it was sent: its newest send's caption, else the latest an earlier send of it gave, the same in every list and in the reader); unread, its glyph takes the fresh ink, and the file being read is underlined.
 

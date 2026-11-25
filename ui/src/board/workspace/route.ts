@@ -1,16 +1,14 @@
 import type { DocKey } from './documents.js'
 import { parseRoute, type WorkspaceRoute } from './boardRoute.js'
 import { DESK_VIEW, getView, viewOrDesk, viewTitle } from '../views/ViewRegistry.js'
+import { FRAME_STEPS, LANDING_MS } from './DocumentBridge.js'
 
 export { parseRoute, type WorkspaceRoute }
 
 /** The reader's addresses live under `#/board/`; `#/board` itself is an old address of Channels. */
 const BOARD_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
-/** A back goes on through at most this many entries of framed pages' own history. */
-export const FRAME_STEPS = 8
-/** A back whose landing the board has not heard of in this long is taken as landed. */
-export const LANDING_MS = 500
+export { FRAME_STEPS, LANDING_MS }
 /** The view a reader entry was opened from: `desk`, or a registered view's id. */
 export type WorkspaceOriginView = string
 /**
@@ -82,20 +80,21 @@ function withRouteState(value: unknown, routeState: RouteState | null): StateObj
  * another page, a link, a scan) replaces that entry, so the address always
  * names what is shown while the history never grows. The reader's back,
  * Escape, the phone's swipe, the origin view's tab and the browser's own
- * back are therefore the same single step. A reader address opened
- * directly (a deep link, a typed URL with nothing of ours below it) has no
- * view entry below: leaving it replaces it with its view.
+ * back are therefore the same single step, save from full screen. A reader
+ * address opened directly (a deep link, a typed URL with nothing of ours
+ * below it) has no view entry below: leaving it replaces it with its view.
  *
  * Full screen (a file a page shows in place, sent to fill the reader) is
  * one entry more, above the page it was sent from: moves inside it replace
  * it, and back from it (the reader's, Escape, the phone's swipe, the
  * browser's) returns to that page; that page chosen from it is back too.
- * Leaving for the view from it (the view's tab, Channels' swipe) passes
- * both entries.
+ * Leaving the reader from full screen (the view's tab, Channels' swipe,
+ * another view) passes full screen's entry first, then leaves as from the
+ * page beneath.
  *
  * Another view chosen from the reader replaces the reader's entry, so the
  * browser's back from there returns to the view the reader covered; the
- * view under the reader, chosen from it, is back. Dialogs over the reader
+ * view under the reader, chosen from it, is leaving. Dialogs over the reader
  * (the sent files sheet) keep no entry of their own.
  */
 export class WorkspaceHistory {
@@ -112,8 +111,10 @@ export class WorkspaceHistory {
   private under: string | null = null
   /** A back this history asked for has not landed: anything asked meanwhile waits for it. */
   private leaving = false
-  /** A leave from full screen has yet to pass the page beneath it. */
-  private passing = false
+  /** Leaving the reader from full screen: what is left to do once full screen's entry is passed. */
+  private passing: (() => void) | null = null
+  /** The address of full screen's page beneath, once a leave has passed it; the browser's second report of that landing (a hashchange after its popstate) is not where the leave lands. */
+  private passed: string | null = null
   private queued: (() => void) | null = null
   /** How many entries of framed pages' history the back in flight has gone on through. */
   private steps = 0
@@ -226,14 +227,9 @@ export class WorkspaceHistory {
     if (hash === this.currentHash) return
     // The view under the reader, chosen from it, is back.
     if (this.current?.kind === 'channel' && viewOfHash(hash) === this.originView) { this.leave(); return }
-    if (this.current?.kind === 'channel') window.history.replaceState(withRouteState(window.history.state, null), '', hash)
-    else window.history.pushState(null, '', hash)
-    this.origin = viewOfHash(hash) ?? DESK_VIEW
-    this.layered = false
-    this.under = null
-    this.current = { kind: 'overview', hash }
-    this.currentHash = hash
-    this.onRoute(this.current, false)
+    if (this.current?.kind === 'channel') { this.close(hash, false); return }
+    window.history.pushState(null, '', hash)
+    this.showView(hash)
   }
 
   /** A back that landed in a framed page's own history (a deck's slides): the back this history asked for goes on to the view. */
@@ -244,7 +240,7 @@ export class WorkspaceHistory {
   /** The reader's back: from full screen, the page beneath it; from any other page, the view. */
   back(): void {
     const beneath = this.beneath
-    if (this.current?.kind !== 'channel' || this.leaving) return
+    if (this.current?.kind !== 'channel') return
     if (!beneath) { this.leave(); return }
     this.leaving = true
     this.steps = 0
@@ -255,18 +251,38 @@ export class WorkspaceHistory {
     this.onRoute(beneath, false)
   }
 
-  /** Leave the reader, from anywhere in it: its view, a step back, or two from full screen; with no view below, its entry becomes the view. */
+  /** Leave the reader, from anywhere in it: its view, a step back; with no view below, its entry becomes the view. */
   leave(): void {
-    if (this.current?.kind !== 'channel' || this.leaving) return
-    const hash = `#/${this.originView}`
-    if (this.layered) {
+    if (this.leaving) { this.queued = () => this.leave(); return }
+    if (this.current?.kind !== 'channel') return
+    this.close(`#/${this.originView}`, this.layered)
+  }
+
+  /**
+   * The reader gives way to the view at `hash`: its entry is popped onto the
+   * view's below it (`pop`), or given the view's address. From full screen,
+   * full screen's entry is passed first.
+   */
+  private close(hash: string, pop: boolean): void {
+    const out = (): void => {
+      if (pop) { this.pop(); return }
+      window.history.replaceState(withRouteState(window.history.state, null), '', hash)
+      if (this.leaving) this.handleLocation(window.history.state)
+    }
+    this.steps = 0
+    if (this.under) {
       this.leaving = true
-      this.passing = !!this.under
-      this.steps = 0
+      this.passing = out
       this.pop()
     } else {
-      window.history.replaceState(withRouteState(window.history.state, null), '', hash)
+      this.leaving = pop
+      out()
     }
+    this.showView(hash)
+  }
+
+  private showView(hash: string): void {
+    this.origin = viewOfHash(hash) ?? DESK_VIEW
     this.layered = false
     this.under = null
     this.current = { kind: 'overview', hash }
@@ -288,15 +304,18 @@ export class WorkspaceHistory {
   /**
    * One step back. A back the board never hears land (it stopped in a frame's
    * history past the steps it goes on through, or on an entry a nested frame
-   * made, which reports nothing) is taken as landed: the entry it stopped on
-   * names what the board shows (the view, or the page beneath full screen),
-   * and what was asked meanwhile goes ahead.
+   * made, which reports nothing) goes on back while it still stands on full
+   * screen's entry; past that, or past the steps, it is taken as landed: the
+   * entry it stopped on names what the board shows (the view, or the page
+   * beneath full screen), and what was asked meanwhile goes ahead.
    */
   private pop(): void {
     window.history.back()
     clearTimeout(this.landing)
     this.landing = window.setTimeout(() => {
       if (!this.leaving) return
+      if (readRouteState(window.history.state)?.under && ++this.steps <= FRAME_STEPS) { this.pop(); return }
+      this.passing = null
       window.history.replaceState(withRouteState(window.history.state, this.current?.kind === 'channel' ? this.routeState() : null), '', this.currentHash)
       this.handleLocation(window.history.state)
     }, LANDING_MS)
@@ -309,7 +328,8 @@ export class WorkspaceHistory {
     window.removeEventListener('hashchange', this.onHashChange)
     this.started = false
     this.leaving = false
-    this.passing = false
+    this.passing = null
+    this.passed = null
     this.queued = null
   }
 
@@ -330,16 +350,20 @@ export class WorkspaceHistory {
   /** The browser moved: through its own back or forward, a typed address, or a back this history asked for. */
   private handleLocation(state: unknown): void {
     this.redirect(settled)
+    if (this.leaving && window.location.hash === this.passed) return
     clearTimeout(this.landing)
-    // A leave from full screen landed on the page beneath it: on to the view below that.
+    // Leaving from full screen, the back landed on the page beneath it: on to the view.
     if (this.passing && this.leaving) {
-      this.passing = false
-      this.pop()
+      const pass = this.passing
+      this.passing = null
+      this.passed = window.location.hash
+      pass()
       return
     }
     const hash = window.location.hash
     const queued = this.leaving ? this.queued : null
     this.leaving = false
+    this.passed = null
     this.queued = null
     if (hash !== this.currentHash) this.land(hash, state)
     else this.know(state)

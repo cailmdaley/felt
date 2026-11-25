@@ -364,7 +364,7 @@ export class Workspace {
       open: () => this.board.read([family]),
     }
   }
-  /** Return from the reader to the view it was opened from, as Escape does. */
+  /** Leave the reader for the view it was opened from, from any page, full screen included. */
   returnToOrigin(): void {
     if (!this.isActive) return
     this.history.leave()
@@ -629,7 +629,7 @@ export class Workspace {
   /** The reader's way back names where it returns: the constitution beneath full screen, else the view. */
   private nameBack(): void {
     const beneath = this.history.beneath, card = beneath && cardNamed(this.opts.cards(), beneath.uid, beneath.owner)
-    this.reader.setBackDestination(beneath ? card ? slug(card) : beneath.uid : this.history.backLabel)
+    this.reader.setBackDestination(beneath ? card ? slug(card) : beneath.uid : this.history.backLabel, !!beneath)
   }
   /** Seat the band over the channel's pages, with its links. */
   private seatBand(state: ChannelState): void {

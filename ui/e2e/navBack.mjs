@@ -230,10 +230,12 @@ export function registerViewFullScreenJourneys(test) {
  * A tapestry sent full screen, on a phone and a desktop: one frame of a slide
  * deck, full bleed, which takes every press inside it. Reached from Find over
  * the Desk and from a post's thread in Channels, a press on the page unfolded
- * in the constitution's view opens it full screen; its way back stands above
- * the frame, in reach, names the constitution, and returns to the view, the
- * page still unfolded, as the browser's back does; one more back reaches the
- * view the reader was opened from.
+ * in the constitution's view opens it full screen on a phone, and its bar's
+ * full screen on a computer, where the unfolded page stays live; its way back
+ * stands above the frame, in reach, names the constitution, stays there while
+ * the page scrolls and across a reload, and returns to the view, the page
+ * still unfolded, as the browser's back does; one more back reaches the view
+ * the reader was opened from.
  */
 export function registerTapestryFullScreenJourneys(test) {
   const channelsHome = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=channels`
@@ -260,16 +262,25 @@ export function registerTapestryFullScreenJourneys(test) {
       assert.ok(await control.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) }), 'nothing covers the way back')
       return control
     }
-    /** The constitution's view on show with its tapestry unfolded: a press on the page itself opens it full screen. */
+    /** The constitution's view on show with its tapestry unfolded: on a phone a press on the page itself opens it full screen, on a computer the bar's full screen. */
     const fullScreen = async (slug, label) => {
       const view = selected(page)
       if (!await view.locator('.ov-unfold[data-unfolded]').count()) await press(view.locator('.ov-unfold .uf-card'))
-      const cover = view.locator('.ov-unfold .uf-cover')
-      await cover.waitFor()
+      await view.locator('.ov-unfold[data-unfolded] .uf-page iframe').waitFor()
+      const full = view.locator('.ov-unfold .uf-full')
+      assert.match(await full.getAttribute('aria-label'), /^Open .+ full screen$/)
+      if (phone) {
+        const target = await full.boundingBox()
+        assert.ok(target.width >= 44 && target.height >= 44, `full screen is a touch target: ${JSON.stringify(target)}`)
+      }
       await shot(`${label}-unfolded`)
-      const box = await cover.boundingBox()
-      if (phone) await page.touchscreen.tap(box.x + box.width / 2, box.y + 40)
-      else await page.mouse.click(box.x + box.width / 2, box.y + 40)
+      if (phone) {
+        const box = await view.locator('.ov-unfold .uf-cover').boundingBox()
+        await page.touchscreen.tap(box.x + box.width / 2, box.y + 40)
+      } else {
+        assert.equal(await view.locator('.ov-unfold .uf-cover').count(), 0, 'on a computer the unfolded page is live')
+        await full.click()
+      }
       await page.waitForFunction(() => /tapestry\.html$/.test(decodeURIComponent(location.hash)))
       await selected(page).locator('iframe').waitFor()
       await shot(`${label}-full`)
@@ -277,7 +288,7 @@ export function registerTapestryFullScreenJourneys(test) {
     }
     const onView = async () => {
       await page.waitForFunction(() => decodeURIComponent(location.hash).includes('/family:'))
-      await selected(page).locator('.ov-unfold[data-unfolded] .uf-cover').waitFor()
+      await selected(page).locator('.ov-unfold[data-unfolded] .uf-page iframe').waitFor()
     }
 
     // From Find over the Desk: a constitution whose tapestry is one frame of a deck.
@@ -321,8 +332,21 @@ export function registerTapestryFullScreenJourneys(test) {
     await reachableBack('Channels')
     const thread = hash()
     back = await fullScreen('kappa-tsz', 'channels')
+    // A page taller than the screen, scrolled down: the way back stays on screen, and across a reload.
+    const tall = async () => {
+      const frame = await selected(page).locator('iframe').elementHandle().then(handle => handle.contentFrame())
+      await frame.evaluate(() => { document.body.style.minHeight = '400vh'; window.scrollTo(0, 1500) })
+      await page.waitForTimeout(300)
+    }
+    await tall()
+    await shot('channels-full-scrolled')
+    await reachableBack('kappa-tsz')
+    await page.reload()
+    await selected(page).locator('iframe').waitFor()
+    await tall()
+    back = await reachableBack('kappa-tsz')
     await press(back)
-    await onView()
+    await page.waitForFunction(() => decodeURIComponent(location.hash).includes('/family:'))
     assert.equal(hash(), thread, 'back returns to the thread\'s view')
     await press(await reachableBack('Channels'))
     await page.locator('.ws-reader.ws-dormant').waitFor()
@@ -330,19 +354,25 @@ export function registerTapestryFullScreenJourneys(test) {
     await shot('channels-back-on-channel')
   }, viewport, 'reduce', phone)
 
-  // The standalone thread page on a phone: a file shown full screen covers the page under a bar whose back returns to it.
-  test('Full screen on the thread page (phone): the bar\'s back and the browser\'s return to the page', async page => {
+  // The standalone thread page on a phone: a file shown full screen covers the page under a bar whose back returns to it,
+  // after a reload on the layer's entry too.
+  test('Full screen on the thread page (phone): the bar\'s back and the browser\'s return to the page, after a reload too', async page => {
     await page.goto(`${channelsHome}&page=thread&f=${encodeURIComponent('cmbx/kappa-tsz')}@umber-workstation`)
     const full = page.locator('.uf-full:visible').first()
-    for (const way of ['bar', 'browser']) {
+    for (const way of ['bar', 'browser', 'reload']) {
       await full.tap()
       const back = page.locator('.pg-full .pg-back')
       await back.waitFor()
+      if (way === 'reload') {
+        await page.reload()
+        await full.tap()
+        await back.waitFor()
+      }
       const box = await back.boundingBox()
       assert.ok(box.y >= 0 && box.width >= 44 && box.height >= 44, `the way back is a touch target: ${JSON.stringify(box)}`)
       assert.equal(await back.getAttribute('aria-label'), 'Back to kappa-tsz')
-      if (way === 'bar') await back.tap()
-      else await page.goBack()
+      if (way === 'browser') await page.goBack()
+      else await back.tap()
       await page.locator('.pg-full').waitFor({ state: 'detached' })
       assert.ok(await full.isVisible(), `${way}: the page is back`)
     }

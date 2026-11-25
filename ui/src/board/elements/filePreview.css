@@ -73,13 +73,14 @@
 .uf-control:disabled { opacity: .35; cursor: default; }
 .uf-control:not(:disabled):hover { color: var(--ws-ink); }
 .uf-control:focus-visible { color: var(--ws-ink); outline: 1px solid var(--ws-ink-soft); outline-offset: 1px; }
-@media (pointer: coarse) { .uf-control { min-width: 36px; height: 36px; } }
+/* Under a finger, each control is a full touch target. */
+@media (pointer: coarse) { .uf-control { min-width: var(--ws-phone-target, 44px); height: var(--ws-phone-target, 44px); } }
 
 /* The file at its natural height: a page grows to its content, text and images unclipped; what cannot (a PDF) keeps a tall pane. */
 /* The card grown: the folded preview's edge and corners, around the file at its full height. */
 .uf-page { position: relative; container-type: inline-size; display: flex; flex-direction: column; border-radius: 4px; box-shadow: 0 0 0 1px var(--ws-hairline-soft); overflow: clip; outline: none; }
-/* Over a framed page, the press is the board's: it opens the page full screen. */
-.uf-page > .uf-cover { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: transparent; cursor: zoom-in; -webkit-tap-highlight-color: transparent; }
+/* On a phone, over a framed page, the press is the board's: it opens the page full screen. */
+.uf-page > .uf-cover { position: absolute; inset: 0; cursor: zoom-in; -webkit-tap-highlight-color: transparent; }
 .uf-page > * { flex: none; }
 .uf-page[data-kind='html'] .kbn-fileview-frame-wrap { height: 56.25cqi; min-height: 56.25cqi; }
 .uf-page[data-kind='text'] .kbn-fileview-text-wrap { overflow: visible; }

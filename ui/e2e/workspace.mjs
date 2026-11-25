@@ -1686,18 +1686,19 @@ test('Phone back swipe from a file returns to the view; edges, vertical pans and
   await (await reportDocument(p)).evaluate(() => { window.flung = new Promise(done => addEventListener('scrollend', () => done(), { once: true })) })
   await swipe(p, 200, 650, 204, 250)
   assert.equal(await key(), original, 'vertical report scroll is not a page gesture')
-  await poll(p, () => document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
   await (await reportDocument(p)).evaluate(() => window.flung)
+  // Over a file, whose frame may keep every touch, the top bar and its way back stay on screen however it scrolls.
+  assert.ok(await (await reportDocument(p)).evaluate(() => window.scrollY > 0), 'the report scrolled')
+  assert.equal(await p.locator('.ws-reader').evaluate(node => node.classList.contains('ws-topbar-hidden')), false)
+  const way = await p.locator('.ws-return').boundingBox()
+  assert.ok(way && way.y >= 0 && way.height >= 44, `the way back is on screen: ${JSON.stringify(way)}`)
   await (await reportDocument(p)).evaluate(() => window.scrollTo(0, 0))
-  await poll(p, () => !document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
   const table = await report(p).contentFrame().locator('#wide-table').boundingBox()
   assert.ok(await (await reportDocument(p)).evaluate(() => { const el = document.getElementById('wide-table'); return el.scrollWidth > el.clientWidth }), 'the fixture table scrolls sideways')
   await swipe(p, 300, table.y + table.height / 2, 100, table.y + table.height / 2)
   assert.equal(await key(), original, 'a horizontally scrollable table keeps its swipe')
   for (const id of ['gesture-deck', 'gesture-carousel']) {
     await (await reportDocument(p)).evaluate(id => document.getElementById(id).scrollIntoView({ block: 'center' }), id)
-    // Hiding the top bar moves the report under the finger; swipe once it has settled.
-    await poll(p, () => document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
     await p.waitForTimeout(400)
     const gesture = await report(p).contentFrame().locator(`#${id}`).boundingBox()
     await swipe(p, 300, gesture.y + gesture.height / 2, 100, gesture.y + gesture.height / 2)
