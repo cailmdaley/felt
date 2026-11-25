@@ -215,6 +215,8 @@ function addHubFixture(example: WorkspaceExample, now: number): void {
     hubTimes(row, row.files, now).forEach((at, n) => {
       const fullPath = `/fixture-project/${row.id}/${['report.html', 'summary.png', 'figure.png', 'notes.md', 'leakage-by-tile.pdf', 'psf-residuals.png'][n % 6].replace(/^(?=.)/, n >= 6 ? `run-${n}-` : '')}`
       example.receipts.push({ fullPath, basename: fullPath.split('/').at(-1), timestamp: at, sessionId: session, uid: row.id, host: WORKSPACE_HOST })
+      // Its reports are pages that exist, so stepping onto one shows it.
+      if (fullPath.endsWith('.html')) example.files.push({ owner: WORKSPACE_HOST, path: fullPath, mime: 'text/html', body: new Blob([`<!doctype html><html><head><meta charset="utf-8"><title>${row.name}: report</title></head><body style="font:16px Georgia;margin:32px"><h1>Report: ${row.name}</h1><p>A report from the thread.</p></body></html>`], { type: 'text/html' }) })
     })
   }
 }

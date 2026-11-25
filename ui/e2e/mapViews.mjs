@@ -129,7 +129,8 @@ export function registerMapViewJourneys(test) {
     const at = page.url()
     await page.keyboard.press('ArrowRight')
     assert.deepEqual(await where(), ['report.html', '2 / 6'])
-    await view(page).locator('.uf-page iframe').waitFor()
+    // The report itself shows, not a frame left empty.
+    assert.equal(await page.frameLocator('.ws-page.ws-selected .uf-page iframe').locator('h1').textContent(), 'Report: Pipeline repository steward')
     await page.frameLocator('.ws-page.ws-selected .uf-page iframe').locator('body').click()
     await page.keyboard.press('ArrowLeft')
     await until(page, () => document.querySelector('.ws-page.ws-selected .uf-bar .uf-count')?.textContent === '1 / 6')

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 // @ts-expect-error Node types are excluded from the browser UI's tsconfig.
 import { readFileSync } from 'node:fs'
 import { settle } from '../testFixtures.js'
+import { resetDocumentResources } from '../documentResources.js'
 import { CARD_PX, densityOf, fileRow, foldPx, openFileList, PREVIEW_GAP, previewsHeight, Unfold } from './filePreview.js'
 
 const files = [{ key: 'host:/w/a.html', name: 'a.html' }, { key: 'host:/w/b.png', name: 'b.png' }, { key: 'host:/w/c.md', name: 'c.md' }]
@@ -55,6 +56,30 @@ describe('files that unfold in place', () => {
     unfold.el.querySelector<HTMLButtonElement>('.uf-full')!.click()
     expect(full).toHaveBeenCalledExactlyOnceWith('host:/w/c.md')
     expect(unfold.unfolded).toBe('host:/w/c.md')
+  })
+
+  it('steps from one unfolded page to the next and back, each shown in the one frame it runs in: served, or a declared public page at its own address', async () => {
+    const deck = '<!doctype html><head><meta name="shuttle-page" content="https://talks.example.org/deck/"></head><body><h1>Deck</h1></body>'
+    const bodies: Record<string, string> = { '/w/a.html': '<h1>Page A</h1>', '/w/deck.html': deck, '/w/c.html': '<h1>Page C</h1>' }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(bodies[new URL(url, location.href).searchParams.get('path')!], { headers: { ETag: '"1"' } })))
+    onTestFinished(() => { vi.unstubAllGlobals(); resetDocumentResources() })
+    const unfold = new Unfold({ shuttleBase: '' })
+    document.body.append(unfold.el)
+    unfold.update(['a.html', 'deck.html', 'c.html'].map(name => ({ key: `host:/w/${name}`, name })))
+    /** The frames the unfolded file runs in: a served page by its text, a declared one by its address. */
+    const shows = (expected: string) => vi.waitFor(() => expect([...page.querySelectorAll('iframe')].map(frame => frame.getAttribute('src') ?? frame.srcdoc.match(/<h1>(.*?)<\/h1>/)?.[1])).toStrictEqual([expected]))
+    unfold.unfold('host:/w/a.html')
+    const page = unfold.el.querySelector('.uf-page')!
+    await shows('Page A')
+    for (const [key, expected] of [['ArrowRight', 'https://talks.example.org/deck/'], ['ArrowRight', 'Page C'], ['ArrowLeft', 'https://talks.example.org/deck/'], ['ArrowLeft', 'Page A']]) {
+      press(page, key)
+      await shows(expected)
+    }
+    // Folded and unfolded again, it shows its page again.
+    press(page, 'Escape')
+    unfold.unfold('host:/w/a.html')
+    await shows('Page A')
+    unfold.dispose()
   })
 
   it('keeps its cards in place across an update with the same files, focus included, and folds when the unfolded file is gone without taking the focus', () => {
