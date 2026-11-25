@@ -11,8 +11,8 @@ defmodule Shuttle.SentFiles do
   entry carries its send's `caption` when it had one; the key is absent
   otherwise. Both kinds carry `copies`, naming each sent path's copy, taken by
   the sending process, by its basename in the host's copy store
-  (`copies/2`; `Shuttle.EventStream.sent_copy/2` serves them to the file
-  route).
+  (`index_copies/3`; `Shuttle.EventStream.sent_copy/2` serves them to the
+  file route).
   Paths are absolute, or resolved against the owning host's recorded `cwd` or
   its home for a leading `~`, and cleaned.
   A worker's tmux-embedded ULID associates the delivery with its fiber. Native
@@ -152,24 +152,54 @@ defmodule Shuttle.SentFiles do
   end
 
   @doc """
-  The copies one decoded send event names, `%{path => copy}`: each path
-  absolutized as `project/1` does, each copy its basename joined onto the copy
-  store `store`. Only a basename `<sha256 hex>[.<ext>]` names a copy, so a
-  copy is always a file directly inside `store`. Any other event names none.
+  Fold one decoded event into a copy index, `%{path => {timestamp, copy}}`.
+  Each path a send names, absolutized as `project/1` does, takes this send's
+  copy of it, or `nil` when the send took none, unless the index already
+  holds a send of that path with a later timestamp. A path's entry is so the
+  send the trail shows for it (`for_uid/2` keeps the newest send of a path by
+  timestamp, the later of two equal ones), and only that send's copy serves
+  it. A copy is the basename the event's `copies` names, joined onto the copy
+  store `store`; only a basename `<sha256 hex>[.<ext>]` names one, so a copy
+  is always a file directly inside `store`. Any other event leaves the index
+  as it is.
   """
-  @spec copies(map(), Path.t()) :: %{optional(String.t()) => String.t()}
-  def copies(%{"copies" => copies} = event, store) when is_map(copies) do
-    if is_list(sent_paths(event)) do
-      for {path, name} <- copies,
-          is_binary(path) and is_binary(name) and name =~ @copy_name,
-          into: %{},
-          do: {:binary.copy(absolutize(path, event["cwd"])), Path.join(store, name)}
-    else
-      %{}
+  @spec index_copies(map(), map(), Path.t()) :: map()
+  def index_copies(index, event, store) do
+    case sent_paths(event) do
+      files when is_list(files) ->
+        named = if is_map(event["copies"]), do: event["copies"], else: %{}
+
+        for file <- files, is_binary(file), reduce: index do
+          index ->
+            copy =
+              case named[file] do
+                name when is_binary(name) -> if name =~ @copy_name, do: Path.join(store, name)
+                _ -> nil
+              end
+
+            path = :binary.copy(absolutize(file, event["cwd"]))
+
+            Map.update(
+              index,
+              path,
+              {event["timestamp"], copy},
+              &newer(&1, {event["timestamp"], copy})
+            )
+        end
+
+      _ ->
+        index
     end
   end
 
-  def copies(_event, _store), do: %{}
+  @doc "Two copy indexes as one, `newer`'s entry winning a timestamp tie."
+  @spec merge_copy_indexes(map(), map()) :: map()
+  def merge_copy_indexes(older, newer),
+    do: Map.merge(older, newer, fn _path, held, next -> newer(held, next) end)
+
+  # The later of two sends by timestamp, the second of equal ones: the order
+  # `dedupe_newest/1` keeps a path's send by.
+  defp newer({held, _} = send, {next, _} = later), do: if(next >= held, do: later, else: send)
 
   @doc """
   One decoded event → the (possibly empty) list of projected events it

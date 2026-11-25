@@ -240,6 +240,67 @@ defmodule Shuttle.EventStreamTest do
     assert EventStream.sent_copy("/tmp/c.png", name) == Path.join(store, name_of.("c"))
   end
 
+  # The bug: the copy index merged each send's copies over the last, so a
+  # newer send that took no copy (an older CLI, a copy that failed, a line
+  # that gave up its copies) left the older send's copy serving the path:
+  # once the original became unreadable, the board showed the older bytes.
+  test "a newer send without a copy leaves its path without one", %{path: path} do
+    copy = String.duplicate("a", 64) <> ".png"
+
+    append(path, [
+      ev("file_sent", -5, %{"files" => ["/tmp/a.png"], "copies" => %{"/tmp/a.png" => copy}})
+    ])
+
+    name = start(path)
+    assert EventStream.sent_copy("/tmp/a.png", name) =~ copy
+
+    append(path, [
+      ev("pre_tool_use", -4, %{
+        "tool" => "SendUserFile",
+        "toolInput" => %{"files" => ["/tmp/a.png"]}
+      })
+    ])
+
+    EventStream.sent_events(name)
+    assert EventStream.sent_copy("/tmp/a.png", name) == nil
+  end
+
+  # The bug: the copy index took the last send appended, the trail the newest
+  # by timestamp. A send stamps itself before it copies, so a slow older send
+  # appended after a newer one served its older bytes for the path the trail
+  # showed as the newer send. Both now take the newest by timestamp, within a
+  # file and across a rotation.
+  test "an older send appended after a newer one does not take its path's copy",
+       %{path: path} do
+    name_of = fn char -> String.duplicate(char, 64) <> ".png" end
+
+    sent_line = fn minute, char ->
+      ev("file_sent", minute, %{
+        "files" => ["/tmp/a.png"],
+        "copies" => %{"/tmp/a.png" => name_of.(char)}
+      })
+    end
+
+    append(path, [sent_line.(-3, "b"), sent_line.(-4, "a")])
+    name = start(path)
+
+    assert [%{timestamp: newest}] =
+             Shuttle.SentFiles.for_uid("01KTS261GJMMRDRHS2QDMEFV3K", stream: name)
+
+    assert newest == @t0 - 3 * @m
+    assert EventStream.sent_copy("/tmp/a.png", name) =~ name_of.("b")
+
+    File.rename!(path, path <> ".1")
+    append(path, [sent_line.(-2, "c")])
+    EventStream.sent_events(name)
+    assert EventStream.sent_copy("/tmp/a.png", name) =~ name_of.("c")
+
+    File.rename!(path, path <> ".1")
+    append(path, [sent_line.(-6, "d")])
+    EventStream.sent_events(name)
+    assert EventStream.sent_copy("/tmp/a.png", name) =~ name_of.("c")
+  end
+
   test "a rotation racing the seed is not counted twice", %{path: path} do
     sent_line = fn minute, file ->
       ev("file_sent", minute, %{"files" => [file]})

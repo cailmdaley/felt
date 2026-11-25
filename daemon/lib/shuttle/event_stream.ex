@@ -68,8 +68,9 @@ defmodule Shuttle.EventStream do
   It is as fresh as the last poll, catch-up read or seed to complete.
 
   `sent_copy/2` reads the same table: the stream keeps, per sent path, the
-  copy the newest retained send of it took (`Shuttle.SentFiles.copies/2`),
-  one row a path, so the file route finds a copy with one lookup. The copies
+  copy the newest retained send of it took, the send the trail shows, and no
+  row when that send took none (`Shuttle.SentFiles.index_copies/3`), so the
+  file route finds a copy with one lookup. The copies
   live in `sent-files/` beside the stream and follow it through rotation like
   the board records: a send's copy is known while the send is retained.
   """
@@ -95,9 +96,9 @@ defmodule Shuttle.EventStream do
     # `clock` returns epoch ms; the waiting projection prunes and reads by it.
     # `table` holds compact reader projections; `published` tracks which
     # waiting and binding maps produced them. `copies_rotated` and
-    # `copies_live` map each sent path to its newest copy in either file;
-    # `copies_published` is the pair the table's copy rows came from, with
-    # their merge.
+    # `copies_live` index each sent path's newest send in either file and its
+    # copy (`SentFiles.index_copies/3`); `copies_published` is the pair the
+    # table's copy rows came from, with the rows.
     defstruct [
       :events_file,
       :table,
@@ -479,7 +480,7 @@ defmodule Shuttle.EventStream do
       state
       | sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
         board_live: Board.fold(state.board_live, event),
-        copies_live: Map.merge(state.copies_live, SentFiles.copies(event, copy_store(state))),
+        copies_live: SentFiles.index_copies(state.copies_live, event, copy_store(state)),
         binding: binding
     }
   end
@@ -530,7 +531,13 @@ defmodule Shuttle.EventStream do
        do: state
 
   defp publish_copies(%State{table: table, copies_published: {_, _, before}} = state) do
-    copies = Map.merge(state.copies_rotated, state.copies_live)
+    copies =
+      for {path, {_timestamp, stored}} <-
+            SentFiles.merge_copy_indexes(state.copies_rotated, state.copies_live),
+          stored != nil,
+          into: %{},
+          do: {path, stored}
+
     :ets.insert(table, for({path, stored} <- copies, do: {{:copy, path}, stored}))
 
     for path <- Map.keys(before),

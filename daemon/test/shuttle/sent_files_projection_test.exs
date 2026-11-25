@@ -296,9 +296,10 @@ defmodule Shuttle.SentFilesProjectionTest do
     assert [%{paths: ["/home/fixture/Documents/01.png", "/tmp/talk/02.png"]}] =
              SentFiles.project(event)
 
-    assert SentFiles.copies(event, "/store") == %{
-             "/home/fixture/Documents/01.png" => "/store/" <> String.duplicate("a", 64) <> ".png",
-             "/tmp/talk/02.png" => "/store/" <> String.duplicate("b", 64)
+    assert SentFiles.index_copies(%{}, event, "/store") == %{
+             "/home/fixture/Documents/01.png" =>
+               {nil, "/store/" <> String.duplicate("a", 64) <> ".png"},
+             "/tmp/talk/02.png" => {nil, "/store/" <> String.duplicate("b", 64)}
            }
   end
 
