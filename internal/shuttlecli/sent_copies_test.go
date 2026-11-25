@@ -265,3 +265,158 @@ func TestSentCopiesAreSharedAndExpire(t *testing.T) {
 		t.Fatalf("the prune removed the store's lock: %v", err)
 	}
 }
+
+// holdStoreLock takes the copy store's lock beside sink, as a concurrent
+// sender's prune would hold it, until the test ends.
+func holdStoreLock(t *testing.T, sink string) string {
+	t.Helper()
+	store := filepath.Join(filepath.Dir(sink), "sent-files")
+	if err := os.MkdirAll(store, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := flockWithin(filepath.Join(store, ".lock"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(unlock)
+	return store
+}
+
+// stagedCopies names the partial copies the store holds.
+func stagedCopies(t *testing.T, store string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".copy-") {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
+}
+
+// The bug: a send that timed out waiting for the store's lock renamed its
+// copies into place anyway, so a prune holding the lock could remove a copy
+// the send had just renewed and recorded; and a lock file that could not be
+// opened or locked at all let every send publish and prune unguarded. A send
+// that cannot hold the lock now keeps no copy, and records itself without.
+func TestSendFileWithoutTheStoreLockKeepsNoCopy(t *testing.T) {
+	t.Parallel()
+	for name, unusable := range map[string]func(t *testing.T, sink string) string{
+		"held": holdStoreLock,
+		"unusable": func(t *testing.T, sink string) string {
+			store := filepath.Join(filepath.Dir(sink), "sent-files")
+			if err := os.MkdirAll(filepath.Join(store, ".lock"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			return store
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env, sink, artifact := sendFileTestEnv(t)
+			store := unusable(t, sink)
+			expired := filepath.Join(store, strings.Repeat("0", 64)+".png")
+			if err := os.WriteFile(expired, []byte("old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-sentCopyRetention - time.Hour)
+			if err := os.Chtimes(expired, old, old); err != nil {
+				t.Fatal(err)
+			}
+			a := newApp(env)
+			a.sentCopyLockWait = 100 * time.Millisecond
+			if _, _, err := executeApp(t, a, filepath.Dir(artifact), "send-file", artifact); err != nil {
+				t.Fatal(err)
+			}
+			if event := sentEvent(t, sink); event["copies"] != nil || event["files"].([]any)[0] != artifact {
+				t.Fatalf("send without the lock = %v, want it recorded without copies", event)
+			}
+			if names := storeCopies(t, store); len(names) != 1 || names[0] != filepath.Base(expired) {
+				t.Fatalf("store holds %v, want only the expired copy, unpruned", names)
+			}
+			if staged := stagedCopies(t, store); len(staged) != 0 {
+				t.Fatalf("send left partial copies %v", staged)
+			}
+		})
+	}
+}
+
+// The bug: the hook's 10-second budget was checked between reads, and the
+// copies then waited up to 30 seconds more for the store's lock, so a held
+// lock kept the harness's SendUserFile call waiting with nothing recorded.
+// The hook now records its event by its deadline, copied or not.
+func TestSendUserFileHookRecordsBeforeItsDeadline(t *testing.T) {
+	t.Parallel()
+	env, sink := eventStream(t)
+	store := holdStoreLock(t, sink)
+	figure := filepath.Join(t.TempDir(), "figure.png")
+	if err := os.WriteFile(figure, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"hook_event_name": "PreToolUse", "session_id": "sess-a", "cwd": filepath.Dir(figure),
+		"tool_name": "SendUserFile", "tool_input": map[string]any{"files": []string{figure}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.Stdin, env.Stdout = bytes.NewReader(payload), &bytes.Buffer{}
+	a := newApp(env)
+	a.hookCopyBudget = 300 * time.Millisecond
+	a.sentCopyLockWait = time.Minute
+	cmd := a.rootCmd()
+	cmd.SetArgs([]string{"hook", "event"})
+	start := time.Now()
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("hook took %v past a 300ms copy budget", elapsed)
+	}
+	event := sentEvent(t, sink)
+	if input, _ := event["toolInput"].(map[string]any); len(input["files"].([]any)) != 1 || event["copies"] != nil {
+		t.Fatalf("hook past its budget recorded %v, want the call without copies", event)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(stagedCopies(t, store)) != 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if staged := stagedCopies(t, store); len(staged) != 0 {
+		t.Fatalf("hook left partial copies %v", staged)
+	}
+	if names := storeCopies(t, store); len(names) != 0 {
+		t.Fatalf("store holds %v after a send recorded without copies", names)
+	}
+}
+
+// The bug: a partial copy a killed send left behind was pruned only after the
+// 30-day retention for copies. It now goes after an hour untouched, while a
+// partial copy still being written stays.
+func TestSentCopyPruneRemovesAbandonedPartialCopies(t *testing.T) {
+	t.Parallel()
+	env, sink, artifact := sendFileTestEnv(t)
+	store := filepath.Join(filepath.Dir(sink), "sent-files")
+	if err := os.MkdirAll(store, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	abandoned, writing := filepath.Join(store, ".copy-abandoned"), filepath.Join(store, ".copy-writing")
+	for _, path := range []string{abandoned, writing} {
+		if err := os.WriteFile(path, []byte("part"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-sentCopyStagingAge - time.Minute)
+	if err := os.Chtimes(abandoned, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := executeIn(t, env, filepath.Dir(artifact), "send-file", artifact); err != nil {
+		t.Fatal(err)
+	}
+	if staged := stagedCopies(t, store); len(staged) != 1 || staged[0] != ".copy-writing" {
+		t.Fatalf("store holds partial copies %v, want only the one being written", staged)
+	}
+}

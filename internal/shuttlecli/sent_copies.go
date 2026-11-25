@@ -25,22 +25,29 @@ import (
 // Copies are content-addressed and named <sha256><ext>, so a re-send of the
 // same bytes replaces one copy with a fresh one. The extension is kept when it
 // is a short alphanumeric one, and dropped otherwise. A send, at most once per
-// sentCopyPruneEvery, removes copies untouched for sentCopyRetention; a send
-// older than that, like a file over sentCopyMaxBytes, is served from its
-// original alone. Renames into the store and the prune hold the store's lock,
-// so a prune never removes a copy a concurrent send has just renewed.
+// sentCopyPruneEvery, removes copies untouched for sentCopyRetention and
+// partial copies an interrupted send left untouched for sentCopyStagingAge; a
+// send older than that, like a file over sentCopyMaxBytes, is served from its
+// original alone. A copy is staged under a temporary name, then renamed into
+// place, and pruned, only while its sender holds the store's lock, so a prune
+// never removes a copy a concurrent send has just renewed. A sender that
+// cannot hold the lock within its sentCopyLockWait, or on a filesystem that
+// refuses locks, discards what it staged and records its send without copies.
 const (
 	sentCopiesDir      = "sent-files"
 	sentCopyMaxBytes   = 256 << 20
 	sentCopyRetention  = 30 * 24 * time.Hour
 	sentCopyPruneEvery = time.Hour
+	sentCopyStagingAge = time.Hour
 	// sentCopyNameMax is the longest copy name: a digest and a dot with
 	// sixteen extension characters.
 	sentCopyNameMax = sha256.Size*2 + 17
-	// hookCopyBudget bounds the copying a SendUserFile hook does before its
-	// harness's tool call goes ahead; a file it has not copied by then is
-	// recorded without a copy.
+	// hookCopyBudget is a SendUserFile hook's default deadline for its
+	// copies, lock wait included (app.hookCopyBudget).
 	hookCopyBudget = 10 * time.Second
+	// sentCopyLockWait is a sender's default wait for the store's lock
+	// (app.sentCopyLockWait).
+	sentCopyLockWait = 2 * time.Second
 )
 
 var sentCopyExt = regexp.MustCompile(`^\.[A-Za-z0-9]{1,16}$`)
@@ -50,8 +57,9 @@ var sentCopyExt = regexp.MustCompile(`^\.[A-Za-z0-9]{1,16}$`)
 type stagedCopy struct{ tmp, name string }
 
 // copySentFiles copies each of paths, which are absolute, into the copy store
-// beside sink and returns each copied path's copy name. A file over
-// sentCopyMaxBytes is left uncopied; any other failure is returned.
+// beside sink and returns each copied path's copy name. A file it cannot read
+// fails the whole send; a file over sentCopyMaxBytes, or every file when the
+// store's lock cannot be had, is left uncopied.
 func (a *app) copySentFiles(sink string, paths []string) (map[string]string, error) {
 	dir, err := sentCopyStore(sink)
 	if err != nil {
@@ -68,13 +76,16 @@ func (a *app) copySentFiles(sink string, paths []string) (map[string]string, err
 			staged[path] = staging
 		}
 	}
-	return a.keepSentCopies(dir, staged)
+	return keepSentCopies(dir, staged, a.sentCopyLockWait), nil
 }
 
 // copyToolFiles copies the files a harness's SendUserFile call sends. The hook
 // runs inside the worker's harness, with its access to the files, and before
-// the tool call goes ahead, so it copies within hookCopyBudget. A file it
-// cannot copy is still recorded by the call, served from its original alone.
+// the tool call goes ahead, so its copies have a deadline, a.hookCopyBudget
+// from now: they are taken in a goroutine, and at the deadline the call is
+// recorded with what was kept by then, nothing when the store's lock was not
+// yet had. A file it cannot copy is still recorded by the call, served from
+// its original alone.
 func (a *app) copyToolFiles(input eventHookInput) map[string]string {
 	var tool struct {
 		Files []string `json:"files"`
@@ -90,23 +101,33 @@ func (a *app) copyToolFiles(input eventHookInput) map[string]string {
 	if err != nil {
 		return nil
 	}
-	deadline := time.Now().Add(hookCopyBudget)
-	staged := map[string]stagedCopy{}
-	defer discardStaged(staged)
-	for _, file := range tool.Files {
-		path := a.sentPath(file, input.CWD)
-		if time.Now().After(deadline) {
-			break
+	deadline := time.Now().Add(a.hookCopyBudget)
+	kept := make(chan map[string]string, 1)
+	go func() {
+		staged := map[string]stagedCopy{}
+		defer discardStaged(staged)
+		for _, file := range tool.Files {
+			path := a.sentPath(file, input.CWD)
+			if time.Now().After(deadline) {
+				break
+			}
+			if !filepath.IsAbs(path) {
+				continue
+			}
+			if staging, err := stageSentCopy(dir, path, deadline); err == nil && staging.tmp != "" {
+				staged[path] = staging
+			}
 		}
-		if !filepath.IsAbs(path) {
-			continue
-		}
-		if staging, err := stageSentCopy(dir, path, deadline); err == nil && staging.tmp != "" {
-			staged[path] = staging
-		}
+		kept <- keepSentCopies(dir, staged, min(a.sentCopyLockWait, time.Until(deadline)))
+	}()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case copies := <-kept:
+		return copies
+	case <-timer.C:
+		return nil
 	}
-	copies, _ := a.keepSentCopies(dir, staged)
-	return copies
 }
 
 // sentCopyStore is the copy store beside the event stream sink, created
@@ -175,26 +196,26 @@ func stageSentCopy(dir, path string, deadline time.Time) (stagedCopy, error) {
 
 // keepSentCopies renames each staged copy to its name, replacing any copy of
 // the same bytes with a fresh one, and prunes the store when a prune is due,
-// all under the store's lock. It returns each path's copy name.
-func (a *app) keepSentCopies(dir string, staged map[string]stagedCopy) (map[string]string, error) {
+// all while holding the store's lock. It returns each kept path's copy name,
+// and keeps none when the lock is not had within wait or cannot be taken at
+// all; the caller discards what is left staged.
+func keepSentCopies(dir string, staged map[string]stagedCopy, wait time.Duration) map[string]string {
 	if len(staged) == 0 {
-		return nil, nil
+		return nil
 	}
-	unlock, locked := lockEventsRotation(filepath.Join(dir, ".lock"), a.eventsLockWait)
-	if locked {
-		defer unlock()
+	unlock, err := flockWithin(filepath.Join(dir, ".lock"), wait)
+	if err != nil {
+		return nil
 	}
+	defer unlock()
 	copies := map[string]string{}
 	for path, staging := range staged {
-		if err := os.Rename(staging.tmp, filepath.Join(dir, staging.name)); err != nil {
-			return nil, fmt.Errorf("copy artifact %s: %w", path, err)
+		if os.Rename(staging.tmp, filepath.Join(dir, staging.name)) == nil {
+			copies[path] = staging.name
 		}
-		copies[path] = staging.name
 	}
-	if locked {
-		pruneSentCopies(dir, time.Now())
-	}
-	return copies, nil
+	pruneSentCopies(dir, time.Now())
+	return copies
 }
 
 // discardStaged removes the temporary files of copies never kept.
@@ -204,9 +225,9 @@ func discardStaged(staged map[string]stagedCopy) {
 	}
 }
 
-// pruneSentCopies removes the copies, and any abandoned partial copy, last
-// touched before the retention window, at most once per sentCopyPruneEvery.
-// The caller holds the store's lock.
+// pruneSentCopies removes the copies last touched before the retention
+// window, and the partial copies last touched before sentCopyStagingAge, at
+// most once per sentCopyPruneEvery. The caller holds the store's lock.
 func pruneSentCopies(dir string, now time.Time) {
 	marker := filepath.Join(dir, ".pruned")
 	if info, err := os.Stat(marker); err == nil && now.Sub(info.ModTime()) < sentCopyPruneEvery {
@@ -218,11 +239,14 @@ func pruneSentCopies(dir string, now time.Time) {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if strings.HasPrefix(name, ".") && !strings.HasPrefix(name, ".copy-") {
+		age := sentCopyRetention
+		if strings.HasPrefix(name, ".copy-") {
+			age = sentCopyStagingAge
+		} else if strings.HasPrefix(name, ".") {
 			continue
 		}
 		info, err := entry.Info()
-		if err == nil && info.Mode().IsRegular() && now.Sub(info.ModTime()) > sentCopyRetention {
+		if err == nil && info.Mode().IsRegular() && now.Sub(info.ModTime()) > age {
 			_ = os.Remove(filepath.Join(dir, name))
 		}
 	}

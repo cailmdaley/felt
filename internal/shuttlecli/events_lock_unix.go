@@ -8,21 +8,16 @@ import (
 	"time"
 )
 
-// lockEventsRotation takes an exclusive flock on the rotation lock file,
-// waiting in the kernel's queue so writers are granted it in turn. A holder
-// only stats, renames and appends, and the kernel drops its lock when it
-// exits, but the stream may live on a network filesystem where a live holder
-// can stall in I/O; ok is false when the lock is not granted within wait. The
-// abandoned request stays queued and gives the lock straight back if it is
-// granted later. A lock that cannot be used at all — the file won't open, or
-// the filesystem refuses flock (a network mount without lock support answers
-// ENOSYS or EOPNOTSUPP) — returns ok with a no-op unlock, so rotation proceeds
-// unguarded rather than never happening and letting the stream grow without
-// bound.
-func lockEventsRotation(lockPath string, wait time.Duration) (unlock func(), ok bool) {
+// flockWithin takes an exclusive flock on lockPath, waiting in the kernel's
+// queue so holders are granted it in turn, for at most wait. Past wait it
+// fails with errLockWait; the abandoned request stays queued and gives the
+// lock straight back if it is granted later. It fails with the filesystem's
+// error when the lock file will not open or the filesystem refuses flock (a
+// network mount without lock support answers ENOSYS or EOPNOTSUPP).
+func flockWithin(lockPath string, wait time.Duration) (unlock func(), err error) {
 	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		return func() {}, true
+		return nil, err
 	}
 	fd := int(file.Fd())
 	granted := make(chan error, 1)
@@ -45,14 +40,17 @@ func lockEventsRotation(lockPath string, wait time.Duration) (unlock func(), ok 
 	case err := <-granted:
 		if err != nil {
 			_ = file.Close()
-			return func() {}, true
+			return nil, err
 		}
-		return release, true
+		return release, nil
 	case <-timer.C:
 		go func() {
-			<-granted
-			release()
+			if <-granted == nil {
+				release()
+			} else {
+				_ = file.Close()
+			}
 		}()
-		return nil, false
+		return nil, errLockWait
 	}
 }

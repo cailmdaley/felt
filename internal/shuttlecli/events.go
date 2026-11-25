@@ -1,11 +1,13 @@
 package shuttlecli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
@@ -85,6 +87,29 @@ func (a *app) eventsMaxBytes() int64 {
 		}
 	}
 	return eventsDefaultMaxBytes
+}
+
+// errLockWait is flockWithin's answer when the lock is not granted in time.
+var errLockWait = errors.New("lock not granted in time")
+
+// lockEventsRotation takes the stream's rotation lock (flockWithin). A holder
+// only stats, renames and appends, and the kernel drops its lock when it
+// exits, but the stream may live on a network filesystem where a live holder
+// can stall in I/O; ok is false when the lock is not granted within wait. A
+// lock that cannot be used at all (the file won't open, the filesystem
+// refuses flock, or Windows) returns ok with a no-op unlock, so rotation
+// proceeds unguarded rather than never happening and letting the stream grow
+// without bound.
+func lockEventsRotation(lockPath string, wait time.Duration) (unlock func(), ok bool) {
+	unlock, err := flockWithin(lockPath, wait)
+	switch {
+	case err == nil:
+		return unlock, true
+	case errors.Is(err, errLockWait):
+		return nil, false
+	default:
+		return func() {}, true
+	}
 }
 
 // appendEventLine serializes rotation and append against other writers. A

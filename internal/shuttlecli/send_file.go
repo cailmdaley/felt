@@ -19,7 +19,8 @@ and the board opens it through the owner-routed file surface: from its
 original path while the host's daemon can read it there, else from the copy,
 so a file sent from a folder the daemon cannot read, or since deleted, still
 opens. All paths must be readable regular files; nothing is recorded unless
-every file was copied. Files over 256 MiB are not copied, and copies untouched
+every file was read. Files over 256 MiB are not copied, nor is any file of a
+send that cannot hold the copy store's lock within 2 seconds; copies untouched
 for 30 days are removed by a later send.
 
 Session attribution uses --session; else the calling harness session (the

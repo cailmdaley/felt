@@ -694,8 +694,9 @@ content digest) and the event names each copy under its path. The board opens
 a sent file from its path while the host's daemon can read it there, so a
 rewritten report stays live, and from the copy otherwise: a file sent from
 `~/Documents`, which a launchd daemon cannot read, or from a scratch directory
-since cleared, still opens. Files over 256 MiB are not copied; each send
-removes copies untouched for 30 days.
+since cleared, still opens. Files over 256 MiB are not copied, nor are the
+files of a send that cannot hold the copy store's lock within 2 seconds; each
+send removes copies untouched for 30 days.
 The command reads the whole batch before recording one `file_sent` event.
 It fails visibly if attribution or recording is unavailable.
 `--caption "<text>"` records why the files are sent on that event; the board

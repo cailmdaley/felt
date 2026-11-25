@@ -97,14 +97,19 @@ takes inside the harness, keyed by the path resolved against the event's
 The writer copies with the sender's access (`internal/shuttlecli/sent_copies.go`),
 content-addressed as `<sha256>[.<ext>]`, the extension kept when it is one to
 sixteen letters or digits; a re-send of the same bytes replaces one copy with
-a fresh one. Under the store's `.lock`, at most once an hour, a send removes
-copies untouched for 30 days. A file over 256 MiB is recorded without a copy,
-as is a hook path the hook could not read within its 10-second budget; a
-`SendUserFile` line too long for the stream drops its copies before its
-caption. The daemon reads only basenames of that form, so a copy is always a
-file directly in the store. `Shuttle.EventStream` keeps the newest retained
-send's copy of each path, which the file route serves when the daemon cannot
-read the path itself.
+a fresh one. A copy is staged as `.copy-*` and renamed into place only while
+its sender holds the store's `.lock`; a sender that cannot hold it within 2
+seconds, or at all (a filesystem without `flock`), discards its staged copies
+and records the send without them. Holding the lock, at most once an hour, a
+send removes copies untouched for 30 days and partial copies untouched for an
+hour. A file over 256 MiB is recorded without a copy. The hook records its
+`SendUserFile` call by a 10-second deadline, lock wait included, with only
+the copies kept by then; a line too long for the stream drops its copies
+before its caption. The daemon reads only basenames of that form, so a copy is
+always a file directly in the store. `Shuttle.EventStream` indexes, for each
+path, the newest retained send of it by timestamp, the send the sent-files
+trail shows, and the file route serves that send's copy when the daemon
+cannot read the path itself; when that send took no copy, there is none.
 
 ### Clearing sent files
 

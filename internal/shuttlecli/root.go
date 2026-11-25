@@ -105,6 +105,12 @@ type app struct {
 	// eventsLockWait bounds how long an event append waits for the stream's
 	// rotation lock before dropping its line.
 	eventsLockWait time.Duration
+	// sentCopyLockWait bounds how long a send waits for the copy store's
+	// lock before recording itself without copies (sent_copies.go).
+	sentCopyLockWait time.Duration
+	// hookCopyBudget is the deadline a SendUserFile hook's copies are taken
+	// by, lock wait included.
+	hookCopyBudget time.Duration
 
 	env           *sysenv.Env
 	json          bool   // --json
@@ -167,6 +173,8 @@ func newApp(env *sysenv.Env) *app {
 		daemonSignalPID:           signalDaemonPID,
 		daemonPause:               time.Sleep,
 		eventsLockWait:            30 * time.Second,
+		sentCopyLockWait:          sentCopyLockWait,
+		hookCopyBudget:            hookCopyBudget,
 		daemonLifecycleTimeout:    daemonPostTimeout,
 		boardEntropy:              rand.Reader,
 		eventNow:                  time.Now,
