@@ -1,5 +1,6 @@
 import type { ShuttleClient } from '../client.js'
 import { fileKindOf, type ShuttleFileKind } from '../model.js'
+import { declaredPageOf } from '../remotePage.js'
 import type { ShuttleSentFile } from '../types.js'
 import { button, part } from './dom.js'
 import { createTime } from './time.js'
@@ -32,8 +33,10 @@ const extension = (name: string): string => /\.([a-z0-9]+)$/i.exec(name)?.[1]?.t
 /**
  * A file as `<div data-slot="shuttle-file-preview" data-kind>`: a `figure`
  * shows its picture in an `<img>`, a `page` the top of its page in an inert
- * `<iframe>` that runs no scripts, a `card` or a `row` its extension; each has its
- * `name`, its `caption` when a send gave one, and its `age`.
+ * `<iframe>` that runs no scripts, once its head is read, a `card` or a `row`
+ * its extension; a page that declares a public page elsewhere
+ * (`<meta name="shuttle-page">`) is a `card` naming that page's site. Each has
+ * its `name`, its `caption` when a send gave one, and its `age`.
  */
 export function createFilePreview(input: FilePreviewFile | ShuttleSentFile, client: ShuttleClient, options: FilePreviewOptions = {}): HTMLDivElement {
   const file = 'fullPath' in input ? sentFile(input) : input
@@ -54,10 +57,15 @@ export function createFilePreview(input: FilePreviewFile | ShuttleSentFile, clie
     frame.setAttribute('sandbox', '')
     frame.toggleAttribute('inert', true)
     frame.tabIndex = -1
-    frame.src = client.htmlAssetUrl(file.path, options.origin)
     frame.title = name
     frame.loading = 'lazy'
     media = frame
+    void declaredPageOf(client, file.path, options.origin).then(remote => {
+      if (!remote) { frame.src = client.htmlAssetUrl(file.path, options.origin); return }
+      const site = part('span', 'media', new URL(remote).host)
+      root.dataset.kind = 'card'
+      frame.replaceWith(site)
+    })
   } else {
     media = part('span', 'media', extension(name))
     media.setAttribute('aria-hidden', 'true')

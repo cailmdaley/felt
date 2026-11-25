@@ -7,6 +7,7 @@
  * caller to render. A refusal carries the daemon's own words. Writes that act
  * on a fiber are owner-routed by `origin`, the composite row's owner.
  */
+import { DOCUMENT_HEAD } from './remotePage.js'
 import type {
   ShuttleCaptureRequest, ShuttleCompositeResponse, ShuttleCreatedFiber, ShuttleCreateFiberRequest,
   ShuttleDeliverRequest, ShuttleDispatchRequest, ShuttleFiber, ShuttleFiberEnvelope, ShuttleFleetResponse,
@@ -217,9 +218,9 @@ export class ShuttleClient {
     return origin && origin !== 'local' ? `${url}&origin=${encodeURIComponent(origin)}` : url
   }
 
-  /** `GET /file`: a file's text on its owner. */
-  async fileText(path: string, origin?: string): Promise<string> {
-    const res = await this.#send(this.fileUrl(path, origin))
+  /** `GET /file` for a file's head on its owner: its first 64 KiB as text, where its declarations stand. */
+  async fileHead(path: string, origin?: string): Promise<string> {
+    const res = await this.#send(this.fileUrl(path, origin), { headers: { Range: `bytes=0-${DOCUMENT_HEAD - 1}` } })
     if (!res.ok) throw new DaemonRequestError(await responseError(res, 'File unavailable'), res.status)
     return await res.text()
   }

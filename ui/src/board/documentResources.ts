@@ -2,7 +2,7 @@ import { inLane } from './requestLanes.js'
 import { normalizeAbsolutePath } from './workspace/documents.js'
 import { fileKind } from './attachments.js'
 import { fileBytesUrl } from './utils.js'
-import { remotePage } from '../sdk/remotePage.js'
+import { DOCUMENT_HEAD, remotePage } from '../sdk/remotePage.js'
 
 /**
  * The document cache: the one reader of document content. Every surface that
@@ -29,7 +29,7 @@ import { remotePage } from '../sdk/remotePage.js'
  * - **Derived facts once per validator:** `fact` memoises a computation over
  *   a document's bytes under the validator it was computed from.
  */
-const PEEK_BYTES = 65536
+const PEEK_BYTES = DOCUMENT_HEAD
 /** What a read serves, most urgent first. */
 export const RESOURCE_PRIORITY = { selected: 0, neighbour: 1, title: 2, thumbnail: 3, duration: 4 } as const
 export type ResourcePriority = typeof RESOURCE_PRIORITY[keyof typeof RESOURCE_PRIORITY]
@@ -426,13 +426,21 @@ export function recallText(src: string): TextBody | undefined {
 }
 
 /**
- * Where a file opens in a tab of its own: an HTML page held here that declares
- * itself a public page elsewhere opens at that page, anything else at its bytes.
+ * Where a file opens in a tab of its own: an HTML page that declares itself a
+ * public page elsewhere opens at that page, anything else at its bytes (and
+ * `hash`). A page not yet read here has its head read first.
  */
-export function fileTabUrl(base: string, fullPath: string, owner: string): string {
+export async function fileTabUrl(base: string, fullPath: string, owner: string, hash = ''): Promise<string> {
   const src = fileBytesUrl(base, fullPath, owner)
-  const html = fileKind(fullPath) === 'html' ? recallText(src)?.text : undefined
-  return (html && remotePage(html, [location.href, src])) || src
+  return (fileKind(fullPath) === 'html' && await declaredPage(src)) || src + hash
+}
+
+/** The public page an HTML document declares, from the text held for it or else its head. */
+export async function declaredPage(src: string): Promise<string | null> {
+  const held = recallText(src)?.text
+  const head = held === undefined ? await peek(src, RESOURCE_PRIORITY.selected, { stale: true }) : null
+  const html = held ?? (head ? new TextDecoder().decode(head.bytes) : '')
+  return remotePage(html, [location.href, src])
 }
 
 /**

@@ -400,15 +400,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     if (options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
     queueMicrotask(() => finish(true))
   } else if (kind === 'html') {
-    const frame = document.createElement('iframe')
-    frame.title = basename(path)
-    frame.inert = true
-    frame.tabIndex = -1
-    frame.setAttribute('scrolling', 'no')
-    frame.addEventListener('error', () => finish(false), { once: true })
     // The page's own text, from the cache the reader shares, drawn without scripts.
-    frame.setAttribute('sandbox', '')
-    frame.allow = "autoplay 'none'"
     void documentText(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(body => {
       if (disposed) return
       if (!body) { finish(false); return }
@@ -416,12 +408,19 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       // A page declared remote is not loaded for a preview: its card names it and its site.
       const remote = remotePage(body.text, [location.href, src])
       if (remote) {
-        wrap.className = 'kbn-fileview-thumbnail kbn-thumbnail-remote'
+        wrap.classList.replace('kbn-thumbnail-html', 'kbn-thumbnail-remote')
         duration.textContent = new URL(remote).host
         finish(true)
         return
       }
-      // An empty frame has already loaded about:blank; only the page's own load counts.
+      const frame = document.createElement('iframe')
+      frame.title = basename(path)
+      frame.inert = true
+      frame.tabIndex = -1
+      frame.setAttribute('scrolling', 'no')
+      frame.setAttribute('sandbox', '')
+      frame.allow = "autoplay 'none'"
+      frame.addEventListener('error', () => finish(false), { once: true })
       frame.addEventListener('load', () => finish(true), { once: true })
       frame.srcdoc = htmlWithBase(thumbnailPreviews.get(src, body.text, body.etag, options.keepMedia), src)
       wrap.append(frame)
@@ -607,11 +606,13 @@ export function suspendFileViewer(viewer: HTMLElement | null): void {
 export function resumeFileViewer(viewer: HTMLElement | null): void {
   if (viewer) {
     drawnPages.get(viewer)?.resume()
-    void liveViewSubscriptions.get(viewer)?.resume()
     const state = mediaViewers.get(viewer)
     if (state) state.active = true
     const embedded = embeddedMediaViewers.get(viewer)
-    if (embedded) { embedded.active = true; embedded.bridge?.command('active', { active: true }); embedded.shown(true) }
+    if (embedded) { embedded.active = true; embedded.bridge?.command('active', { active: true }) }
+    // Shown again, a page read since it was hidden arrives first; only a viewer still without one takes back the page it last read.
+    void liveViewSubscriptions.get(viewer)?.resume()
+    embedded?.shown(true)
   }
 }
 
@@ -650,7 +651,6 @@ function buildHtmlViewer(
   }
   let disposed = false
   let failed = false
-  let hasContent = false
   let initialLoadHandled = false
   let generation = 0
   let stagingFrame: HTMLIFrameElement | null = null
@@ -784,7 +784,7 @@ function buildHtmlViewer(
   }
   /** The first page a served frame shows, ready: the veil lifts and the host binds to it. */
   const firstReady = (frame: HTMLIFrameElement, bridge: FrameBridge): void => {
-    if (!hasContent || initialLoadHandled || iframe !== frame) return
+    if (initialLoadHandled || iframe !== frame) return
     initialLoadHandled = true
     embedded.bridge = bridge
     if (options.fit) bridge.command('fit')
@@ -795,18 +795,20 @@ function buildHtmlViewer(
     onFrameLoad?.(frame, false)
     options.onState?.({ status: 'ready' })
   }
-  // The served frame joins the wrap with the first page it shows.
-  let iframe = createFrame(firstReady)
-  let currentBridge = frameBridge(iframe)!
+  /** The served frame on show and its bridge, from the first page it shows until it is dropped. */
+  let iframe: HTMLIFrameElement | null = null
+  let currentBridge: FrameBridge | null = null
   wrap.append(pdfLayer, veil)
   /** A page declared remote, framed as itself in the served frame's place. */
   let remote: { url: string; frame: HTMLIFrameElement } | null = null
+  /** A declared page that landed on the board's own origin: the served file shows instead. */
+  let refused: string | null = null
   /** The page as last read, shown again when this viewer takes the document back. */
   let latest: string | null = null
   const holders = documentHolders.get(src) ?? documentHolders.set(src, new Set()).get(src)!
   const holder: DocumentHolder = {
     get active() { return embedded.active },
-    get live() { return !!remote || iframe.parentNode === wrap },
+    get live() { return !!remote || !!iframe },
     release: () => { dropServed(); remote?.frame.remove(); remote = null },
     restore: () => { if (latest !== null) show(latest) },
   }
@@ -821,7 +823,7 @@ function buildHtmlViewer(
     if (next || remote) holder.release()
     next?.restore()
   }
-  /** The served frame and whatever was staged for it leave; a fresh one waits, unattached, for the next page. */
+  /** The served frame, whatever was staged for it and the height it was fitted to leave. */
   const dropServed = (): void => {
     generation++
     stagingBridge?.dispose()
@@ -831,22 +833,25 @@ function buildHtmlViewer(
     for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove() }
     pdfs.clear()
     pdfWeights.clear()
-    if (iframe.parentNode === wrap) {
-      currentBridge.command('pause')
-      currentBridge.dispose()
-      iframe.remove()
-      iframe = createFrame(firstReady)
-      currentBridge = frameBridge(iframe)!
-    }
+    currentBridge?.command('pause')
+    currentBridge?.dispose()
+    iframe?.remove()
+    iframe = null
+    currentBridge = null
     embedded.bridge = null
-    hasContent = false
     initialLoadHandled = false
+    wrap.style.height = ''
+    fitted = 0; step = 0; coupled = false
   }
   const showRemote = (url: string): void => {
     if (remote?.url === url) return
     dropServed()
     remote?.frame.remove()
-    const frame = remotePageFrame(url, basename(fullPath))
+    const frame = remotePageFrame(url, basename(fullPath), () => {
+      if (disposed || remote?.frame !== frame || latest === null) return
+      refused = url
+      show(latest)
+    })
     frame.className = 'kbn-fileview-frame'
     remote = { url, frame }
     frame.addEventListener('load', () => {
@@ -864,7 +869,8 @@ function buildHtmlViewer(
     options.onThumbnailSource?.(html, recallText(src)?.etag)
     veil.classList.remove('kbn-fileview-loading-error')
     latest = html
-    const url = remotePage(html, [location.href, src])
+    const declared = remotePage(html, [location.href, src])
+    const url = declared === refused ? null : declared
     // Hidden, it waits while another viewer runs the document, and runs no remote page.
     if (!embedded.active && (url || [...holders].some(other => other !== holder && other.live))) { holder.release(); return }
     for (const other of holders) if (other !== holder) other.release()
@@ -873,8 +879,9 @@ function buildHtmlViewer(
     const withBase = htmlWithBase(html, src)
     const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(options.fit ? pinViewportUnits(withBase, window.innerHeight) : withBase)
     const weight = pageWeight(html)
-    if (!hasContent) {
-      hasContent = true
+    if (!iframe) {
+      iframe = createFrame(firstReady)
+      currentBridge = frameBridge(iframe)!
       byteWeights.set(iframe, weight)
       wrap.prepend(iframe)
       iframe.srcdoc = srcdoc
@@ -884,23 +891,24 @@ function buildHtmlViewer(
     stagingBridge?.dispose()
     stagingFrame?.remove()
     // The page on show measures where its passages stand, for the rewrite to keep the reader beside theirs.
-    currentBridge.command('anchors')
+    currentBridge!.command('anchors')
     const currentGeneration = ++generation
     let loaded = false
     const next = createFrame((frame, bridge) => {
+      // A dropped served frame raises the generation, so a frame staged for it never lands.
       if (loaded || currentGeneration !== generation) return
       loaded = true
-      const position = initialLoadHandled ? currentBridge.position : undefined
+      const position = initialLoadHandled ? currentBridge!.position : undefined
       // The reader stays beside the passage they were reading, whatever the rewrite changed around it.
-      const before = currentBridge.anchors
+      const before = currentBridge!.anchors
       const scroller = options.fit && initialLoadHandled ? scrollingAncestor(wrap) : null
       if (scroller) {
         const y = scroller.getBoundingClientRect().top - wrap.getBoundingClientRect().top
         const top = scroller.scrollTop + carryReading(before, bridge.anchors, y) - y
         carried = y > 0 && top !== scroller.scrollTop ? { scroller, top, at: 0 } : null
       }
-      currentBridge.command('pause')
-      currentBridge.dispose()
+      currentBridge!.command('pause')
+      currentBridge!.dispose()
       for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove() }
       pdfs.clear()
       pdfWeights.clear()
@@ -912,7 +920,7 @@ function buildHtmlViewer(
       if (position) bridge.command('restore', { x: position.x, y: carryReading(before, bridge.anchors, position.y), clamp: true })
       // Moving a frame reloads its document, so the staged frame already sits
       // where it will stay and the swap only removes its predecessor.
-      iframe.remove()
+      iframe!.remove()
       iframe = frame
       if (carried) { carried.scroller.scrollTop = carried.top; carried.at = carried.scroller.scrollTop }
       htmlWeight = frameWeights.get(frame) ?? byteWeights.get(frame) ?? 1
@@ -924,7 +932,7 @@ function buildHtmlViewer(
       const firstVisibleContent = !initialLoadHandled
       if (firstVisibleContent) { initialLoadHandled = true; veil.remove() }
       failed = false
-      onFrameLoad?.(iframe, !firstVisibleContent)
+      onFrameLoad?.(frame, !firstVisibleContent)
       options.onState?.({ status: 'ready' })
     })
     next.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none'
@@ -941,7 +949,7 @@ function buildHtmlViewer(
     (error) => {
       if (disposed) return
       failed = true
-      if (!hasContent && !remote) showLoadError(veil, wrap, fullPath, error)
+      if (!iframe && !remote) showLoadError(veil, wrap, fullPath, error)
       options.onState?.({ status: 'error', error, hasContent: initialLoadHandled })
     },
     {
@@ -957,19 +965,13 @@ function buildHtmlViewer(
   liveViewSubscriptions.set(wrap, stop)
   viewerDisposers.set(wrap, () => {
     disposed = true
-    generation++
-    stagingBridge?.dispose()
-    stagingFrame?.remove()
-    currentBridge.command('pause')
-    currentBridge.dispose()
-    remote?.frame.remove()
-    for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.() }
-    pdfs.clear()
+    const held = holder.live
+    holder.release()
     embeddedPlayers.delete(embedded)
     embeddedMediaViewers.delete(wrap)
     holders.delete(holder)
     if (!holders.size) documentHolders.delete(src)
-    else if (holder.live) heir()?.restore()
+    else if (held) heir()?.restore()
   })
   return wrap
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl, pinViewportUnits, pageWeight } from './FileViewerPanel.js'
 import { envelope } from './workspace/DocumentBridge.js'
 import { fileTabUrl, resetDocumentResources } from './documentResources.js'
+import { Thumbnail } from './workspace/Thumbnail.js'
 const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
 const responseWithBlob = (content: string): Response => new Response(content)
 const pdfRenderer = vi.hoisted(() => ({ mount: vi.fn() }))
@@ -307,18 +308,41 @@ describe('workspace file viewer hooks', () => {
     expect(onState).toHaveBeenCalledWith({ status: 'ready' })
     disposeFileViewer(viewer)
   })
-  it('draws a page declared remote as a card naming its site, in no frame, and opens it in a tab at that page', async () => {
+  it('draws a page declared remote as a card naming its site, in no frame', async () => {
     const source = '<!doctype html><html><head><title>Deck</title><meta name="shuttle-page" content="https://talks.example.org/deck/"></head><body><iframe src="https://talks.example.org/deck/"></iframe></body></html>'
     vi.stubGlobal('fetch', vi.fn(async () => new Response(source, { headers: { ETag: 'remote-preview' } })))
-    const onState = vi.fn()
-    const viewer = buildFileViewer('', '/tapestry.html', 'host-a', undefined, undefined, { thumbnail: true, onState })
-    await vi.waitFor(() => expect(onState).toHaveBeenCalledWith({ status: 'ready' }))
-    expect(viewer.querySelector('iframe')).toBeNull()
-    expect(viewer.classList.contains('kbn-thumbnail-remote')).toBe(true)
-    expect(viewer.querySelector('.kbn-thumbnail-kind')?.textContent).toBe('▣')
-    expect(viewer.querySelector('.kbn-thumbnail-duration')?.textContent).toBe('talks.example.org')
-    expect(fileTabUrl('', '/tapestry.html', 'host-a')).toBe('https://talks.example.org/deck/')
-    expect(fileTabUrl('', '/other.html', 'host-a')).toBe('/api/v1/file?path=%2Fother.html&origin=host-a')
+    const thumb = new Thumbnail({ key: 'deck', shuttleBase: '', file: { fullPath: '/tapestry.html', owner: 'host-a', basename: 'tapestry.html' }, fallback: '', priority: () => 1, distance: () => 0 })
+    thumb.mount()
+    await vi.waitFor(() => expect(thumb.state).toBe('live'))
+    const body = thumb.body!
+    expect(body.querySelector('iframe')).toBeNull()
+    expect([...body.classList]).toEqual(expect.arrayContaining(['ws-thumbnail-body', 'kbn-thumbnail-remote']))
+    expect(body.classList.contains('kbn-thumbnail-html')).toBe(false)
+    expect(body.querySelector('.kbn-thumbnail-kind')?.textContent).toBe('▣')
+    expect(body.querySelector('.kbn-thumbnail-duration')?.textContent).toBe('talks.example.org')
+    thumb.dispose()
+  })
+  it('opens a page in a tab at the public page it declares, reading its head when it has not been read, and anything else at its bytes', async () => {
+    const declares = '<!doctype html><head><meta name="shuttle-page" content="https://talks.example.org/deck/"></head><body></body>'
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(/deck|notes\.md/.test(decodeURIComponent(url)) ? declares : '<!doctype html><p>Notes</p>', { status: 206 })))
+    expect(await fileTabUrl('', '/deck.html', 'host-a')).toBe('https://talks.example.org/deck/')
+    expect(await fileTabUrl('', '/notes.html', 'host-a', '#fit')).toBe('/api/v1/file?path=%2Fnotes.html&origin=host-a#fit')
+    // Only an HTML page declares one: a note quoting the tag opens as itself.
+    expect(await fileTabUrl('', '/notes.md', 'host-a')).toBe('/api/v1/file?path=%2Fnotes.md&origin=host-a')
+  })
+  it('shows the served file in place of a declared page that lands on the board\'s own origin', async () => {
+    const viewer = buildFileViewer('', '/talk.html', 'host-a', undefined, undefined, { kind: 'html', active: true })
+    document.body.append(viewer)
+    watch.content!('<!doctype html><head><meta name="shuttle-page" content="https://bounce.example.org/go"></head><body><p>Here</p></body>')
+    const remote = viewer.querySelector('iframe')!
+    expect(remote.getAttribute('src')).toBe('https://bounce.example.org/go')
+    // The redirect ended on a document the board can read.
+    Object.defineProperty(remote, 'contentDocument', { value: { URL: 'http://localhost:3000/' } })
+    remote.dispatchEvent(new Event('load'))
+    const served = viewer.querySelector('iframe')!
+    expect(served.hasAttribute('src')).toBe(false)
+    expect(served.srcdoc).toContain('<p>Here</p>')
+    expect(served.getAttribute('sandbox')).not.toContain('allow-same-origin')
     disposeFileViewer(viewer)
   })
   it('sends full thumbnail source to title metadata but only lightweight markup to the frame', async () => {

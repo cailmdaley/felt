@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
-import { publicPage, remotePage } from './remotePage'
+import { describe, expect, it, vi } from 'vitest'
+import { DOCUMENT_HEAD, publicPage, remotePage, remotePageFrame } from './remotePage'
 
 const BOARD = 'http://hub.example.org:4000/'
 const page = (head: string, body = ''): string => `<!doctype html><html><head>${head}</head><body>${body}</body></html>`
@@ -28,8 +28,14 @@ describe('publicPage', () => {
     ['a home network name', 'https://router.home.arpa/'],
     ['the board\'s own host on another port', 'https://hub.example.org/'],
     ['the board\'s own host, fully qualified', 'https://HUB.example.org./deck/'],
+    ['loopback with trailing dots', 'https://localhost../'],
+    ['a name with an empty label', 'https://hub..example.org/'],
   ])('refuses %s', (_, raw) => {
     expect(publicPage(raw, [BOARD])).toBeNull()
+  })
+
+  it('refuses every page when a home cannot be read', () => {
+    expect(publicPage('https://example.org/deck/', ['http://[bad'])).toBeNull()
   })
 
   it('refuses the host of every daemon it is told of', () => {
@@ -61,7 +67,31 @@ describe('remotePage', () => {
     expect(remotePage(page('', '<meta name="shuttle-page" content="https://example.org/deck/">'), [BOARD])).toBeNull()
   })
 
+  it('reads past a head whose comment, title or style mentions a body', () => {
+    expect(remotePage(page('<!-- <body> --><title>On <body> tags</title><style>/* <body */</style><meta name="shuttle-page" content="https://example.org/deck/">'), [BOARD])).toBe('https://example.org/deck/')
+  })
+
+  it('reads only the first 64 KiB, for a page with no body tag', () => {
+    const meta = '<meta name="shuttle-page" content="https://example.org/deck/">'
+    expect(remotePage(`<title>T</title>${meta}<p>${'x'.repeat(DOCUMENT_HEAD)}</p>`, [BOARD])).toBe('https://example.org/deck/')
+    expect(remotePage(`<!-- ${'x'.repeat(DOCUMENT_HEAD)} -->${meta}`, [BOARD])).toBeNull()
+  })
+
   it('reads a declaration that names a page it refuses as none', () => {
     expect(remotePage(page('<meta name="shuttle-page" content="https://127.0.0.1:4000/">'), [BOARD])).toBeNull()
+  })
+})
+
+describe('remotePageFrame', () => {
+  it('refuses a page that lands on an origin the board can read, and nothing it cannot reach', () => {
+    const refused = vi.fn()
+    const frame = remotePageFrame('https://example.org/deck/', 'Deck', refused)
+    expect(frame.getAttribute('sandbox')!.split(' ')).not.toContain('allow-modals')
+    Object.defineProperty(frame, 'contentDocument', { configurable: true, value: null })
+    frame.dispatchEvent(new Event('load'))
+    expect(refused).not.toHaveBeenCalled()
+    Object.defineProperty(frame, 'contentDocument', { configurable: true, value: { URL: 'https://hub.example.org/' } })
+    frame.dispatchEvent(new Event('load'))
+    expect(refused).toHaveBeenCalledOnce()
   })
 })

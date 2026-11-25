@@ -593,12 +593,16 @@ export class Reader {
   private fillMenu(doc: WorkspaceDocument): void {
     const menu = this.menuContent
     menu.replaceChildren()
-    const url = isDrawn(doc) ? window.location.href : fileTabUrl(this.opts.shuttleBase, doc.path, doc.owner)
+    const bytes = fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of (doc.kind === 'family' ? [['Open in new tab', false]] : [['Open in new tab', false], ['Download', true]]) as Array<[string, boolean]>) {
       const a = element('a', 'ws-menu-item', label)
-      a.href = download ? fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner) : url
+      a.href = download || !isDrawn(doc) ? bytes : window.location.href
       if (download) a.download = doc.name
-      else { a.target = '_blank'; a.rel = 'noopener' }
+      else {
+        a.target = '_blank'; a.rel = 'noopener noreferrer'
+        // A page that declares a public page opens there, once its head says so.
+        if (!isDrawn(doc)) void fileTabUrl(this.opts.shuttleBase, doc.path, doc.owner).then(url => { a.href = url })
+      }
       menu.append(a)
     }
     menu.append(button('ws-menu-item', 'Copy path', () => {

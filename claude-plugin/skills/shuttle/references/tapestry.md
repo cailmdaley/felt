@@ -141,6 +141,7 @@ A page that lives at a public address and needs storage, an origin of its own, o
 Wherever the board would show the tapestry (a thread, the reader, a thread's own page, Open in new tab), it shows that address instead, at the page's own origin, as a browser tab would; its thumbnail is a card naming the site. A sent HTML file can declare a page the same way.
 The `<meta>` goes in `<head>`. Only a public `https` address counts: an IP address, the board's own host, or a loopback, private or tailnet name (`localhost`, a single-label name, `*.local`, `*.internal`, `*.ts.net`) is ignored, and the file shows sealed as usual.
 The page has to allow being framed (GitHub Pages does). Keep a body for anyone who opens the file outside Shuttle; a link to the page is enough.
+The board's keys, swipes and height fitting do not reach inside a declared page: it keys and scrolls itself within the frame the board gives it, which never grows to the page's length.
 
 ## Copy-paste primitives
 

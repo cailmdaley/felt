@@ -651,7 +651,7 @@ describe('minified production document keyboard bridge', () => {
     const [frame] = frames(documents[0].key)
     expect(frame.getAttribute('src')).toBe(deck)
     expect(frame.hasAttribute('srcdoc')).toBe(false)
-    expect(frame.getAttribute('sandbox')!.split(' ').sort()).toEqual(['allow-downloads', 'allow-forms', 'allow-modals', 'allow-popups', 'allow-popups-to-escape-sandbox', 'allow-same-origin', 'allow-scripts'])
+    expect(frame.getAttribute('sandbox')!.split(' ').sort()).toEqual(['allow-downloads', 'allow-forms', 'allow-popups', 'allow-popups-to-escape-sandbox', 'allow-same-origin', 'allow-scripts'])
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
     expect(frame.getAttribute('allow')).toBe('fullscreen')
     // The board cannot pause a page it cannot reach: hidden, it runs nowhere.

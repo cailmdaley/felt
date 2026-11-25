@@ -1,4 +1,5 @@
 import { provesContent } from '../documentResources.js'
+import { DOCUMENT_HEAD } from '../../sdk/remotePage.js'
 export interface DocumentTitle { title?: string; preview: string; etag?: string; change?: { branch?: string; number?: number; additions?: number; deletions?: number } }
 const titles = new Map<string, DocumentTitle>()
 const versions = new Map<string, DocumentTitle>()
@@ -54,8 +55,6 @@ export function watchDocumentTitles(listener: (key: string) => void): () => void
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
-/** Titles and previews are read from a document's head, so it is all that is parsed or versioned. */
-const VERSION_HEAD = 65536
 const clean = (text: string): string => text.replace(/\0/g, '').replace(/\s+/g, ' ').trim().slice(0, 240)
 
 /**
@@ -64,7 +63,7 @@ const clean = (text: string): string => text.replace(/\0/g, '').replace(/\s+/g, 
  * only its first 64 KiB is ever parsed, whatever length of source arrives.
  */
 export function extractDocumentTitle(path: string, whole: string | Uint8Array): Omit<DocumentTitle, 'etag'> {
-  const source = typeof whole === 'string' ? whole.slice(0, VERSION_HEAD) : whole.subarray(0, VERSION_HEAD)
+  const source = typeof whole === 'string' ? whole.slice(0, DOCUMENT_HEAD) : whole.subarray(0, DOCUMENT_HEAD)
   if (typeof source === 'string') {
     if (/\.change\.json$/i.test(path)) {
       const title = /"title"\s*:\s*("(?:\\.|[^"\\])*")/.exec(source)?.[1]
@@ -144,7 +143,7 @@ export function cacheDocumentTitle(key: string, path: string, source: string | U
   if (provesContent(etag)) content = etag
   else {
     let hash = 2166136261
-    const end = Math.min(source.length, VERSION_HEAD)
+    const end = Math.min(source.length, DOCUMENT_HEAD)
     for (let i = 0; i < end; i++) hash = Math.imul(hash ^ (typeof source === 'string' ? source.charCodeAt(i) : source[i]), 16777619)
     content = `${etag ?? ''}|${source.length}|${hash >>> 0}`
   }

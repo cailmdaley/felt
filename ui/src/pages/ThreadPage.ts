@@ -13,7 +13,7 @@ import { hasLiveWorker, type KanbanCard } from '../board/KanbanTypes.js'
 import { lastSaid } from '../board/said.js'
 import { attachConversation, workerOpener } from '../board/sessionHistory.js'
 import { slug } from '../board/threadOutline.js'
-import { basename, fileBytesUrl } from '../board/utils.js'
+import { basename } from '../board/utils.js'
 import { ChannelStream, withdraws } from '../board/views/ChannelStream.js'
 import { Voice } from '../board/voice.js'
 import { createWorkerStarter } from '../board/workerStart.js'
@@ -67,13 +67,16 @@ const fiberPath = (card: KanbanCard): string => {
   return card.path.startsWith('/') ? card.path : `${card.feltStore ?? ''}/${card.path}`
 }
 
-/** Opens a file in a 3/4-screen floating window (RexWeb Popup on Mac, normal window/tab in browsers). */
+/**
+ * Opens a file in a 3/4-screen floating window (RexWeb Popup on Mac, normal
+ * window/tab in browsers), which learns nothing of the page that opened it.
+ */
 const openFloating = (url: string): void => {
   const availW = typeof window.screen?.availWidth === 'number' && window.screen.availWidth > 0 ? window.screen.availWidth : 1440
   const availH = typeof window.screen?.availHeight === 'number' && window.screen.availHeight > 0 ? window.screen.availHeight : 900
   const w = Math.max(640, Math.round(availW * 0.75))
   const h = Math.max(480, Math.round(availH * 0.75))
-  window.open(url, '_blank', `width=${w},height=${h}`)
+  window.open(url, '_blank', `width=${w},height=${h},noopener,noreferrer`)
 }
 
 /**
@@ -248,7 +251,7 @@ export class ThreadPage {
         const file = parseDocKey(key)
         if (!file) return
         if (isChangeFile(file.path)) { this.openChangeFile(file); return }
-        openFloating(fileTabUrl(this.opts.base, file.path, file.owner))
+        void fileTabUrl(this.opts.base, file.path, file.owner).then(openFloating)
       },
       lead: card => this.leads.of(card),
       said: card => { const root = feed.index.rootOf(card); return lastSaid(card, feed.index, feed.board.records([root.uid ?? root.id])) },
@@ -354,14 +357,14 @@ export class ThreadPage {
       this.filesBtn.toggleAttribute('data-active', this.mode === 'files')
       this.changesBtn.toggleAttribute('data-active', this.mode === 'changes')
 
+      const showPosts = hasPostsMode && this.mode === 'posts'
+      const showChanges = hasChangesMode && this.mode === 'changes'
+      this.reveal(this.postsPane, showPosts, this.stream)
+      this.reveal(this.family.el, !showPosts && !showChanges, this.familyViewer)
       this.family.update(card, this.feed.index)
       document.title = card.name
       this.checkAutoAdvance(card)
 
-      const showPosts = hasPostsMode && this.mode === 'posts'
-      const showChanges = hasChangesMode && this.mode === 'changes'
-      this.postsPane.hidden = !showPosts
-      this.family.el.hidden = showPosts || showChanges
       this.changesPane.hidden = !showChanges
       if (showPosts) {
         this.renderPosts(card)
@@ -395,8 +398,8 @@ export class ThreadPage {
       this.consoleAct.paint()
       this.verbs.paint()
       this.modes.hidden = true
-      this.postsPane.hidden = true
-      this.family.el.hidden = true
+      this.reveal(this.postsPane, false, this.stream)
+      this.reveal(this.family.el, false, this.familyViewer)
       this.changesPane.hidden = true
       this.disposeChanges()
       this.hostMismatch.hidden = true
@@ -425,6 +428,17 @@ export class ThreadPage {
     this.unbindKeyboard?.()
     this.workerActions?.dispose()
     this.family.dispose()
+  }
+
+  /** The constitution's view as a viewer: hidden, it draws nothing, a page it shows is paused, and a declared public page leaves. */
+  private readonly familyViewer = { suspend: () => suspendFileViewer(this.family.el), resume: () => resumeFileViewer(this.family.el) }
+
+  /** Shows or hides a pane; hidden, what runs in it is suspended until it shows again. */
+  private reveal(pane: HTMLElement, shown: boolean, runs: { suspend(): void; resume(): void }): void {
+    if (pane.hidden === !shown) return
+    pane.hidden = !shown
+    if (shown) runs.resume()
+    else runs.suspend()
   }
 
   private setMode(mode: ThreadMode): void {
@@ -775,7 +789,7 @@ export class ThreadPage {
         const file = parseDocKey(doc)
         if (!file) return
         if (isChangeFile(file.path)) { this.openChangeFile(file); return }
-        openFloating(fileTabUrl(this.opts.base, file.path, file.owner))
+        void fileTabUrl(this.opts.base, file.path, file.owner).then(openFloating)
       },
       edits: false,
     }
@@ -934,7 +948,7 @@ export class ThreadPage {
     const file = from && linkedFile(from, href, window.location.href)
     if (file) {
       if (isChangeFile(file.path)) { this.openChangeFile(file); return }
-      window.open(fileBytesUrl(this.opts.base, file.path, file.owner) + file.hash, '_blank', 'noopener')
+      void fileTabUrl(this.opts.base, file.path, file.owner, file.hash).then(url => window.open(url, '_blank', 'noopener,noreferrer'))
     } else if (isExternalHref(href)) window.open(href, '_blank', 'noopener')
   }
 }

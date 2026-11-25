@@ -370,6 +370,10 @@ export class ChannelStream {
     this.lastTop = this.el.scrollTop
   }
 
+  /** Its host is hidden: the files unfolded in it stop running. */
+  suspend(): void { for (const unfold of this.unfolds.values()) unfold.suspend() }
+  resume(): void { for (const unfold of this.unfolds.values()) unfold.resume() }
+
   dispose(): void {
     this.sweep(new Set())
     this.rows.clear()

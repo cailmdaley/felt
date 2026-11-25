@@ -154,7 +154,8 @@ describe('createPost', () => {
 describe('createFilePreview', () => {
   const client = new ShuttleClient()
 
-  it('previews a figure as an image and a page in a sandboxed frame, from its owner', () => {
+  it('previews a figure as an image and a page in a sandboxed frame, from its owner', async () => {
+    const client = new ShuttleClient({ fetch: (async () => new Response('<!doctype html><title>Fit</title><p>The fit</p>')) as unknown as typeof globalThis.fetch })
     const figure = createFilePreview({ path: '/r/plot.png', at: NOW - 60_000, caption: 'the fit' }, client, { origin: 'remote', now: NOW })
     expect(figure.dataset.kind).toBe('figure')
     expect(figure.querySelector('img[data-slot="media"]')!.getAttribute('src')).toBe('/api/v1/file?path=%2Fr%2Fplot.png&origin=remote')
@@ -167,9 +168,19 @@ describe('createFilePreview', () => {
     expect(frame.getAttribute('sandbox')).toBe('')
     expect(frame.hasAttribute('inert')).toBe(true)
     expect(frame.tabIndex).toBe(-1)
-    expect(frame.getAttribute('src')).toBe('/api/v1/file-assets/local/r/tapestry.html')
+    // Its head is read first, for a declaration.
+    await vi.waitFor(() => expect(frame.getAttribute('src')).toBe('/api/v1/file-assets/local/r/tapestry.html'))
     expect(page.querySelector('[data-slot="age"]')).toBeNull()
     unskinned(figure)
+  })
+
+  it('draws a page that declares a public page as a card naming its site, in no frame', async () => {
+    const client = new ShuttleClient({ fetch: (async () => new Response('<!doctype html><head><meta name="shuttle-page" content="https://talks.example.org/deck/"></head>')) as unknown as typeof globalThis.fetch })
+    const page = createFilePreview({ path: '/r/tapestry.html' }, client)
+    await vi.waitFor(() => expect(page.dataset.kind).toBe('card'))
+    expect(page.querySelector('iframe')).toBeNull()
+    expect(page.querySelector('[data-slot="media"]')!.textContent).toBe('talks.example.org')
+    unskinned(page)
   })
 
   it('draws a card or a row from its name alone, and opens from its name', () => {
@@ -191,7 +202,8 @@ describe('createTapestryFrame', () => {
     expect(framed.hasAttribute('data-empty')).toBe(false)
     await vi.waitFor(() => expect(framed.querySelector('iframe[data-slot="frame"]')).not.toBeNull())
     const frame = framed.querySelector<HTMLIFrameElement>('iframe[data-slot="frame"]')!
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith('http://hub:4000/api/v1/file?path=%2Fs%2Fwork%2Ffit-model%2Ftapestry.html&origin=remote', undefined)
+    // Only its head is read, for a declaration.
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('http://hub:4000/api/v1/file?path=%2Fs%2Fwork%2Ffit-model%2Ftapestry.html&origin=remote', { headers: { Range: 'bytes=0-65535' } })
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
     expect(frame.src).toBe('http://hub:4000/api/v1/file-assets/remote/s/work/fit-model/tapestry.html')
     expect(new URL('fig.png', frame.src).href).toBe('http://hub:4000/api/v1/file-assets/remote/s/work/fit-model/fig.png')

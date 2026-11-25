@@ -210,7 +210,8 @@ export class FamilyPage {
   unfoldFile(key: DocKey): void {
     if (isChangeDoc(key)) return
     const uid = this.card && (this.card.uid ?? this.card.id)
-    if (this.shown?.card === uid && this.shown.files.has(key)) {
+    // Asleep, it unfolds the file when it next paints.
+    if (this.awake && this.shown?.card === uid && this.shown.files.has(key)) {
       this.unfold.unfold(key, false)
       return
     }

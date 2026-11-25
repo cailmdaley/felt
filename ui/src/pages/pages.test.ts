@@ -55,7 +55,7 @@ describe('the thread page', () => {
   let requests: Array<{ url: string; method: string; body?: string; headers: Headers }>
   let go: { went: boolean; place: string }
   let serveFiles: ((url: string, method: string, headers: Headers) => Response) | undefined
-  let boardRecords: Array<{ id: string; kind: string; fiber: string; by: { fiber?: string; label?: string }; to?: { label?: string; fiber?: string }; text?: string; timestamp: number; originName: string }>
+  let boardRecords: Array<{ id: string; kind: string; fiber: string; by: { fiber?: string; label?: string }; to?: { label?: string; fiber?: string }; text?: string; timestamp: number; originName: string; files?: string[] }>
   let sentFiles: Array<{ fullPath: string; basename: string; timestamp: number; sessionId: string; uid: string; host: string; show?: boolean; caption?: string }>
   let usageResponse: Record<string, unknown> | null
   let voiceResponse: Record<string, unknown>
@@ -148,12 +148,20 @@ describe('the thread page', () => {
     for (let i = 0; i < 4; i++) await settle()
     return { page, feed, navigate }
   }
+  /** Opens a family root's Tapestry / Files tab: its constitution's view draws only while it shows. */
+  async function filesTab(page: ThreadPage): Promise<void> {
+    page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="files"]')!.click()
+    for (let i = 0; i < 4; i++) await settle()
+  }
   const rows = (page: ThreadPage): string[] => [...page.el.querySelectorAll<HTMLElement>('.ov-thread')].map(row => row.dataset.fiber!)
   const row = (page: ThreadPage, fiber: string): HTMLElement => page.el.querySelector<HTMLElement>(`.ov-thread[data-fiber="${fiber}"]`)!
   const posts = () => requests.filter(each => each.method === 'POST')
 
   it('draws one constitution from the board\'s feed, lists no tempered or discarded thread, and never touches Rex focus', async () => {
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    // A family root opens on its Posts: its constitution's view, hidden beside them, has not drawn.
+    expect(page.el.querySelector('.ov-name')!.textContent).toBe('')
+    await filesTab(page)
     expect(page.el.querySelector('.ov-name')!.textContent).toBe('calibration-report')
     expect(rows(page)).toContain('thread-analysis')
     page.el.querySelector<HTMLButtonElement>('.ov-quiet')!.click()
@@ -174,6 +182,7 @@ describe('the thread page', () => {
 
   it('in a Rex pane, a row asks the owner to go there and the page stays; a fiber with no worker is said to be not running, one Rex could not show is said so', async () => {
     const { page, navigate } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}&in=rex`)
+    await filesTab(page)
     row(page, 'thread-analysis').click()
     await settle()
     expect(posts().map(each => [each.url, JSON.parse(each.body!)])).toStrictEqual([['/api/v1/go', { fiber_id: 'thread-analysis', origin: WORKSPACE_HOST }]])
@@ -193,6 +202,7 @@ describe('the thread page', () => {
 
   it('in a browser, a row opens that fiber\'s page and moves no Rex', async () => {
     const { page, navigate } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    await filesTab(page)
     row(page, 'thread-analysis').click()
     expect(navigate).toHaveBeenCalledWith(`${window.location.origin}/thread?f=thread-analysis%40${WORKSPACE_HOST}`)
     expect(posts()).toStrictEqual([])
@@ -212,6 +222,7 @@ describe('the thread page', () => {
       return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
     }
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    await filesTab(page)
     const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
     expect(unfold.hasAttribute('data-unfolded')).toBe(true)
     expect(unfold.hasAttribute('data-pinned-file')).toBe(true)
@@ -234,8 +245,36 @@ describe('the thread page', () => {
     expect(unfold.querySelector<HTMLButtonElement>('.uf-fold')!.hidden).toBe(true)
   })
 
+  it('runs a page only in the pane on show: one unfolded in Posts moves to Tapestry / Files and back with the tab', async () => {
+    const html = '<!doctype html><p>Tapestry</p>'
+    const tapestry = '/fixture-store/workspace/.felt/research/workspace/calibration-report/tapestry.html'
+    serveFiles = url => {
+      if (!url.includes('tapestry.html')) return new Response('{}', { status: 404 })
+      if (url.startsWith('/api/v1/file-info')) return new Response(JSON.stringify({ exists: true, size: html.length, modified_at: Math.floor(now / 1000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    }
+    boardRecords = [{ id: 'rec-tapestry', kind: 'post', fiber: WORKSPACE_UID, by: { fiber: WORKSPACE_UID }, to: { label: 'human' }, text: 'The tapestry is ready.', timestamp: now - 10_000, originName: WORKSPACE_HOST, files: [tapestry] }]
+    const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    const postsPane = page.el.querySelector<HTMLElement>('.pg-posts')!
+    const familyPane = page.el.querySelector<HTMLElement>('.ws-family-page')!
+    // The viewers running the page (a rewrite stages its next frame beside the one on show); a preview's inert frame runs nothing.
+    const frames = (pane: HTMLElement): number => [...pane.querySelectorAll('.kbn-fileview-frame-wrap')].filter(wrap => wrap.querySelector(':scope > iframe')).length
+    // Hidden beside the Posts, the constitution's view runs nothing.
+    expect(frames(familyPane)).toBe(0)
+    postsPane.querySelector<HTMLButtonElement>('.uf-card')!.click()
+    await vi.waitFor(() => expect(frames(postsPane)).toBe(1))
+    await filesTab(page)
+    await vi.waitFor(() => expect(frames(familyPane)).toBe(1))
+    expect(frames(postsPane)).toBe(0)
+    page.el.querySelector<HTMLButtonElement>('.pg-mode-pill[data-mode="posts"]')!.click()
+    for (let i = 0; i < 4; i++) await settle()
+    await vi.waitFor(() => expect(frames(postsPane)).toBe(1))
+    expect(frames(familyPane)).toBe(0)
+  })
+
   it('its constitution unfolds in place, beside its files, and folds when asked for again', async () => {
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    await filesTab(page)
     page.el.querySelector<HTMLButtonElement>('.ov-tools [data-part="constitution"]')!.click()
     for (let i = 0; i < 4; i++) await settle()
     const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
@@ -291,8 +330,9 @@ describe('the thread page', () => {
     }
     sentFiles = [{ fullPath: '/tmp/initial.png', basename: 'initial.png', timestamp: now - 5_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: true }]
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    await filesTab(page)
     const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
-    // Tapestry unfolds on mount; the pre-existing show:true file does not yank away from it.
+    // Tapestry unfolds when its view first shows; the pre-existing show:true file does not yank away from it.
     expect([unfold.hasAttribute('data-unfolded'), unfold.querySelector('.uf-name')!.textContent]).toStrictEqual([true, 'Tapestry'])
 
     // New show:true arrives while idle -> auto-advances to it without stealing focus.
@@ -337,6 +377,7 @@ describe('the thread page', () => {
       return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
     }
     const { page } = await open(`?f=${WORKSPACE_UID}@${WORKSPACE_HOST}`)
+    await filesTab(page)
     const unfold = page.el.querySelector<HTMLElement>('.ov-unfold')!
     expect(unfold.querySelector('.uf-name')!.textContent).toBe('Tapestry')
     sentFiles = [{ fullPath: '/tmp/quiet.png', basename: 'quiet.png', timestamp: now + 10_000, sessionId: 's1', uid: WORKSPACE_UID, host: WORKSPACE_HOST, show: false }]

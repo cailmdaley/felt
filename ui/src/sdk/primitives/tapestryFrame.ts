@@ -1,6 +1,6 @@
 import type { ShuttleClient } from '../client.js'
 import { fileKindOf, tapestryPathOf } from '../model.js'
-import { remotePage, remotePageFrame } from '../remotePage.js'
+import { declaredPageOf, remotePageFrame } from '../remotePage.js'
 import type { ShuttleFiber } from '../types.js'
 import { flag, part } from './dom.js'
 
@@ -16,7 +16,7 @@ export interface TapestryFrameOptions {
  * companion page on its owner in an `<iframe data-slot="frame"
  * sandbox="allow-scripts">`, addressed so its relative figures and styles
  * resolve, or, when the owner found none, an `empty` slot and the root's
- * `data-empty` flag. A page joins the root once it is read; one that declares
+ * `data-empty` flag. A page joins the root once its head is read; one that declares
  * itself a public page elsewhere (`<meta name="shuttle-page">`) is framed as
  * that page, at its own origin.
  */
@@ -30,18 +30,19 @@ export function createTapestryFrame(fiber: ShuttleFiber, client: ShuttleClient, 
   }
   const title = options.title ?? `${fiber.fiber.name} — tapestry`
   const page = fileKindOf(path) === 'page'
-  const served = page ? client.htmlAssetUrl(path, fiber.origin) : client.fileUrl(path, fiber.origin)
-  const mount = (remote: string | null): void => {
-    const frame = remote ? remotePageFrame(remote, title) : part('iframe', 'frame')
-    frame.dataset.slot = 'frame'
-    if (!remote) {
-      frame.setAttribute('sandbox', 'allow-scripts')
-      frame.src = served
-      frame.title = title
-    }
-    root.append(frame)
+  const served = (): HTMLIFrameElement => {
+    const frame = part('iframe', 'frame')
+    frame.setAttribute('sandbox', 'allow-scripts')
+    frame.src = page ? client.htmlAssetUrl(path, fiber.origin) : client.fileUrl(path, fiber.origin)
+    frame.title = title
+    return frame
   }
-  if (!page) mount(null)
-  else void client.fileText(path, fiber.origin).catch(() => '').then(html => mount(remotePage(html, [location.href, served])))
+  if (!page) root.append(served())
+  else void declaredPageOf(client, path, fiber.origin).then(remote => {
+    // A declared page that lands on the board's own origin gives way to the served file.
+    const frame = remote ? remotePageFrame(remote, title, () => frame.replaceWith(served())) : served()
+    frame.dataset.slot = 'frame'
+    root.append(frame)
+  })
   return root
 }
