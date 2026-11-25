@@ -60,16 +60,10 @@ defmodule Shuttle.Voice.Recovered do
     {"#{launch}-#{stamp(wall)}.md", markdown}
   end
 
-  @doc "A one-line caption for the send."
+  @doc "A one-line caption for the send of nonempty `rows`."
   def caption(rows, summary) do
-    case rows do
-      [] ->
-        "Said while muted"
-
-      _ ->
-        "Said while muted, #{clock(hd(rows)["t"])}–#{clock(List.last(rows)["t"])} " <>
-          "(#{minutes(summary["seconds"])} held): nothing was delivered"
-    end
+    "Said while muted, #{clock(hd(rows)["t"])}–#{clock(List.last(rows)["t"])} " <>
+      "(#{minutes(summary["seconds"])} held): nothing was delivered"
   end
 
   @doc "The route in force at spoken time `t`, or nil before the first."
