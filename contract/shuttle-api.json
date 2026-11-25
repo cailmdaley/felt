@@ -1941,7 +1941,7 @@
     "/file": {
       "get": {
         "summary": "Read artifact bytes from their host.",
-        "description": "path must be absolute on the selected host, not relative to a fiber or confined to a felt store. Returns raw bytes with the file’s content type; conditional and byte-range requests are supported and forwarded to the owner. A path the owner cannot open is served from the copy the newest retained send of it took, when there is one.",
+        "description": "path must be absolute on the selected host, not relative to a fiber or confined to a felt store. Returns raw bytes with the file’s content type; conditional and byte-range requests are supported and forwarded to the owner, and HEAD answers the same statuses without a body. A path the owner cannot open is served, with its own content type, from the copy the newest retained send of it took, when there is one.",
         "tags": [
           "core"
         ],
@@ -2060,7 +2060,7 @@
             }
           },
           "403": {
-            "description": "The file is there but the owner could not open it: a macOS privacy folder (~/Documents, ~/Desktop, ~/Downloads) is refused without an open, and any other open not finished within 5 seconds counts as unreadable. Answered at once.",
+            "description": "The file is there but the owner could not open it, or opening it did not finish within 3 seconds (macOS holds an open in a folder it keeps from a launchd daemon; a stalled mount holds one too). A folder whose opens did not finish answers at once for 30 seconds after.",
             "content": {
               "application/json": {
                 "schema": {

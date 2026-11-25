@@ -276,6 +276,32 @@ defmodule Shuttle.SentFilesProjectionTest do
     end
   end
 
+  # The bug: a SendUserFile of `~/Documents/01.png` with no recorded cwd, or
+  # of an absolute path with `..` in it, kept the path as written, so it never
+  # matched the cleaned path the board asks for or the sender's copy key.
+  test "a sent path is expanded from home and cleaned, as its sender keys its copy" do
+    Shuttle.Test.Env.put_env("HOME", "/home/fixture")
+
+    event = %{
+      "type" => "file_sent",
+      "sessionId" => "s",
+      "cwd" => "",
+      "files" => ["~/Documents/01.png", "/tmp/talk/../talk//02.png"],
+      "copies" => %{
+        "~/Documents/01.png" => String.duplicate("a", 64) <> ".png",
+        "/tmp/talk/../talk//02.png" => String.duplicate("b", 64)
+      }
+    }
+
+    assert [%{paths: ["/home/fixture/Documents/01.png", "/tmp/talk/02.png"]}] =
+             SentFiles.project(event)
+
+    assert SentFiles.copies(event, "/store") == %{
+             "/home/fixture/Documents/01.png" => "/store/" <> String.duplicate("a", 64) <> ".png",
+             "/tmp/talk/02.png" => "/store/" <> String.duplicate("b", 64)
+           }
+  end
+
   test "malformed path clears cannot become whole-fiber clears" do
     clear = %{"type" => "sent_files_cleared", "uid" => @match_ulid, "timestamp" => 20}
 
@@ -403,9 +429,12 @@ defmodule Shuttle.SentFilesProjectionTest do
   defp legacy_sent_paths(_), do: nil
 
   defp legacy_absolutize(path, cwd) do
-    if Path.type(path) == :relative and is_binary(cwd) and cwd != "",
-      do: Path.expand(path, cwd),
-      else: path
+    cond do
+      path == "~" or String.starts_with?(path, "~/") -> Shuttle.Env.expand(path)
+      Path.type(path) == :absolute -> Path.expand(path)
+      is_binary(cwd) and cwd != "" -> Path.expand(path, cwd)
+      true -> path
+    end
   end
 
   defp legacy_event_uid(event, session_uids) do

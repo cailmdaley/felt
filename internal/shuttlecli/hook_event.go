@@ -144,9 +144,9 @@ type eventLine struct {
 	BackgroundTasks int             `json:"backgroundTasks,omitempty"`
 	Tool            string          `json:"tool,omitempty"`
 	ToolInput       json.RawMessage `json:"toolInput,omitempty"`
-	// Copies names, for each sent file the sender could copy, its copy in the
-	// host's copy store (sent_copies.go). Carried by every send: `file_sent`
-	// lines and a harness's SendUserFile tool call.
+	// Copies names, for each sent file the sender could copy, its copy's
+	// basename in the host's copy store (sent_copies.go). Carried by every
+	// send: `file_sent` lines and a harness's SendUserFile tool call.
 	Copies map[string]string `json:"copies,omitempty"`
 }
 
@@ -315,6 +315,15 @@ func (a *app) renderEvent(input eventHookInput) (string, bool) {
 	encoded, err := encodeJSONLine(line)
 	if err != nil {
 		return "", false
+	}
+	// An oversized send gives up its copies before its caption; its files are
+	// still served from their originals.
+	if len(encoded) > eventMaxLineBytes && line.Copies != nil {
+		line.Copies = nil
+		encoded, err = encodeJSONLine(line)
+		if err != nil {
+			return "", false
+		}
 	}
 	if len(encoded) > eventMaxLineBytes && line.ToolInput != nil {
 		line.ToolInput = trimToolInput(line.ToolInput)

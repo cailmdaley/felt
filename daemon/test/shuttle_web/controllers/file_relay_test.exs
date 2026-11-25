@@ -15,6 +15,17 @@ defmodule ShuttleWeb.FileRelayTest do
     @behaviour Plug
     def init(opts), do: opts
 
+    def call(%{query_string: "path=%2Flocked.png"} = conn, opts) do
+      send(opts[:observer], {:owner_request, conn.method, []})
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(
+        403,
+        ~s({"error":"owner could not read file","detail":"opening it failed: eperm"})
+      )
+    end
+
     def call(conn, opts) do
       send(opts[:observer], {:owner_request, conn.method, get_req_header(conn, "range")})
 
@@ -117,6 +128,24 @@ defmodule ShuttleWeb.FileRelayTest do
              {"content-length", Integer.to_string(@size)}
 
     assert_receive {:owner_request, "HEAD", []}
+  end
+
+  # A native viewer that failed asks the owner for the bytes with a HEAD; the
+  # owner's 403 must reach it as a 403 over the real transport, not a 502.
+  test "the owner's 403 crosses a real relay for HEAD and GET" do
+    url = "/api/v1/file?path=%2Flocked.png&origin=file-owner"
+
+    conn = head(api_conn(), url)
+    assert_receive {:owner_request, "HEAD", []}
+    assert conn.status == 403
+    assert conn.resp_body == ""
+    assert_file_security(conn)
+
+    conn = get(api_conn(), url)
+    assert_receive {:owner_request, "GET", []}
+
+    assert %{"error" => "owner could not read file", "detail" => "opening it failed: eperm"} =
+             json_response(conn, 403)
   end
 
   test "an If-Range mismatch preserves the owner's full 200 fallback" do

@@ -989,85 +989,115 @@ defmodule ShuttleWeb.FileControllerTest do
   # The bug: a worker sent the human a PNG from ~/Documents. The launchd daemon
   # could stat it (`/file-info` answered at once) but its open blocked on a
   # macOS privacy prompt, so `/file` never answered and the board blamed the
-  # browser. An unreadable file now answers 403 at once, distinct from 404,
-  # and a sent file is served from the copy its send took.
+  # browser. An unreadable file now answers 403, distinct from 404, an open
+  # that hangs costs the request one bounded probe of its folder, and a sent
+  # file is served from the copy its send took.
   describe "files the owner cannot read" do
     @tag :tmp_dir
-    test "a file this daemon cannot open is a prompt 403, not a 404", %{tmp_dir: dir} do
-      path = Path.join(dir, "locked.png")
-      File.write!(path, "png")
-      File.chmod!(path, 0)
-      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
-
-      for conn <- [get(api_conn(), url), head(api_conn(), url)] do
-        assert conn.status == 403
-      end
-
-      assert %{"error" => "owner could not read file", "detail" => "opening it failed: eacces"} =
-               json_response(get(api_conn(), url), 403)
-
-      info = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(path)}")
-      assert %{"exists" => true, "size" => 3} = json_response(info, 200)
+    test "a file this daemon may not open is a prompt 403, not a 404", %{tmp_dir: dir} do
+      if root?(), do: :ok, else: assert_locked_is_403(dir)
     end
 
     @tag :tmp_dir
-    @tag if(:os.type() == {:unix, :darwin}, do: [], else: [skip: "macOS privacy folders"])
-    test "a file in a macOS privacy folder answers 403 without being opened", %{tmp_dir: dir} do
-      Shuttle.Test.Env.put_env("HOME", dir)
-      path = Path.join([dir, "Documents", "talk", "01-title.png"])
-      File.mkdir_p!(Path.dirname(path))
-      File.write!(path, "png")
+    test "an open that hangs answers 403 within the probe's deadline, and its folder at once after",
+         %{tmp_dir: dir} do
+      Shuttle.Test.Env.put_app_env(:folder_probe_deadline_ms, 200)
+      # A FIFO's open blocks until a writer comes, as macOS holds an open of a
+      # protected file while its consent prompt waits.
+      fifo = Path.join(dir, "prompt.png")
+      {_, 0} = System.cmd("mkfifo", [fifo])
+      sibling = Path.join(dir, "figure.png")
+      File.write!(sibling, "png")
 
-      {micros, conn} =
-        :timer.tc(fn -> get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}") end)
+      {micros, conn} = :timer.tc(fn -> get(api_conn(), file_url(fifo)) end)
 
-      assert %{"detail" => "macOS keeps this host's daemon out of" <> _} =
+      assert %{
+               "error" => "owner could not read file",
+               "detail" => "opening it did not finish" <> _
+             } =
                json_response(conn, 403)
 
-      assert micros < 1_000_000
+      assert micros < 5_000_000
+      assert ShuttleWeb.FolderAccess.cached(sibling) == :hangs
+
+      # The folder's verdict stands: its readable sibling is not touched, and
+      # `/file-info` says so without opening either.
+      assert %{"detail" => "opening it did not finish" <> _} =
+               json_response(head_or_get(:get, sibling), 403)
+
+      assert head_or_get(:head, sibling).status == 403
+
+      assert json_response(get(api_conn(), info_url(sibling)), 200) == %{
+               "exists" => true,
+               "readable" => false
+             }
     end
 
     @tag :tmp_dir
-    test "a sent path is served from its copy once the original is gone or locked", %{
+    test "a sent path is served from its copy once the original is gone, locked or hung", %{
       tmp_dir: dir
     } do
+      Shuttle.Test.Env.put_app_env(:folder_probe_deadline_ms, 200)
       store = Path.join(dir, "sent-files")
       File.mkdir_p!(store)
-      stored = Path.join(store, "0123abcd.png")
-      File.write!(stored, "sent bytes")
+      # Named without an extension: the content type is the requested path's.
+      name = String.duplicate("ab", 32)
+      File.write!(Path.join(store, name), "sent bytes")
+      link = String.duplicate("cd", 32)
+      File.ln_s!(Path.join(dir, "elsewhere.png"), Path.join(store, link))
+      File.write!(Path.join(dir, "elsewhere.png"), "not a copy")
       gone = Path.join(dir, "scratch/frame.png")
       locked = Path.join(dir, "locked.png")
       File.write!(locked, "locked bytes")
       File.chmod!(locked, 0)
-      live = Path.join(dir, "events.jsonl")
+      hung = Path.join(dir, "hung/frame.png")
+      File.mkdir_p!(Path.dirname(hung))
+      {_, 0} = System.cmd("mkfifo", [Path.join(dir, "hung/prompt")])
+      outside = Path.join(dir, "outside.png")
+      linked = Path.join(dir, "linked.png")
+
+      events_file = Path.join(dir, "events.jsonl")
 
       File.write!(
-        live,
+        events_file,
         Jason.encode!(%{
           "type" => "file_sent",
           "sessionId" => "sess",
           "timestamp" => 1,
-          "files" => [gone, locked],
-          "copies" => %{gone => stored, locked => stored}
+          "files" => [gone, locked, hung, outside, linked],
+          "copies" => %{
+            gone => name,
+            locked => name,
+            hung => name,
+            outside => "../elsewhere.png",
+            linked => link
+          }
         }) <> "\n"
       )
 
-      Shuttle.Test.EventFiles.scope!(live)
+      Shuttle.Test.EventFiles.scope!(events_file)
+      # The folder of `hung` hangs: its probe opens the FIFO.
+      assert json_response(get(api_conn(), file_url(Path.join(dir, "hung/prompt"))), 403)
 
-      for path <- [gone, locked] do
-        conn = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
-        assert conn.status == 200
+      sent =
+        if root?(),
+          do: [gone, hung, Path.join(dir, "scratch/../scratch//frame.png")],
+          else: [gone, locked, hung, Path.join(dir, "scratch/../scratch//frame.png")]
+
+      for path <- sent do
+        conn = get(api_conn(), file_url(path))
+        assert conn.status == 200, path
         assert conn.resp_body == "sent bytes"
         assert get_resp_header(conn, "content-type") |> List.first() =~ "image/png"
 
-        info = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(path)}")
-        assert %{"exists" => true, "size" => 10} = json_response(info, 200)
+        assert %{"exists" => true, "size" => 10} =
+                 json_response(get(api_conn(), info_url(path)), 200)
       end
 
-      unsent =
-        get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(Path.join(dir, "x.png"))}")
-
-      assert unsent.status == 404
+      # A copy is a file directly inside the store, never a link out of it.
+      for path <- [outside, linked, Path.join(dir, "x.png")] do
+        assert get(api_conn(), file_url(path)).status == 404, path
+      end
     end
 
     test "the owner's 403 crosses the owner-routed forward" do
@@ -1087,6 +1117,27 @@ defmodule ShuttleWeb.FileControllerTest do
       assert %{"error" => "owner could not read file"} = json_response(conn, 403)
     end
   end
+
+  defp root?, do: System.cmd("id", ["-u"]) |> elem(0) |> String.trim() == "0"
+
+  defp assert_locked_is_403(dir) do
+    path = Path.join(dir, "locked.png")
+    File.write!(path, "png")
+    File.chmod!(path, 0)
+
+    assert head_or_get(:head, path).status == 403
+
+    assert %{"error" => "owner could not read file", "detail" => "opening it failed: eacces"} =
+             json_response(head_or_get(:get, path), 403)
+
+    assert %{"exists" => true, "readable" => false, "size" => 3} =
+             json_response(get(api_conn(), info_url(path)), 200)
+  end
+
+  defp head_or_get(:head, path), do: head(api_conn(), file_url(path))
+  defp head_or_get(:get, path), do: get(api_conn(), file_url(path))
+  defp file_url(path), do: "/api/v1/file?path=#{URI.encode_www_form(path)}"
+  defp info_url(path), do: "/api/v1/file-info?path=#{URI.encode_www_form(path)}"
 
   describe "remote forward" do
     test "forwards a remote-owned path to the owning daemon and relays bytes" do

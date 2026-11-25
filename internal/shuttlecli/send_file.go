@@ -165,25 +165,34 @@ func (a *app) recordSentFiles(paths []string, session, caption string, show bool
 // appendFileSent records a send of files, which are absolute paths: it copies
 // each into the copy store beside sink, then appends the file_sent event that
 // names the files and their copies. Nothing is recorded unless every file was
-// read.
+// read, and nothing is copied for a send whose line would be too long.
 func (a *app) appendFileSent(sink string, line eventLine, files []string, caption string, show bool) error {
-	copies, err := copySentFiles(sink, files)
-	if err != nil {
-		return err
+	line.Type = "file_sent"
+	encode := func(copies map[string]string) (string, error) {
+		line.Copies = copies
+		return encodeJSONLine(struct {
+			eventLine
+			Files   []string `json:"files"`
+			Caption string   `json:"caption,omitempty"`
+			Show    bool     `json:"show,omitempty"`
+		}{eventLine: line, Files: files, Caption: caption, Show: show})
 	}
-	line.Type, line.Copies = "file_sent", copies
-	event := struct {
-		eventLine
-		Files   []string `json:"files"`
-		Caption string   `json:"caption,omitempty"`
-		Show    bool     `json:"show,omitempty"`
-	}{eventLine: line, Files: files, Caption: caption, Show: show}
-	encoded, err := encodeJSONLine(event)
-	if err != nil {
-		return err
+	longest := map[string]string{}
+	for _, file := range files {
+		longest[file] = strings.Repeat("0", sentCopyNameMax)
 	}
-	if len(encoded) > eventMaxLineBytes {
+	if encoded, err := encode(longest); err != nil {
+		return err
+	} else if len(encoded) > eventMaxLineBytes {
 		return fmt.Errorf("delivery exceeds %d bytes; send fewer files at once", eventMaxLineBytes)
+	}
+	copies, err := a.copySentFiles(sink, files)
+	if err != nil {
+		return err
+	}
+	encoded, err := encode(copies)
+	if err != nil {
+		return err
 	}
 	if err := a.appendEventLine(sink, encoded); err != nil {
 		return fmt.Errorf("record delivery: %w", err)

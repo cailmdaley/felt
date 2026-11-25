@@ -66,6 +66,12 @@ defmodule Shuttle.EventStream do
   The poller calls it inside the owner-feed request, which must
   wait neither on the filesystem nor behind a full reseed of a shrunken file.
   It is as fresh as the last poll, catch-up read or seed to complete.
+
+  `sent_copy/2` reads the same table: the stream keeps, per sent path, the
+  copy the newest retained send of it took (`Shuttle.SentFiles.copies/2`),
+  one row a path, so the file route finds a copy with one lookup. The copies
+  live in `sent-files/` beside the stream and follow it through rotation like
+  the board records: a send's copy is known while the send is retained.
   """
 
   use GenServer
@@ -88,7 +94,10 @@ defmodule Shuttle.EventStream do
     # rotated one — the window a racing rotation lands in. Tests rotate there.
     # `clock` returns epoch ms; the waiting projection prunes and reads by it.
     # `table` holds compact reader projections; `published` tracks which
-    # waiting and binding maps produced them.
+    # waiting and binding maps produced them. `copies_rotated` and
+    # `copies_live` map each sent path to its newest copy in either file;
+    # `copies_published` is the pair the table's copy rows came from, with
+    # their merge.
     defstruct [
       :events_file,
       :table,
@@ -102,6 +111,9 @@ defmodule Shuttle.EventStream do
       sent_live: [],
       board_rotated: %{},
       board_live: %{},
+      copies_rotated: %{},
+      copies_live: %{},
+      copies_published: {nil, nil, %{}},
       waiting: %{},
       seed_events: nil,
       binding: SessionBinding.new()
@@ -138,6 +150,21 @@ defmodule Shuttle.EventStream do
   @spec sent_events(GenServer.server()) :: [SentFiles.event()]
   def sent_events(server \\ __MODULE__),
     do: call(server, :sent_events)
+
+  @doc """
+  The copy store file holding the newest retained send's copy of `path`, an
+  absolute cleaned path, or `nil`. An ETS read like `session_activity/1`; a
+  stream that is not running knows no copies.
+  """
+  @spec sent_copy(String.t(), atom()) :: String.t() | nil
+  def sent_copy(path, server \\ __MODULE__) when is_binary(path) do
+    case :ets.lookup(Shuttle.Env.server(server), {:copy, path}) do
+      [{_key, stored}] -> stored
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
 
   @doc "The retained board records, after catching up."
   @spec board_records(GenServer.server()) :: %{optional(String.t()) => map()}
@@ -297,6 +324,8 @@ defmodule Shuttle.EventStream do
         sent_live: [],
         board_rotated: %{},
         board_live: %{},
+        copies_rotated: %{},
+        copies_live: %{},
         waiting: known,
         seed_events: [],
         binding: binding
@@ -314,7 +343,9 @@ defmodule Shuttle.EventStream do
             | sent_rotated: from_rotated.sent_live,
               sent_live: [],
               board_rotated: from_rotated.board_live,
-              board_live: %{}
+              board_live: %{},
+              copies_rotated: from_rotated.copies_live,
+              copies_live: %{}
           },
           lines
         )
@@ -403,7 +434,9 @@ defmodule Shuttle.EventStream do
         | sent_rotated: state.sent_live,
           sent_live: [],
           board_rotated: state.board_live,
-          board_live: %{}
+          board_live: %{},
+          copies_rotated: state.copies_live,
+          copies_live: %{}
       }
 
       # The inode comes from the open file, so it names the file these lines
@@ -446,6 +479,7 @@ defmodule Shuttle.EventStream do
       state
       | sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
         board_live: Board.fold(state.board_live, event),
+        copies_live: Map.merge(state.copies_live, SentFiles.copies(event, copy_store(state))),
         binding: binding
     }
   end
@@ -459,13 +493,23 @@ defmodule Shuttle.EventStream do
 
   defp schedule_poll(ms), do: Process.send_after(self(), :poll, ms)
 
+  # The copy store beside the stream, where every send's copies live
+  # (`internal/shuttlecli/sent_copies.go`).
+  defp copy_store(%State{events_file: path}), do: Path.join(Path.dirname(path), "sent-files")
+
   # Publish reader-sized projections only when the underlying maps change.
   # Event histories stay in this process, rather than being copied out of ETS
   # on every poller and interrupt-watcher read.
-  defp publish(%State{waiting: waiting, binding: binding, published: {waiting, binding}} = state),
-    do: state
+  defp publish(state), do: state |> publish_activity() |> publish_copies()
 
-  defp publish(%State{table: table, waiting: waiting, binding: binding, clock: clock} = state) do
+  defp publish_activity(
+         %State{waiting: waiting, binding: binding, published: {waiting, binding}} = state
+       ),
+       do: state
+
+  defp publish_activity(
+         %State{table: table, waiting: waiting, binding: binding, clock: clock} = state
+       ) do
     phases = WaitingTracker.phases(waiting, clock.())
 
     turns =
@@ -475,5 +519,24 @@ defmodule Shuttle.EventStream do
 
     :ets.insert(table, [{:activity, phases}, {:open_turns, turns}, {:binding, binding}])
     %{state | published: {waiting, binding}}
+  end
+
+  # A path's row is replaced in place, never absent between two publishes
+  # that both know a copy of it; a path no retained send names loses its row.
+  defp publish_copies(
+         %State{copies_rotated: rotated, copies_live: live, copies_published: {rotated, live, _}} =
+           state
+       ),
+       do: state
+
+  defp publish_copies(%State{table: table, copies_published: {_, _, before}} = state) do
+    copies = Map.merge(state.copies_rotated, state.copies_live)
+    :ets.insert(table, for({path, stored} <- copies, do: {{:copy, path}, stored}))
+
+    for path <- Map.keys(before),
+        not Map.has_key?(copies, path),
+        do: :ets.delete(table, {:copy, path})
+
+    %{state | copies_published: {state.copies_rotated, state.copies_live, copies}}
   end
 end

@@ -159,11 +159,12 @@ defmodule ShuttleWeb.ApiContractTest do
     assert range.status == 416
     assert_contract(range, "/file")
 
-    for {query, status} <- [
-          {%{}, 400},
-          {%{path: "relative"}, 400},
-          {%{path: Path.join(tmp, "absent")}, 404}
-        ] do
+    for {query, status} <-
+          [
+            {%{}, 400},
+            {%{path: "relative"}, 400},
+            {%{path: Path.join(tmp, "absent")}, 404}
+          ] ++ locked_file(tmp) do
       refused = get(api_conn(), "/api/v1/file", query)
       assert refused.status == status
       assert_contract(refused, "/file")
@@ -208,6 +209,18 @@ defmodule ShuttleWeb.ApiContractTest do
     refused = get(api_conn(), "/api/v1/sent-files")
     assert refused.status == 400
     assert_contract(refused, "/sent-files")
+  end
+
+  # A file the owner may not open answers the contract's 403; root opens it.
+  defp locked_file(tmp) do
+    locked = Path.join(tmp, "locked.html")
+    File.write!(locked, "locked")
+    File.chmod!(locked, 0)
+
+    case File.read(locked) do
+      {:error, :eacces} -> [{%{path: locked}, 403}]
+      {:ok, _bytes} -> []
+    end
   end
 end
 

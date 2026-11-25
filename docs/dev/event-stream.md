@@ -89,16 +89,22 @@ Switching sessions within a client can leave a stale record.
 ### Sent-file copies
 
 Every send carries `copies`, an object naming, for each sent absolute path,
-its copy in `sent-files/` beside the stream: `file_sent` lines from
-`shuttle send-file`, `show`, `post --file`, `close --file` and `change`, and a
-harness's `SendUserFile` tool call, whose copies `shuttle hook event` takes
-inside the harness, keyed by the path resolved against the event's `cwd`.
+the basename of its copy in `sent-files/` beside the stream: `file_sent` lines
+from `shuttle send-file`, `show`, `post --file`, `close --file` and `change`,
+and a harness's `SendUserFile` tool call, whose copies `shuttle hook event`
+takes inside the harness, keyed by the path resolved against the event's
+`cwd` (or home, for a leading `~`) and cleaned.
 The writer copies with the sender's access (`internal/shuttlecli/sent_copies.go`),
-content-addressed as `<sha256><ext>`; a re-send of the same bytes renews one
-copy's mtime, and each send removes copies untouched for 30 days. A file over
-256 MiB is recorded without a copy, as is a hook path the hook could not read.
-`Shuttle.SentFiles.copy_for/2` reads the newest send's copy of a path for the
-file route, which serves it when the daemon cannot read the path itself.
+content-addressed as `<sha256>[.<ext>]`, the extension kept when it is one to
+sixteen letters or digits; a re-send of the same bytes replaces one copy with
+a fresh one. Under the store's `.lock`, at most once an hour, a send removes
+copies untouched for 30 days. A file over 256 MiB is recorded without a copy,
+as is a hook path the hook could not read within its 10-second budget; a
+`SendUserFile` line too long for the stream drops its copies before its
+caption. The daemon reads only basenames of that form, so a copy is always a
+file directly in the store. `Shuttle.EventStream` keeps the newest retained
+send's copy of each path, which the file route serves when the daemon cannot
+read the path itself.
 
 ### Clearing sent files
 

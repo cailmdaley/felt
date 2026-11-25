@@ -43,7 +43,9 @@ defmodule Shuttle.Test.EventFiles do
 
   @doc """
   Make a stream following `live` this test's `Shuttle.EventStream`, and point
-  `SHUTTLE_EVENTS_FILE` at `live` for the readers that stat it. Returns its name.
+  `SHUTTLE_EVENTS_FILE` at `live` for the readers that stat it. Returns its
+  name, which is what the scope resolves `Shuttle.EventStream` to, since its
+  readers of published projections look up the table of that name.
   """
   def scope!(live, opts \\ []) do
     Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", live)
@@ -58,6 +60,7 @@ defmodule Shuttle.Test.EventFiles do
       EventStream
     )
 
+    Shuttle.Test.Env.put_server(EventStream, name)
     name
   end
 end

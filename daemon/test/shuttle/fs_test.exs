@@ -114,24 +114,6 @@ defmodule Shuttle.FSTest do
     refute FS.protected?(root, [protected])
   end
 
-  # A FIFO's open blocks until a writer comes, as macOS holds an open of a
-  # protected file while its consent prompt waits: the answer still arrives.
-  test "readable answers within its bound when an open blocks", %{tmp_dir: root} do
-    fifo = Path.join(root, "fifo")
-    {_, 0} = System.cmd("mkfifo", [fifo])
-    {micros, result} = :timer.tc(fn -> FS.readable(fifo, 100) end)
-    assert result == {:error, :timeout}
-    assert micros < 1_000_000
-    # A writer lets the abandoned open finish and give back its I/O thread.
-    {:ok, writer} = FS.open(fifo, [:write])
-    FS.close(writer)
-
-    path = Path.join(root, "plain")
-    File.write!(path, "x")
-    assert FS.readable(path, 1_000) == :ok
-    assert FS.readable(root <> "/missing", 1_000) == {:error, :enoent}
-  end
-
   test "empty directories and bang failures retain File result shapes", %{tmp_dir: root} do
     assert {:ok, []} = FS.ls(root)
     assert {:error, :enoent} = FS.read(root <> "/missing")

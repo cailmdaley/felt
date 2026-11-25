@@ -9,10 +9,12 @@ defmodule Shuttle.SentFiles do
   `caption`. A harness's `SendUserFile` tool call, recorded by the hook, carries
   its paths in `toolInput.files` and its words in `toolInput.caption`. Each
   entry carries its send's `caption` when it had one; the key is absent
-  otherwise. Both kinds carry `copies`, each sent path's copy in the host's
-  copy store, taken by the sending process; `copy_for/2` reads them for the
-  file route.
-  Paths are absolute or resolved against the owning host's recorded `cwd`.
+  otherwise. Both kinds carry `copies`, naming each sent path's copy, taken by
+  the sending process, by its basename in the host's copy store
+  (`copies/2`; `Shuttle.EventStream.sent_copy/2` serves them to the file
+  route).
+  Paths are absolute, or resolved against the owning host's recorded `cwd` or
+  its home for a leading `~`, and cleaned.
   A worker's tmux-embedded ULID associates the delivery with its fiber. Native
   sessions without a tmux name use the session ledger's fiber claim; an
   unclaimed session remains addressable by its raw `sessionId`.
@@ -77,6 +79,7 @@ defmodule Shuttle.SentFiles do
   alias Shuttle.EventStream
 
   @cap 50
+  @copy_name ~r/\A[0-9a-f]{64}(\.[A-Za-z0-9]{1,16})?\z/
 
   @typedoc """
   One projected sent-file event: what the event itself says, absolutized, with
@@ -90,7 +93,6 @@ defmodule Shuttle.SentFiles do
             tmux_session: String.t() | nil,
             caption: String.t() | nil,
             show: boolean(),
-            copies: %{optional(String.t()) => String.t()},
             timestamp: term()
           }
           | %{cleared_uid: String.t(), cleared_path: String.t() | nil, timestamp: integer()}
@@ -150,26 +152,24 @@ defmodule Shuttle.SentFiles do
   end
 
   @doc """
-  The copy the newest send of `path` took, or `nil` when no retained send of
-  it carries one. `path` is absolute, as sends are projected.
-
-  The file route serves a path from this copy when the daemon cannot read the
-  path itself. A stream that is not running knows no copies.
-
-  Opts (for tests): `:stream`.
+  The copies one decoded send event names, `%{path => copy}`: each path
+  absolutized as `project/1` does, each copy its basename joined onto the copy
+  store `store`. Only a basename `<sha256 hex>[.<ext>]` names a copy, so a
+  copy is always a file directly inside `store`. Any other event names none.
   """
-  @spec copy_for(String.t(), keyword()) :: String.t() | nil
-  def copy_for(path, opts \\ []) when is_binary(path) do
-    opts
-    |> events()
-    |> Enum.reverse()
-    |> Enum.find_value(fn
-      %{copies: %{^path => stored}} -> stored
-      _event -> nil
-    end)
-  catch
-    :exit, _reason -> nil
+  @spec copies(map(), Path.t()) :: %{optional(String.t()) => String.t()}
+  def copies(%{"copies" => copies} = event, store) when is_map(copies) do
+    if is_list(sent_paths(event)) do
+      for {path, name} <- copies,
+          is_binary(path) and is_binary(name) and name =~ @copy_name,
+          into: %{},
+          do: {:binary.copy(absolutize(path, event["cwd"])), Path.join(store, name)}
+    else
+      %{}
+    end
   end
+
+  def copies(_event, _store), do: %{}
 
   @doc """
   One decoded event → the (possibly empty) list of projected events it
@@ -218,7 +218,6 @@ defmodule Shuttle.SentFiles do
                 tmux_session: copy(event["tmuxSession"]),
                 caption: caption(event),
                 show: event["show"] == true,
-                copies: copies(event),
                 timestamp: event["timestamp"]
               }
             ]
@@ -231,15 +230,6 @@ defmodule Shuttle.SentFiles do
 
   defp copy(value) when is_binary(value), do: :binary.copy(value)
   defp copy(value), do: value
-
-  # Each sent path's copy in the host's copy store, as the sender recorded it.
-  defp copies(%{"copies" => copies}) when is_map(copies) do
-    for {path, stored} <- copies, is_binary(path) and is_binary(stored), into: %{} do
-      {:binary.copy(path), :binary.copy(stored)}
-    end
-  end
-
-  defp copies(_event), do: %{}
 
   # The words a send came with, blank ones none.
   defp caption(event) do
@@ -350,13 +340,17 @@ defmodule Shuttle.SentFiles do
   # route serves only ABSOLUTE paths — a relative one is a 400, so the card's
   # thumbnail renders as a broken-image icon. Resolve against the event's `cwd`
   # here, in `SentFiles`, which runs on the OWNING host (owner-routed): that cwd
-  # is a path on the same host where the file actually lives. An already-absolute
-  # path passes through verbatim; a relative path with no recorded cwd is left
-  # as-is, with nothing to resolve it against.
+  # is a path on the same host where the file actually lives. A leading `~` is
+  # that host's home, cwd or none. Every resolved path is cleaned, as the board
+  # and the sender clean the paths they name; a relative path with no recorded
+  # cwd is left as-is, with nothing to resolve it against.
   defp absolutize(path, cwd) do
-    if Path.type(path) == :relative and is_binary(cwd) and cwd != "",
-      do: Path.expand(path, cwd),
-      else: path
+    cond do
+      path == "~" or String.starts_with?(path, "~/") -> Shuttle.Env.expand(path)
+      Path.type(path) == :absolute -> Path.expand(path)
+      is_binary(cwd) and cwd != "" -> Path.expand(path, cwd)
+      true -> path
+    end
   end
 
   # The fiber id an event belongs to: prefer the ULID embedded in the tmux

@@ -362,13 +362,20 @@ board compares a content fingerprint, leaving unchanged views untouched.
 
 A local path's bytes come from the file itself when the owner can open it,
 else from the copy the newest retained send of that path took (each send
-records `copies`, see [the event stream](../dev/event-stream.md)); `/file-info`
-answers the same way. A path with neither is a 404. A regular file the owner
-cannot open is a 403 `{error: "owner could not read file", detail}`, answered
-at once: macOS keeps a launchd daemon out of `~/Documents`, `~/Desktop` and
-`~/Downloads`, so those folders are refused without an open, and any other
-open that has not finished in 5 seconds counts as unreadable. An owner-routed
-request relays the owner's 403; a 502 means the owner did not answer.
+records `copies`, see [the event stream](../dev/event-stream.md)), served with
+the requested path's content type; `/file-info` answers the same way. A path
+with neither is a 404. A regular file the owner cannot open is a 403
+`{error: "owner could not read file", detail}`, for `GET` and `HEAD` alike.
+An open can block without bound (macOS holds one in a folder it keeps from a
+launchd daemon, such as `~/Documents`, while a consent prompt nobody sees
+waits; a stalled mount holds every open beneath it), so before the owner
+touches a path, a throwaway process opens it: one that has not finished in 3
+seconds is killed, and the 403 says so. That verdict stands for the folder
+for 30 seconds, during which its files answer at once. No folder is refused
+by name: a daemon with access to `~/Documents` serves it. `/file-info` never
+opens a file; it adds `readable: false` when the file's mode bars the owner or
+its folder is known to hang. An owner-routed request relays the owner's 403;
+a 502 means the owner did not answer.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; it carries a weak `ETag` and honors

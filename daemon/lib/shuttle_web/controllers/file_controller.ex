@@ -31,19 +31,21 @@ defmodule ShuttleWeb.FileController do
 
   **A sent path falls back to its copy.** Sending a file copies it, from the
   sender's own process, into the host's copy store (`Shuttle.SentFiles`
-  records each send's `copies`). A local path is served from the file itself
+  reads each send's `copies`). A local path is served from the file itself
   when this daemon can read it, so a sent report that is still being rewritten
   stays live and its relative figures resolve; otherwise from the copy the
-  newest send of that path took. Only a path with neither answers 404, or 403
-  when the file is there but this daemon cannot read it.
+  newest send of that path took (`Shuttle.EventStream.sent_copy/2`). Only a
+  path with neither answers 404, or 403 when the file is there but this
+  daemon cannot read it. The content type is always the requested path's.
 
-  **Reading is bounded.** A file this daemon cannot open answers 403 at once,
-  never a hung request: macOS keeps launchd processes out of `~/Documents`,
-  `~/Desktop` and `~/Downloads` (`Shuttle.FS.protected?/1`), and holds an open
-  of such a file while it waits on a consent prompt nobody may see. Those
-  folders are refused without an open, and any other open that has not
-  finished within `@open_timeout_ms` counts as unreadable
-  (`Shuttle.FS.readable/2`). The owner-routed leg relays the owner's answer.
+  **No open can hang a request.** macOS holds an open of a file in a folder
+  it keeps from launchd processes while a consent prompt nobody sees waits,
+  and a stalled mount holds every open beneath it. Before `/file` touches a
+  path, `ShuttleWeb.FolderAccess` says whether opens in its folder return; a
+  folder whose opens hang answers 403 within the probe's deadline the first
+  time and at once after. `/file-info` never opens a file: it answers from
+  `stat` and adds `readable: false` when the file's mode bars this daemon or
+  its folder is known to hang. The owner-routed leg relays the owner's answer.
 
   **Conditional and range reads on both owner legs.** Small GETs use a content
   digest. A whole GET of a larger document (up to 64 MiB, not media) uses its
@@ -72,7 +74,6 @@ defmodule ShuttleWeb.FileController do
   alias Shuttle.OriginRouter
 
   @digest_limit 1024 * 1024
-  @open_timeout_ms 5_000
   @hash_limit 64 * 1024 * 1024
   @range_limit 4 * 1024 * 1024
 
@@ -166,10 +167,13 @@ defmodule ShuttleWeb.FileController do
         else: conn |> put_resp_content_type(MIME.from_path(path)) |> send_resp(200, page)
     else
       {:relay, forwarded} -> relay_file_bytes(conn, forwarded)
+      {:resolved, resolution} -> serve_resolved(conn, path, resolution)
       _ -> serve(conn, path, origin)
     end
   end
 
+  # The page's whole body, else what to serve instead: the owner's answer to
+  # relay, or a local path's resolution, so the path is resolved only once.
   defp framed_body(path, origin) do
     case OriginRouter.route(origin) do
       {:remote, remote} ->
@@ -186,16 +190,23 @@ defmodule ShuttleWeb.FileController do
         end
 
       :local ->
-        with :absolute <- Path.type(path),
-             {:ok, source, %File.Stat{size: size}} when size <= @hash_limit <- resolve(path),
-             {:ok, body} <- Shuttle.FS.read(source) do
-          {:ok, body}
-        else
-          _ -> :error
-        end
+        if Path.type(path) == :absolute, do: framed_local(path), else: :error
 
       _ ->
         :error
+    end
+  end
+
+  defp framed_local(path) do
+    case resolve(path) do
+      {:ok, source, %File.Stat{size: size}} = found when size <= @hash_limit ->
+        case Shuttle.FS.read(source) do
+          {:ok, body} -> {:ok, body}
+          {:error, _reason} -> {:resolved, found}
+        end
+
+      resolution ->
+        {:resolved, resolution}
     end
   end
 
@@ -267,16 +278,43 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp serve_info(conn, path) do
-    with_local_file(conn, path,
-      found: fn _source, stat ->
-        info_json(conn, %{exists: true, modified_at: stat.mtime, size: stat.size})
-      end,
-      unreadable: fn _reason, stat ->
-        info_json(conn, %{exists: true, modified_at: stat.mtime, size: stat.size})
-      end,
-      missing: fn -> info_json(conn, %{exists: false}) end
-    )
+    if Path.type(path) != :absolute,
+      do: relative_path(conn),
+      else: info_json(conn, info_for(path))
   end
+
+  # A file's metadata without opening it: its own when this daemon may read
+  # it, else its sent copy's, else what is known of it.
+  defp info_for(path) do
+    local =
+      if ShuttleWeb.FolderAccess.cached(path) == :hangs,
+        do: {:unreadable, nil},
+        else: info_stat(path)
+
+    case {local, sent_copy(path)} do
+      {{:ok, stat}, _copy} -> stat_info(stat)
+      {_local, {:ok, _stored, stat}} -> stat_info(stat)
+      {{:unreadable, nil}, nil} -> %{exists: true, readable: false}
+      {{:unreadable, stat}, nil} -> Map.put(stat_info(stat), :readable, false)
+      {:missing, nil} -> %{exists: false}
+    end
+  end
+
+  defp info_stat(path) do
+    case Shuttle.FS.stat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular, access: access} = stat}
+      when access in [:read, :read_write] ->
+        {:ok, stat}
+
+      {:ok, %File.Stat{type: :regular} = stat} ->
+        {:unreadable, stat}
+
+      _ ->
+        :missing
+    end
+  end
+
+  defp stat_info(stat), do: %{exists: true, modified_at: stat.mtime, size: stat.size}
 
   defp info_json(conn, body) do
     conn
@@ -285,92 +323,91 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp serve_local(conn, path) do
-    with_local_file(conn, path,
-      found: fn source, stat -> serve_with_validators(conn, source, stat) end,
-      unreadable: fn reason, _stat ->
-        conn
-        |> put_status(403)
-        |> json(%{error: "owner could not read file", detail: unreadable_detail(reason)})
-      end,
-      missing: fn -> file_not_found(conn) end
-    )
+    if Path.type(path) != :absolute,
+      do: relative_path(conn),
+      else: serve_resolved(conn, path, resolve(path))
   end
 
-  # The head both local legs share: reject a relative path, then resolve where
-  # its bytes come from. Only what happens at each outcome differs (bytes +
-  # validators vs. a metadata JSON; 404 vs. `exists: false`).
-  defp with_local_file(conn, path, found: found, unreadable: unreadable, missing: missing) do
-    if Path.type(path) != :absolute do
-      conn |> put_status(400) |> json(%{error: "path must be absolute"})
-    else
-      case resolve(path) do
-        {:ok, source, stat} -> found.(source, stat)
-        {:unreadable, reason, stat} -> unreadable.(reason, stat)
-        :missing -> missing.()
-      end
-    end
+  defp relative_path(conn), do: conn |> put_status(400) |> json(%{error: "path must be absolute"})
+
+  defp serve_resolved(conn, path, {:ok, source, stat}),
+    do: serve_with_validators(conn, {path, source}, stat)
+
+  defp serve_resolved(conn, _path, {:unreadable, reason}) do
+    conn
+    |> put_status(403)
+    |> json(%{error: "owner could not read file", detail: unreadable_detail(reason)})
   end
 
-  # Where an absolute local path's bytes come from: the regular file itself
-  # when this daemon can open it, else the copy the newest send of that path
-  # took (`Shuttle.SentFiles.copy_for/1`).
+  defp serve_resolved(conn, _path, :missing), do: file_not_found(conn)
+
+  # Where an absolute local path's bytes come from, decided once per request:
+  # the regular file itself when this daemon can open it, else the copy the
+  # newest send of that path took. Nothing in a folder whose opens hang is
+  # touched.
   defp resolve(path) do
-    case Shuttle.FS.stat(path, time: :posix) do
-      {:ok, %File.Stat{type: :regular} = stat} ->
-        case readable(path) do
-          :ok -> {:ok, path, stat}
-          {:error, reason} -> sent_copy(path) || {:unreadable, reason, stat}
-        end
+    case ShuttleWeb.FolderAccess.verdict(path) do
+      :hangs ->
+        sent_copy(path) || {:unreadable, :timeout}
 
-      _ ->
-        sent_copy(path) || :missing
+      :returns ->
+        case Shuttle.FS.stat(path, time: :posix) do
+          {:ok, %File.Stat{type: :regular} = stat} ->
+            case Shuttle.FS.open(path, [:read]) do
+              {:ok, fd} ->
+                Shuttle.FS.close(fd)
+                {:ok, path, stat}
+
+              {:error, reason} ->
+                sent_copy(path) || {:unreadable, reason}
+            end
+
+          _ ->
+            sent_copy(path) || :missing
+        end
     end
   end
 
-  defp readable(path) do
-    if Shuttle.FS.protected?(path),
-      do: {:error, :protected},
-      else: Shuttle.FS.readable(path, @open_timeout_ms)
-  end
-
+  # The newest retained send's copy of `path`, a regular file inside the copy
+  # store and no link out of it.
   defp sent_copy(path) do
-    with stored when is_binary(stored) <- Shuttle.SentFiles.copy_for(path),
-         {:ok, %File.Stat{type: :regular} = stat} <- Shuttle.FS.stat(stored, time: :posix) do
+    with stored when is_binary(stored) <- Shuttle.EventStream.sent_copy(Path.expand(path)),
+         {:ok, %File.Stat{type: :regular} = stat} <- Shuttle.FS.lstat(stored, time: :posix) do
       {:ok, stored, stat}
     else
       _ -> nil
     end
   end
 
-  defp unreadable_detail(:protected),
-    do: "macOS keeps this host's daemon out of ~/Documents, ~/Desktop and ~/Downloads"
-
   defp unreadable_detail(:timeout),
-    do: "opening it did not finish within #{div(@open_timeout_ms, 1000)} s"
+    do: "opening it did not finish within #{ShuttleWeb.FolderAccess.deadline_ms()} ms"
 
   defp unreadable_detail(reason), do: "opening it failed: #{reason}"
 
-  defp serve_with_validators(conn, path, stat) do
+  # `file` is the requested path, which names the representation (its content
+  # type and media handling), and the source its bytes are read from: the
+  # path itself or its sent copy.
+  defp serve_with_validators(conn, {path, source} = file, stat) do
     cond do
       stat.size > @digest_limit ->
         metadata = ~s(W/"stat-#{stat.mtime}-#{stat.size}-#{stat.inode}")
 
         etag =
-          case large_digest(conn, path, stat) do
+          case large_digest(conn, path, source, stat) do
             nil -> metadata
             digest -> ~s(W/"sha256-#{digest}")
           end
 
-        serve_representation(conn, path, nil, stat.mtime, stat.size, etag)
+        serve_representation(conn, file, nil, stat.mtime, stat.size, etag)
 
       head_request?(conn) ->
-        serve_representation(conn, path, nil, stat.mtime, stat.size, nil)
+        serve_representation(conn, file, nil, stat.mtime, stat.size, nil)
 
       true ->
         # Hash and serve the same small snapshot, including same-second rewrites.
-        case Shuttle.FS.read(path) do
+        case Shuttle.FS.read(source) do
           {:ok, body} ->
-            serve_representation(conn, path, body, stat.mtime, byte_size(body), weak_etag(body))
+            serve_representation(conn, file, body, stat.mtime, byte_size(body), weak_etag(body))
 
           {:error, _reason} ->
             file_not_found(conn)
@@ -382,23 +419,23 @@ defmodule ShuttleWeb.FileController do
   # once per settled version (`ShuttleWeb.FileDigests`), so an unchanged poll is
   # a 304 instead of the whole file again. Media and ranged reads stay bounded:
   # they use a remembered digest when there is one and never read to make one.
-  defp large_digest(conn, path, stat) do
+  defp large_digest(conn, path, source, stat) do
     whole_document? =
       not head_request?(conn) and get_req_header(conn, "range") == [] and
         stat.size <= @hash_limit and
         not Map.has_key?(@media_types, String.downcase(Path.extname(path)))
 
     if whole_document? do
-      case ShuttleWeb.FileDigests.digest(path, stat) do
+      case ShuttleWeb.FileDigests.digest(source, stat) do
         {:ok, digest} -> digest
         :error -> nil
       end
     else
-      ShuttleWeb.FileDigests.lookup(path, stat)
+      ShuttleWeb.FileDigests.lookup(source, stat)
     end
   end
 
-  defp serve_representation(conn, path, body, mtime, size, etag) do
+  defp serve_representation(conn, file, body, mtime, size, etag) do
     conn =
       conn
       |> put_resp_header("last-modified", http_date(mtime))
@@ -411,18 +448,18 @@ defmodule ShuttleWeb.FileController do
         send_resp(conn, 304, "")
 
       head_request?(conn) ->
-        send_full(conn, path, nil, size)
+        send_full(conn, file, nil, size)
 
       true ->
         case requested_range(conn, etag, mtime, size) do
-          {:partial, first, last} -> send_partial(conn, path, body, size, first, last)
-          :unsatisfiable -> send_unsatisfiable(conn, path, size)
-          :ignore -> send_full(conn, path, body, size)
+          {:partial, first, last} -> send_partial(conn, file, body, size, first, last)
+          :unsatisfiable -> send_unsatisfiable(conn, file, size)
+          :ignore -> send_full(conn, file, body, size)
         end
     end
   end
 
-  defp send_full(conn, path, body, size) do
+  defp send_full(conn, {path, source}, body, size) do
     conn =
       conn
       |> representation_headers(path)
@@ -431,11 +468,11 @@ defmodule ShuttleWeb.FileController do
     cond do
       head_request?(conn) -> send_resp(conn, 200, "")
       is_binary(body) -> send_resp(conn, 200, body)
-      true -> send_file(conn, 200, path, 0, size)
+      true -> send_file(conn, 200, source, 0, size)
     end
   end
 
-  defp send_partial(conn, path, body, size, first, last) do
+  defp send_partial(conn, {path, source}, body, size, first, last) do
     length = last - first + 1
 
     conn =
@@ -447,7 +484,7 @@ defmodule ShuttleWeb.FileController do
     if is_binary(body) do
       send_resp(conn, 206, binary_part(body, first, length))
     else
-      send_file(conn, 206, path, first, length)
+      send_file(conn, 206, source, first, length)
     end
   end
 
@@ -456,7 +493,7 @@ defmodule ShuttleWeb.FileController do
   defp head_request?(%{adapter: {_, %{method: "HEAD"}}}), do: true
   defp head_request?(conn), do: conn.method == "HEAD"
 
-  defp send_unsatisfiable(conn, path, size) do
+  defp send_unsatisfiable(conn, {path, _source}, size) do
     conn
     |> representation_headers(path)
     |> put_resp_header("content-range", "bytes */#{size}")

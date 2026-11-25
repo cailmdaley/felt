@@ -204,6 +204,42 @@ defmodule Shuttle.EventStreamTest do
     assert waiting(name) == %{"s1" => "waiting"}
   end
 
+  # The file route finds a sent path's copy with one lookup: the newest
+  # retained send's, a basename inside the store beside the stream, known for
+  # as long as a rotation retains the send.
+  test "a sent path's copy is the newest retained send's", %{path: path} do
+    store = Path.join(Path.dirname(path), "sent-files")
+    name_of = fn char -> String.duplicate(char, 64) <> ".png" end
+
+    sent_line = fn minute, copies ->
+      ev("file_sent", minute, %{"files" => Map.keys(copies), "copies" => copies})
+    end
+
+    append(path, [sent_line.(-5, %{"/tmp/a.png" => name_of.("a")})])
+    name = start(path)
+    assert EventStream.sent_copy("/tmp/a.png", name) == Path.join(store, name_of.("a"))
+
+    append(path, [
+      sent_line.(-4, %{"/tmp/a.png" => name_of.("b"), "/tmp/b.png" => "../../etc/hosts"})
+    ])
+
+    EventStream.sent_events(name)
+    assert EventStream.sent_copy("/tmp/a.png", name) == Path.join(store, name_of.("b"))
+    assert EventStream.sent_copy("/tmp/b.png", name) == nil
+
+    File.rename!(path, path <> ".1")
+    append(path, [sent_line.(-3, %{"/tmp/c.png" => name_of.("c")})])
+    EventStream.sent_events(name)
+    assert EventStream.sent_copy("/tmp/a.png", name) == Path.join(store, name_of.("b"))
+    assert EventStream.sent_copy("/tmp/c.png", name) == Path.join(store, name_of.("c"))
+
+    File.rename!(path, path <> ".1")
+    append(path, [ev("stop", -1)])
+    EventStream.sent_events(name)
+    assert EventStream.sent_copy("/tmp/a.png", name) == nil
+    assert EventStream.sent_copy("/tmp/c.png", name) == Path.join(store, name_of.("c"))
+  end
+
   test "a rotation racing the seed is not counted twice", %{path: path} do
     sent_line = fn minute, file ->
       ev("file_sent", minute, %{"files" => [file]})

@@ -212,6 +212,9 @@ defmodule Shuttle.Application do
       # Owns the ETS table of large files' content digests, keyed on each
       # file version. Pure cache: a restart costs one re-read per file.
       ShuttleWeb.FileDigests,
+      # Owns the ETS table of per-folder open verdicts the file routes probe
+      # before they touch a path. Pure cache: a restart costs one probe each.
+      ShuttleWeb.FolderAccess,
       ShuttleWeb.PeerGateThrottle
     ]
 
