@@ -15,8 +15,8 @@ defmodule Shuttle.Voice.Recovered do
 
   @doc """
   The document for nonempty `rows` (`%{"t", "speaker", "text"}`, oldest first), as
-  `{file name, markdown}`, given the capture's `routes` and the batch's
-  `summary` and closing `wall`.
+  `{file name, markdown}`, given the capture's `routes`, the `recovery` row's
+  `summary` (empty when the recording stopped before one) and `wall`.
   """
   def document(launch, rows, routes, summary, wall) do
     speakers = rows |> Enum.map(& &1["speaker"]) |> Enum.uniq()
@@ -46,7 +46,7 @@ defmodule Shuttle.Voice.Recovered do
     markdown = """
     # Said while muted
 
-    Recovered at #{clock(wall)} from #{minutes(summary["seconds"])} of speech held while the mic was muted#{said}. None of it was delivered; forward what you want.#{left(summary)}
+    #{recovered(summary, wall, said)} None of it was delivered; forward what you want.#{left(summary)}
 
     #{body}\
     """
@@ -56,9 +56,23 @@ defmodule Shuttle.Voice.Recovered do
 
   @doc "A one-line caption for the send of nonempty `rows`."
   def caption(rows, summary) do
-    "Said while muted, #{clock(hd(rows)["t"])}–#{clock(List.last(rows)["t"])} " <>
-      "(#{minutes(summary["seconds"])} held): nothing was delivered"
+    held =
+      case summary do
+        %{"seconds" => seconds} -> "#{minutes(seconds)} held"
+        _ -> "the recording stopped"
+      end
+
+    "Said while muted, #{clock(hd(rows)["t"])}–#{clock(List.last(rows)["t"])} (#{held}): nothing was delivered"
   end
+
+  # A `recovery` row's summary carries the seconds recovered; a recording that
+  # stopped before its recovery closed leaves none.
+  defp recovered(%{"seconds" => seconds}, wall, said),
+    do:
+      "Recovered at #{clock(wall)} from #{minutes(seconds)} of speech held while the mic was muted#{said}."
+
+  defp recovered(_summary, _wall, said),
+    do: "Recovered from speech held while the mic was muted#{said}, before the recording stopped."
 
   @doc "The route in force at spoken time `t`, or nil before the first."
   def route_at(routes, t) do
@@ -82,11 +96,30 @@ defmodule Shuttle.Voice.Recovered do
   this host's own file.
   """
   def send_file(path, card, session, caption) do
+    path = Path.expand(path)
     if sent?(path), do: :ok, else: record(path, card, session, caption)
   end
 
-  # A send recorded before a restart could confirm it is not made twice.
-  defp sent?(path), do: Enum.any?(Shuttle.SentFiles.all_since(0), &(&1.fullPath == path))
+  # A send recorded before a restart could confirm it is not made twice. The
+  # event files are read here, not the stream that projects them, which a
+  # relay resuming at boot can run before.
+  defp sent?(path) do
+    live = Shuttle.EventStream.default_events_file()
+    name = Path.basename(path)
+
+    Enum.any?([Shuttle.EventStream.rotated(live), live], fn file ->
+      File.regular?(file) and
+        file
+        |> File.stream!()
+        |> Enum.any?(fn line ->
+          String.contains?(line, name) and
+            Enum.any?(
+              Shuttle.SentFiles.project(Shuttle.EventStream.decode(line) || %{}),
+              &(path in Map.get(&1, :paths, []))
+            )
+        end)
+    end)
+  end
 
   defp record(path, card, session, caption) do
     terminal =

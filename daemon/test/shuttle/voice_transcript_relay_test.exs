@@ -1355,6 +1355,27 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert %{"recovered_sends" => []} = Jason.decode!(File.read!(relay_path(c, "launch")))
   end
 
+  test "words recovered before the recording stopped still reach the board, without a closing row",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    {send_file, sent} = sender([:ok])
+    start_monitor(c, routes: routes, send_file: send_file)
+    recovered(c.path, "2026-11-06T10:00:05+01:00", "a first batch's words")
+    poll(c)
+    Agent.update(c.observation, fn _ -> {:ok, %{capture: nil}} end)
+    poll(c)
+    sync_sending(c)
+    assert [{path, "fiber-a", _, caption}] = sent.()
+    assert caption =~ "the recording stopped"
+
+    assert File.read!(path) =~
+             "Recovered from speech held while the mic was muted, said 6 Nov 10:00–10:00, before the recording stopped. None of it was delivered"
+
+    assert File.read!(path) =~ "**10:00:05** a first batch's words"
+  end
+
   # A send_file that answers each call with the next of `answers`, and the calls it took.
   defp sender(answers) do
     {:ok, calls} = Agent.start_link(fn -> {answers, []} end)
@@ -1387,7 +1408,6 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
   test "a recovered document is filed under a card this host owns, and unaddressed for another host's",
        c do
-    Shuttle.Test.EventFiles.scope!(Path.join(c.root, "events.jsonl"))
     path = Path.join(c.root, "said-while-muted.md")
     File.write!(path, "# Said while muted\n")
     uid = "01KTCA2CG0FB27BDJX3K8G21FP"
@@ -1412,10 +1432,11 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
                "theirs"
              )
 
-    # A send the event stream already records is not made again.
+    # A send the event stream already records is not made again, however its path is spelled,
+    # with no event stream running yet.
     assert :ok =
              Shuttle.Voice.Recovered.send_file(
-               path,
+               Path.join([c.root, "elsewhere", "..", Path.basename(path)]),
                %{"fiber_id" => uid, "origin" => own},
                "voice-recovered-a",
                "again"

@@ -730,7 +730,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     {name, markdown} =
       Shuttle.Voice.Recovered.document(config["launch"], rows, config["routes"], summary, wall)
 
-    path = Path.join([Shuttle.data_dir(), "voice-recovered", name])
+    path = Path.expand(Path.join([Shuttle.data_dir(), "voice-recovered", name]))
     :ok = Shuttle.FS.mkdir_p(Path.dirname(path))
     :ok = Shuttle.FS.write_atomic(path, markdown)
 
@@ -747,6 +747,11 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       if Enum.any?(sends, &(&1["path"] == path)), do: sends, else: sends ++ [send]
     end)
   end
+
+  defp end_recovered(%{"recovered" => []} = config), do: config
+
+  defp end_recovered(config),
+    do: put_recovered(config, List.last(config["recovered"])["t"], %{})
 
   # One recovered document at a time, off the poll; it leaves the queue only
   # once `shuttle send-file` has recorded it, and a failure waits a while.
@@ -1069,7 +1074,11 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       drained
     else
       # An incomplete suffix stays on disk; no recorder remains to finish it.
-      drained |> Map.put("ended", true) |> flush_all(state)
+      # Words a recovery wrote before the recording stopped still go to the board.
+      drained
+      |> Map.put("ended", true)
+      |> flush_all(state)
+      |> end_recovered()
     end
   end
 
