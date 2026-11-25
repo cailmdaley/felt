@@ -54,3 +54,35 @@ it('a pushed route the board already holds does not close the open menu', async 
   ;(voice as unknown as { pushed: (e: Event) => void }).pushed(new MessageEvent('target', { data: JSON.stringify({ ...swg, cold: false }) }))
   expect(menu()).not.toBeNull()
 })
+
+it('speech said into the muted mic shows how much, marked while it grows, and Recover asks the recorder for it', async () => {
+  const held = () => control.el.querySelector<HTMLElement>('.listen-held')!
+  const recover = () => control.el.querySelector<HTMLButtonElement>('.listen-recover')!
+  const read = (seconds: number, recovering = false) => {
+    voice.status = { ...voice.status!, muted: true, muted_speech: { seconds, since: '2026-11-25T21:52:03+01:00', recovering } }
+    ;(voice as unknown as { notify(): void }).notify()
+  }
+  expect(held().hidden).toBe(true)
+  read(236)
+  expect(held().hidden).toBe(false)
+  expect(held().textContent).toBe('4 min said while mutedRecover')
+  expect(held().hasAttribute('data-arriving')).toBe(true)
+  read(236)
+  expect(held().hasAttribute('data-arriving')).toBe(false)
+  read(42)
+  expect(held().textContent).toBe('42 s said while mutedRecover')
+
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+    posts.push({ url, body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> })
+    const next: VoiceStatus = { ...voice.status!, muted_speech: { ...voice.status!.muted_speech!, recovering: true } }
+    return Promise.resolve({ ok: true, status: 200, json: async () => next })
+  }))
+  recover().click(); await settle()
+  expect(posts.at(-1)).toEqual({ url: '/api/v1/voice/recover', body: { recorder: 'near-host' } })
+  expect(held().textContent).toBe('Recovering 42 s said while muted…Recover')
+  expect(recover().hidden).toBe(true)
+
+  voice.status = { ...voice.status!, enabled: false }
+  ;(voice as unknown as { notify(): void }).notify()
+  expect(held().hidden).toBe(true)
+})

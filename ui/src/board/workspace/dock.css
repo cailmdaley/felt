@@ -124,6 +124,8 @@
   .ws-band-head { gap: 6px; min-height: 0; padding: 2px 4px 0 12px; }
   .ws-dock .ws-worker-acts { --ws-box-line: var(--ws-phone-target); margin: 4px 8px 6px; }
   .ws-dock .ws-worker-tools .listen-dropdown { width: 32px; }
+  /* Held muted speech stands in for the strip, as its amount and Recover. */
+  .ws-dock .listen-held-words, .ws-dock .listen-control:has(.listen-held:not([hidden])) + .ws-voice-strip { display: none; }
 }
 
 .ws-dock {
@@ -262,6 +264,15 @@
 .ws-dock .listen-mic:disabled { opacity: .6; cursor: default; }
 .ws-dock .listen-failed .listen-mic { color: var(--ws-stop); }
 @media (pointer: coarse) { .ws-dock .listen-dropdown { width: 32px; } }
+/* Speech held from the muted mic: how much, and Recover; while more arrives, the held-words alarm and a beating dot. */
+.ws-dock .listen-held { display: inline-flex; align-items: center; gap: 6px; margin: 0 6px 0 2px; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-solid) var(--font-serif); }
+.ws-dock .listen-held[hidden], .ws-dock .listen-recover[hidden] { display: none; }
+.ws-dock .listen-held[data-arriving] { color: var(--ws-voice-held); }
+.ws-dock .listen-held[data-arriving]::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: listen-held-beat 1.2s ease-in-out infinite; }
+.ws-dock .listen-recover { padding: 1px 7px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-fill); color: var(--ws-ink); font: inherit; cursor: pointer; }
+.ws-dock .listen-recover:disabled { opacity: .6; cursor: default; }
+@keyframes listen-held-beat { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .ws-dock .listen-held[data-arriving]::before { animation: none; } }
 .ws-dock .listen-route { padding: 6px 10px 4px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .listen-cadence { display: grid; gap: 4px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .listen-cadence input { width: 5em; color: var(--ws-ink); background: var(--ws-fill); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }

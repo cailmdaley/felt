@@ -5,7 +5,8 @@
  * against mocked daemon routes, then opens from `file://`. The feed still runs
  * through the board's real classifier (`parseCompositeFeed` →
  * `buildKanbanResponseFromComposite`), so the DOM and CSS are production code.
- * `?voice=off|following|pinned|meeting|muted|failed|phone` stages Listen.
+ * `?voice=off|following|pinned|meeting|muted|failed|phone` stages Listen; `?voice=muted-speech` is muted with
+ * four minutes said into the muted mic and more arriving on each read, until Recover.
  * `?capture` opens ordinary Capture.
  * `?example=workspace` selects the fictional documentation example; add
  * `?transcript=live` to give its constitution a live worker, or
@@ -142,7 +143,8 @@ const recorderHost = search.get('recorder') ?? 'local'
 const voiceScenario = search.get('voice') ?? 'off'
 const voiceTarget = { fiber_id: workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run', origin: workspaceFixture ? WORKSPACE_HOST : FOREIGN_HOST, name: 'Null tests' }
 let mockVoice: Record<string, unknown> = {
-  available: true, sources: ['desktop', 'phone'], enabled: voiceScenario !== 'off', muted: voiceScenario === 'muted',
+  available: true, sources: ['desktop', 'phone'], enabled: voiceScenario !== 'off', muted: ['muted', 'muted-speech'].includes(voiceScenario),
+  muted_speech: voiceScenario === 'muted-speech' ? { seconds: 236, since: iso(-50 * 60_000), recovering: false } : null,
   follow: !['pinned', 'meeting'].includes(voiceScenario), system_audio: voiceScenario === 'meeting',
   source: voiceScenario === 'phone' ? 'phone' : 'desktop', launch: voiceScenario === 'off' ? null : 'voice-harness',
   state: voiceScenario === 'off' ? 'off' : voiceScenario === 'failed' ? 'failed' : 'listening',
@@ -1171,6 +1173,12 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       mockVoice.destination = mockVoice.enabled ? mockVoice.target : null
       mockVoice.launch = mockVoice.enabled ? 'voice-harness' : null
     }
+    const speech = mockVoice.muted_speech as { seconds: number; recovering: boolean } | null
+    if (speech && mockVoice.muted && !speech.recovering) mockVoice.muted_speech = { ...speech, seconds: speech.seconds + 3 }
+    return json(mockVoice)
+  }
+  if (url.split('?')[0].endsWith('/api/v1/voice/recover')) {
+    if (mockVoice.muted_speech) mockVoice.muted_speech = { ...(mockVoice.muted_speech as object), recovering: true }
     return json(mockVoice)
   }
   if (url.split('?')[0].endsWith('/api/v1/voice/target')) {

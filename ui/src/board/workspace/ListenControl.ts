@@ -1,5 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
-import { voiceDestination, type Voice, type VoiceUpdate } from '../voice.js'
+import { mutedAmount, voiceDestination, type MutedSpeech, type Voice, type VoiceUpdate } from '../voice.js'
 import type { PhoneListening, PhoneListeningAttempt } from '../phoneListening.js'
 import { isMobileViewport } from '../mobile.js'
 import { TranscriptPanel } from '../voiceTranscript.js'
@@ -42,12 +42,22 @@ function iconButton(className: string): HTMLButtonElement {
 /**
  * One mic toggle, with routing and the less frequent actions in ▾. The menu
  * names the current route (following, pinned to a card, or a meeting there)
- * and offers only the moves that change it.
+ * and offers only the moves that change it. While the recording holds speech
+ * said into the muted mic, the toggle says how much beside a Recover button,
+ * marked while more arrives: the warning that the mic is muted.
  */
 export class ListenControl {
   readonly el = document.createElement('span')
   private readonly button = iconButton('listen-mic')
   private readonly dropdown = iconButton('listen-dropdown')
+  private readonly held = document.createElement('span')
+  private readonly said = document.createElement('span')
+  private readonly amount = document.createElement('span')
+  private readonly words = document.createElement('span')
+  private readonly recoverButton = document.createElement('button')
+  private speech: MutedSpeech | null = null
+  private arriving = false
+  private recovering = false
   private readonly disposers: Array<() => void> = []
   private starting = false
   private menu: HTMLElement | null = null
@@ -68,9 +78,16 @@ export class ListenControl {
     this.dropdown.setAttribute('aria-expanded', 'false')
     this.dropdown.addEventListener('click', () => this.showMenu())
     this.button.addEventListener('click', () => { void this.press() })
+    this.held.className = 'listen-held'
+    this.said.append(this.amount, this.words)
+    this.words.className = 'listen-held-words'
+    this.recoverButton.type = 'button'; this.recoverButton.className = 'listen-recover'
+    this.recoverButton.textContent = 'Recover'
+    this.recoverButton.addEventListener('click', () => this.recover())
+    this.held.append(this.said, this.recoverButton)
     this.disposers.push(opts.voice.subscribe(() => this.paint()))
     if (opts.phone) this.disposers.push(opts.phone.subscribe(() => this.paint()))
-    this.el.append(this.button, this.dropdown)
+    this.el.append(this.button, this.dropdown, this.held)
     this.paint()
   }
 
@@ -122,6 +139,10 @@ export class ListenControl {
     } catch (error) { opening?.cancel(); this.fail(error) }
     finally { this.starting = false; this.paint() }
   }
+  private recover(): void {
+    this.localError = null; this.recovering = true; this.paint()
+    void this.opts.voice.recover().catch(error => this.fail(error)).finally(() => { this.recovering = false; this.paint() })
+  }
   private change(values: VoiceUpdate): void {
     this.localError = null
     void this.opts.voice.set(values).catch(error => this.fail(error))
@@ -158,6 +179,26 @@ export class ListenControl {
     this.el.classList.toggle('listen-failed', !!failure)
     this.el.classList.toggle('listen-muted', muted)
     this.button.classList.toggle('listen-on', on)
+    this.paintHeld(on ? state?.muted_speech ?? null : null, muted)
+  }
+
+  /** What the recording holds from the muted mic; each new reading that grew, while muted, marks speech arriving. */
+  private paintHeld(speech: MutedSpeech | null, muted: boolean): void {
+    if (speech !== this.speech) this.arriving = muted && !!speech && speech.seconds > (this.speech?.seconds ?? 0)
+    this.speech = speech
+    this.held.hidden = !speech
+    if (!speech) return
+    // The phone shows the amount alone.
+    const amount = `${speech.recovering ? 'Recovering ' : ''}${mutedAmount(speech.seconds)}`
+    const words = ` said while muted${speech.recovering ? '…' : ''}`
+    if (this.amount.textContent !== amount) this.amount.textContent = amount
+    if (this.words.textContent !== words) this.words.textContent = words
+    this.recoverButton.hidden = speech.recovering
+    this.recoverButton.disabled = this.recovering
+    this.held.toggleAttribute('data-arriving', this.arriving)
+    this.held.title = speech.recovering ? 'Transcribing it into a document on your board; none of it goes to a worker.'
+      : 'Speech said into the muted mic, held until Listen stops. Recover writes it as a document on your board for you to forward; none of it goes to a worker.'
+    this.recoverButton.title = 'Transcribe what was said while muted into a document on your board'
   }
 
   /** Where words go now, in words. */

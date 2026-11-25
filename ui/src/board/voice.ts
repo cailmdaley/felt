@@ -27,7 +27,19 @@ export interface VoiceStatus {
   /** Where words go right now. */
   destination?: VoiceDestination | null
   paused?: boolean
+  /** Speech said into the muted mic that the recording holds until Listen stops: its seconds, since when, and whether a recovery runs. */
+  muted_speech?: MutedSpeech | null
 }
+
+export interface MutedSpeech {
+  seconds: number
+  since: string | null
+  recovering: boolean
+}
+
+/** How much was said while muted, in the words the mute control uses: `40 s`, `4 min`. */
+export const mutedAmount = (seconds: number): string =>
+  seconds < 60 ? `${Math.max(1, Math.round(seconds))} s` : `${Math.round(seconds / 60)} min`
 
 export const voicePollDelay = (visible: boolean, success: boolean, status: VoiceStatus | null): number | null =>
   !visible ? null : success && status?.enabled && status.state !== 'failed' ? 2_000 : 15_000
@@ -165,11 +177,16 @@ export class Voice {
       this.openEvents()
     }
   }
-  async set(values: VoiceUpdate): Promise<void> {
+  set(values: VoiceUpdate): Promise<void> {
+    // Let a phone start select its recorder; every later control stays there.
+    return this.write('/api/v1/voice', values, values.source === 'phone' && values.enabled)
+  }
+  /** Ask the recording to transcribe what it holds from while muted; the words reach the board as a document, never a worker. */
+  recover(): Promise<void> { return this.write('/api/v1/voice/recover', {}) }
+  private write(path: string, values: object, anyRecorder = false): Promise<void> {
     const task = this.writes.then(async () => {
-      // Let a phone start select its recorder; every later control stays there.
-      const recorder = values.source === 'phone' && values.enabled ? undefined : this.status?.recorder ?? this.recorder
-      const status = await this.post('/api/v1/voice', { ...values, ...(recorder ? { recorder } : {}) })
+      const recorder = anyRecorder ? undefined : this.status?.recorder ?? this.recorder
+      const status = await this.post(path, { ...values, ...(recorder ? { recorder } : {}) })
       this.revision++
       this.status = status
       this.notify()
