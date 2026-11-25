@@ -369,12 +369,14 @@ with neither is a 404. A regular file the owner cannot open is a 403
 An open can block without bound (macOS holds one in a folder it keeps from a
 launchd daemon, such as `~/Documents`, while a consent prompt nobody sees
 waits; a stalled mount holds every open beneath it), so before the owner
-touches a path, a throwaway process opens it: one that has not finished in 3
-seconds is killed, and the 403 says so. That verdict stands for the folder
-for 30 seconds, during which its files answer at once. No folder is refused
-by name: a daemon with access to `~/Documents` serves it. `/file-info` never
-opens a file; it adds `readable: false` when the file's mode bars the owner or
-its folder is known to hang. An owner-routed request relays the owner's 403;
+opens a path, a throwaway process opens that file: one that has not finished
+in 3 seconds is killed, and the 403 says so. That verdict stands for that file
+for 30 seconds, during which it answers at once; the files beside it are
+probed and served on their own. An open that returned also stands for 30
+seconds, during which the owner reads the file without asking again. No
+folder is refused by name: a daemon with access to `~/Documents` serves it.
+`/file-info` never opens a file; it adds `readable: false` when the file's
+mode bars the owner or its open is known to hang. An owner-routed request relays the owner's 403;
 a 502 means the owner did not answer.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the

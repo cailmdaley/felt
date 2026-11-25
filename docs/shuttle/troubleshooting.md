@@ -86,12 +86,20 @@ installs anyway, so the warning is the whole protection. Put both somewhere else
 
 The same holds for a file the board opens by path, such as an embed or a
 report's figure: macOS holds a launchd daemon's open of a file in one of the
-three folders on a consent prompt nobody sees. The daemon opens a path in a
-throwaway process first, so such a file answers 403 within 3 seconds, and the
-rest of its folder at once for 30 seconds after. A daemon started from a
-terminal, or granted access, serves those folders as usual. A file *sent* from
-there still opens, because the sending worker, which can read it, copies it
-into `~/.shuttle/sent-files/`.
+three folders on a consent prompt nobody sees. The daemon opens each file in a
+throwaway process first, so such a file answers 403 within 3 seconds, and at
+once for 30 seconds after; the readable files beside it are served as usual.
+A daemon started from a terminal, or granted access, serves those folders as
+usual. A file *sent* from there still opens, because the sending worker, which
+can read it, copies it into `~/.shuttle/sent-files/`.
+
+That guard has a bound. The daemon still calls `stat` itself, which returns
+under these privacy rules but would hang on a stalled network mount. A file
+whose probe passed is opened and read by the daemon itself for the next 30
+seconds, so a mount that stalls in that window, or a file replaced in it by a
+link into a protected folder, can still hold a request, and the daemon's own
+reads of `~/.shuttle` are never guarded. A handful of requests held that way
+can stop the daemon answering.
 
 That turns the symlink direction into a correctness constraint rather than a
 matter of taste. A project on your Desktop can still be daemon-visible — but

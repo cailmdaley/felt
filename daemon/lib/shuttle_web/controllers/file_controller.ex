@@ -38,14 +38,17 @@ defmodule ShuttleWeb.FileController do
   path with neither answers 404, or 403 when the file is there but this
   daemon cannot read it. The content type is always the requested path's.
 
-  **No open can hang a request.** macOS holds an open of a file in a folder
-  it keeps from launchd processes while a consent prompt nobody sees waits,
-  and a stalled mount holds every open beneath it. Before `/file` touches a
-  path, `ShuttleWeb.FolderAccess` says whether opens in its folder return; a
-  folder whose opens hang answers 403 within the probe's deadline the first
-  time and at once after. `/file-info` never opens a file: it answers from
-  `stat` and adds `readable: false` when the file's mode bars this daemon or
-  its folder is known to hang. The owner-routed leg relays the owner's answer.
+  **No open of an unknown file can hang a request.** macOS holds an open of a
+  file in a folder it keeps from launchd processes while a consent prompt
+  nobody sees waits, and a stalled mount holds every open beneath it. Before
+  `/file` opens a path, `ShuttleWeb.OpenProbe` opens that file in a process
+  it can kill; a file whose open hangs answers 403 within the probe's
+  deadline the first time and at once after, and its readable neighbours are
+  served as usual. `stat`, and the reads of a file whose probe passed, stay
+  in the BEAM (the module says why). `/file-info` never opens a file: it
+  answers from `stat` and adds `readable: false` when the file's mode bars
+  this daemon or its open is known to hang. The owner-routed leg relays the
+  owner's answer.
 
   **Conditional and range reads on both owner legs.** Small GETs use a content
   digest. A whole GET of a larger document (up to 64 MiB, not media) uses its
@@ -286,18 +289,22 @@ defmodule ShuttleWeb.FileController do
   # A file's metadata without opening it: its own when this daemon may read
   # it, else its sent copy's, else what is known of it.
   defp info_for(path) do
-    local =
-      if ShuttleWeb.FolderAccess.cached(path) == :hangs,
-        do: {:unreadable, nil},
-        else: info_stat(path)
+    case info_stat(path) do
+      {:ok, stat} ->
+        if ShuttleWeb.OpenProbe.cached(path) == :hangs,
+          do: copy_info(path) || Map.put(stat_info(stat), :readable, false),
+          else: stat_info(stat)
 
-    case {local, sent_copy(path)} do
-      {{:ok, stat}, _copy} -> stat_info(stat)
-      {_local, {:ok, _stored, stat}} -> stat_info(stat)
-      {{:unreadable, nil}, nil} -> %{exists: true, readable: false}
-      {{:unreadable, stat}, nil} -> Map.put(stat_info(stat), :readable, false)
-      {:missing, nil} -> %{exists: false}
+      {:unreadable, stat} ->
+        copy_info(path) || Map.put(stat_info(stat), :readable, false)
+
+      :missing ->
+        copy_info(path) || %{exists: false}
     end
+  end
+
+  defp copy_info(path) do
+    with {:ok, _stored, stat} <- sent_copy(path), do: stat_info(stat)
   end
 
   defp info_stat(path) do
@@ -342,29 +349,19 @@ defmodule ShuttleWeb.FileController do
   defp serve_resolved(conn, _path, :missing), do: file_not_found(conn)
 
   # Where an absolute local path's bytes come from, decided once per request:
-  # the regular file itself when this daemon can open it, else the copy the
-  # newest send of that path took. Nothing in a folder whose opens hang is
-  # touched.
+  # the regular file itself when this daemon's open of it returns, else the
+  # copy the newest send of that path took. Whatever `stat` finds is probed
+  # before its type is judged, since the open of a FIFO blocks too; nothing
+  # whose probe did not pass is opened here.
   defp resolve(path) do
-    case ShuttleWeb.FolderAccess.verdict(path) do
-      :hangs ->
-        sent_copy(path) || {:unreadable, :timeout}
-
-      :returns ->
-        case Shuttle.FS.stat(path, time: :posix) do
-          {:ok, %File.Stat{type: :regular} = stat} ->
-            case Shuttle.FS.open(path, [:read]) do
-              {:ok, fd} ->
-                Shuttle.FS.close(fd)
-                {:ok, path, stat}
-
-              {:error, reason} ->
-                sent_copy(path) || {:unreadable, reason}
-            end
-
-          _ ->
-            sent_copy(path) || :missing
-        end
+    with {:ok, stat} <- Shuttle.FS.stat(path, time: :posix),
+         :opens <- ShuttleWeb.OpenProbe.verdict(path),
+         %File.Stat{type: :regular} <- stat do
+      {:ok, path, stat}
+    else
+      :hangs -> sent_copy(path) || {:unreadable, :timeout}
+      {:fails, words} -> sent_copy(path) || {:unreadable, words}
+      _missing -> sent_copy(path) || :missing
     end
   end
 
@@ -380,9 +377,9 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp unreadable_detail(:timeout),
-    do: "opening it did not finish within #{ShuttleWeb.FolderAccess.deadline_ms()} ms"
+    do: "opening it did not finish within #{ShuttleWeb.OpenProbe.deadline_ms()} ms"
 
-  defp unreadable_detail(reason), do: "opening it failed: #{reason}"
+  defp unreadable_detail(words), do: "opening it failed: #{words}"
 
   # `file` is the requested path, which names the representation (its content
   # type and media handling), and the source its bytes are read from: the

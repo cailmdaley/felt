@@ -990,7 +990,7 @@ defmodule ShuttleWeb.FileControllerTest do
   # could stat it (`/file-info` answered at once) but its open blocked on a
   # macOS privacy prompt, so `/file` never answered and the board blamed the
   # browser. An unreadable file now answers 403, distinct from 404, an open
-  # that hangs costs the request one bounded probe of its folder, and a sent
+  # that hangs costs the request one bounded probe of that file, and a sent
   # file is served from the copy its send took.
   describe "files the owner cannot read" do
     @tag :tmp_dir
@@ -999,45 +999,105 @@ defmodule ShuttleWeb.FileControllerTest do
     end
 
     @tag :tmp_dir
-    test "an open that hangs answers 403 within the probe's deadline, and its folder at once after",
+    test "an open that hangs answers 403 within the probe's deadline, and at once after",
          %{tmp_dir: dir} do
-      Shuttle.Test.Env.put_app_env(:folder_probe_deadline_ms, 200)
+      Shuttle.Test.Env.put_app_env(:open_probe_deadline_ms, 200)
       # A FIFO's open blocks until a writer comes, as macOS holds an open of a
       # protected file while its consent prompt waits.
       fifo = Path.join(dir, "prompt.png")
       {_, 0} = System.cmd("mkfifo", [fifo])
-      sibling = Path.join(dir, "figure.png")
-      File.write!(sibling, "png")
 
       {micros, conn} = :timer.tc(fn -> get(api_conn(), file_url(fifo)) end)
 
       assert %{
                "error" => "owner could not read file",
-               "detail" => "opening it did not finish" <> _
-             } =
-               json_response(conn, 403)
+               "detail" => "opening it did not finish within 200 ms"
+             } = json_response(conn, 403)
 
       assert micros < 5_000_000
-      assert ShuttleWeb.FolderAccess.cached(sibling) == :hangs
+      assert ShuttleWeb.OpenProbe.cached(fifo) == :hangs
+      assert json_response(head_or_get(:get, fifo), 403)
+      assert head_or_get(:head, fifo).status == 403
+    end
 
-      # The folder's verdict stands: its readable sibling is not touched, and
-      # `/file-info` says so without opening either.
+    # The bug: the verdict was the folder's. One file whose open hung refused
+    # every readable file beside it for 30 seconds, and one whose open
+    # returned let a link beside it into a hanging folder be opened in the
+    # BEAM unprobed. Each file is now probed itself.
+    @tag :tmp_dir
+    test "a file's verdict is its own: a hung neighbour refuses no readable file, a readable one vouches for no link",
+         %{tmp_dir: dir} do
+      Shuttle.Test.Env.put_app_env(:open_probe_deadline_ms, 200)
+      [hung, report, guarded] = for name <- ~w(hung report guarded), do: Path.join(dir, name)
+      Enum.each([hung, report, guarded], &File.mkdir_p!/1)
+      fifo = Path.join(hung, "prompt.png")
+      sibling = Path.join(hung, "figure.png")
+      style = Path.join(report, "style.css")
+      link = Path.join(report, "plot.png")
+      {_, 0} = System.cmd("mkfifo", [fifo])
+      {_, 0} = System.cmd("mkfifo", [Path.join(guarded, "plot.png")])
+      File.write!(sibling, "png")
+      File.write!(style, "css")
+      File.ln_s!(Path.join(guarded, "plot.png"), link)
+
+      assert json_response(get(api_conn(), file_url(fifo)), 403)
+
+      conn = get(api_conn(), file_url(sibling))
+      assert conn.status == 200
+      assert conn.resp_body == "png"
+      assert head_or_get(:head, sibling).status == 200
+      body = json_response(get(api_conn(), info_url(sibling)), 200)
+      assert %{"exists" => true, "size" => 3} = body
+      refute Map.has_key?(body, "readable")
+
+      assert get(api_conn(), file_url(style)).resp_body == "css"
+
       assert %{"detail" => "opening it did not finish" <> _} =
-               json_response(head_or_get(:get, sibling), 403)
+               json_response(get(api_conn(), file_url(link)), 403)
+    end
 
-      assert head_or_get(:head, sibling).status == 403
+    # The bug: a probe's shell was owned by the request that asked for it. A
+    # request killed mid-probe closed the port but left the shell blocked in
+    # its open for good. A supervised task now owns it and kills it at the
+    # deadline whether or not the request is still there.
+    @tag :tmp_dir
+    test "a request killed mid-probe leaves no shell past the deadline", %{tmp_dir: dir} do
+      Shuttle.Test.Env.put_app_env(:open_probe_deadline_ms, 300)
+      fifo = Path.join(dir, "prompt.png")
+      {_, 0} = System.cmd("mkfifo", [fifo])
 
-      assert json_response(get(api_conn(), info_url(sibling)), 200) == %{
-               "exists" => true,
-               "readable" => false
-             }
+      {:ok, request} = Task.start(fn -> get(api_conn(), file_url(fifo)) end)
+      assert eventually(fn -> probing?(fifo) end), "no probe of #{fifo} started"
+      Process.exit(request, :kill)
+
+      assert eventually(fn -> not probing?(fifo) end), "the probe's shell outlived its deadline"
+      assert ShuttleWeb.OpenProbe.cached(fifo) == :hangs
+    end
+
+    # The bug: a request that found the verdict table gone, while its owner
+    # restarted, raised instead of probing, and so did a probe that finished
+    # then. The table is a cache: gone, it is a miss.
+    @tag :tmp_dir
+    test "a file is served while the verdict table's owner is down", %{tmp_dir: dir} do
+      path = Path.join(dir, "figure.png")
+      File.write!(path, "png")
+      :ok = Supervisor.terminate_child(Shuttle.Supervisor, ShuttleWeb.OpenProbe)
+      on_exit(fn -> Supervisor.restart_child(Shuttle.Supervisor, ShuttleWeb.OpenProbe) end)
+
+      for _ <- 1..2 do
+        conn = get(api_conn(), file_url(path))
+        assert conn.status == 200
+        assert conn.resp_body == "png"
+      end
+
+      assert json_response(get(api_conn(), info_url(path)), 200)["size"] == 3
     end
 
     @tag :tmp_dir
     test "a sent path is served from its copy once the original is gone, locked or hung", %{
       tmp_dir: dir
     } do
-      Shuttle.Test.Env.put_app_env(:folder_probe_deadline_ms, 200)
+      Shuttle.Test.Env.put_app_env(:open_probe_deadline_ms, 200)
       store = Path.join(dir, "sent-files")
       File.mkdir_p!(store)
       # Named without an extension: the content type is the requested path's.
@@ -1050,9 +1110,9 @@ defmodule ShuttleWeb.FileControllerTest do
       locked = Path.join(dir, "locked.png")
       File.write!(locked, "locked bytes")
       File.chmod!(locked, 0)
-      hung = Path.join(dir, "hung/frame.png")
-      File.mkdir_p!(Path.dirname(hung))
-      {_, 0} = System.cmd("mkfifo", [Path.join(dir, "hung/prompt")])
+      # A FIFO's open blocks, as macOS holds a protected file's.
+      hung = Path.join(dir, "hung.png")
+      {_, 0} = System.cmd("mkfifo", [hung])
       outside = Path.join(dir, "outside.png")
       linked = Path.join(dir, "linked.png")
 
@@ -1076,8 +1136,6 @@ defmodule ShuttleWeb.FileControllerTest do
       )
 
       Shuttle.Test.EventFiles.scope!(events_file)
-      # The folder of `hung` hangs: its probe opens the FIFO.
-      assert json_response(get(api_conn(), file_url(Path.join(dir, "hung/prompt"))), 403)
 
       sent =
         if root?(),
@@ -1120,6 +1178,27 @@ defmodule ShuttleWeb.FileControllerTest do
 
   defp root?, do: System.cmd("id", ["-u"]) |> elem(0) |> String.trim() == "0"
 
+  # Whether a probe's shell is open on `path`, by its command line.
+  defp probing?(path) do
+    {processes, 0} = System.cmd("ps", ["-A", "-o", "command="])
+    String.contains?(processes, path)
+  end
+
+  # Whether `fun` comes true within five seconds.
+  defp eventually(fun, attempts \\ 250) do
+    cond do
+      fun.() ->
+        true
+
+      attempts == 0 ->
+        false
+
+      true ->
+        Process.sleep(20)
+        eventually(fun, attempts - 1)
+    end
+  end
+
   defp assert_locked_is_403(dir) do
     path = Path.join(dir, "locked.png")
     File.write!(path, "png")
@@ -1127,8 +1206,10 @@ defmodule ShuttleWeb.FileControllerTest do
 
     assert head_or_get(:head, path).status == 403
 
-    assert %{"error" => "owner could not read file", "detail" => "opening it failed: eacces"} =
-             json_response(head_or_get(:get, path), 403)
+    assert %{
+             "error" => "owner could not read file",
+             "detail" => "opening it failed: Permission denied"
+           } = json_response(head_or_get(:get, path), 403)
 
     assert %{"exists" => true, "readable" => false, "size" => 3} =
              json_response(get(api_conn(), info_url(path)), 200)
