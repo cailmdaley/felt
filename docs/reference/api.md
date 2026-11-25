@@ -50,7 +50,6 @@ The routing column names one of the patterns in [How a route is routed](#how-a-r
 | `POST /deliver` | owner-routed | Enqueue agent text in a fiber's inbox, then consume it (`consumed` reports the live action); a dormant or fresh launch obeys its gates. Human lines are recorded before typed paste or a From User launch. `message_id` deduplicates. See [inbox internals](../dev/inbox.md) |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
-| `POST /rehome` | orchestrated | Move a constitution to another host (`fiber`, `target_host`, optional `origin`, `project_dir`, `fiber_path`); takes over on `target_host` first and releases `origin` best-effort |
 | `POST /kill` | owner-routed | Hard-kill a fiber's live worker session; writes no lifecycle verdict |
 
 ### Version and boot
@@ -602,6 +601,7 @@ here" rather than as a missing file.
 |---|---|---|
 | `POST /claim` | owner-routed | Register an already-live terminal session as a fiber's running worker |
 | `POST /migrate` | local owner | Move a live worker from one installed fiber to another on the same host, without ending its conversation — see [Worker migration](#worker-migration) |
+| `POST /rehome` | orchestrated | Move a constitution to another host for `shuttle set-host` and the board (`fiber`, `target_host`, optional `origin`, `project_dir`, `fiber_path`); takes over on `target_host` first and releases `origin` best-effort |
 | `POST /sessions/resume` | local | Resume a past session: a constitution's own session as its worker, leaving the card's lifecycle as it was, any other in a terminal of its own; answers the terminal to open |
 | `POST /sessions/input` | host-addressed | Paste `{session_uuid, text}` into the live terminal of a Codex session this host owns, from the session ledger; answers `{status: "submitted"}`, 404 when the session is not running or not owned, 503 when terminal state is unknown or the paste failed before typing (`terminal_input_failed`), 502 `terminal_input_ambiguous` when it failed after text may have reached the composer. A 4xx or 503 means nothing was typed |
 | `POST /sessions/receiver` | host-addressed | Resolve the live native Codex process for `{session_uuid}` and return `{session_uuid, pid, process_start}` from a kernel lifetime probe; 404 means absent or stale, 503 means process state is unknown |

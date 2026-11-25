@@ -65,6 +65,7 @@
       "routes": [
         "POST /claim",
         "POST /migrate",
+        "POST /rehome",
         "POST /sessions/resume",
         "POST /sessions/input",
         "POST /sessions/receiver",
