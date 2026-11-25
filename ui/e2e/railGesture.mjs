@@ -109,8 +109,14 @@ try {
     assert.equal(await page.evaluate(() => location.hash), reading, 'a scroll that drifts sideways stays in the reader')
     await page.waitForTimeout(200)
     // The second swipe begins while the first's inertia still dies away, its fingers gathering speed gently: the inertia moves
-    // nothing, the new swipe brings the rail.
-    await swipe(page, at, -240, { tail: 12 })
+    // nothing, the new swipe brings the rail. Dispatched in the page so WebKit's IPC round-trip across history.go(-N) does not
+    // insert a >140ms pause between two frames of the same swipe.
+    await page.evaluate(async ({ x, y }) => {
+      const send = deltaX => (document.elementFromPoint(x, y) ?? document.body)
+        .dispatchEvent(new WheelEvent('wheel', { deltaX, bubbles: true, cancelable: true }))
+      for (let frame = 0; frame < 8; frame++) { send(-30); await new Promise(r => setTimeout(r, 16)) }
+      for (let frame = 0, step = -30; frame < 12 && Math.abs(step) >= 1; frame++, step *= 0.9) { send(step); await new Promise(r => setTimeout(r, 16)) }
+    }, at)
     assert.equal(await page.evaluate(() => location.hash), '#/channels', 'one swipe returns to the channel')
     assert.equal(await showing(page), 0, 'and does not bring the rail')
     for (const deltaX of [1, 2, 4, 7, 11, 16, 22, 30, 30, 30, 30, 30, 30, 30]) { await page.mouse.wheel(-deltaX, 0); await page.waitForTimeout(16) }
@@ -151,10 +157,18 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('.kbn-ch-pick').length === 9)
     const railWidth = () => page.evaluate(() => document.querySelector('.kbn-ch-rail').getBoundingClientRect().width)
     const full = await railWidth()
+    await page.evaluate(() => {
+      window.__movingRailWidths = []
+      const layout = document.querySelector('.kbn-ch-layout'), rail = document.querySelector('.kbn-ch-rail')
+      new MutationObserver(() => {
+        if (layout.hasAttribute('data-rail-moving')) window.__movingRailWidths.push(rail.getBoundingClientRect().width)
+      }).observe(layout, { attributes: true, attributeFilter: ['data-rail-moving'] })
+    })
     await page.locator('.kbn-ch-pick').first().click()
-    // Leaving for the channel chosen, the rail keeps the screen's width.
-    assert.equal(await railWidth(), full)
     await page.waitForFunction(() => document.querySelector('.kbn-ch-name') && !document.querySelector('.kbn-ch-layout[data-rail-moving]'))
+    // Leaving for the channel chosen, the rail keeps the screen's width.
+    const widths = await page.evaluate(() => window.__movingRailWidths)
+    assert.ok(widths.length > 0 && widths.every(w => w === full), `leaving for the channel chosen, the rail keeps the screen's width (${widths} vs ${full})`)
     const middle = { x: 195, y: 420 }
     // In, away and in again, each drag begun while the last still settles.
     await drag(page, middle, 220)

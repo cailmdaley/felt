@@ -184,17 +184,55 @@ export class SpentSwipe {
   private peak = 0
   private low = Infinity
   private prev = Infinity
+  private tearingDown = false
+  private waiting = false
+  private rearmedAt = 0
 
   get active(): boolean { return this.on }
 
-  /** The swipe is spent from time `t`. */
-  begin(t: number): void {
+  /**
+   * The swipe is spent from time `t`. Pass `tearingDown = true` when the reader
+   * is closing asynchronously (e.g. `history.go(-N)`): events arriving before
+   * `rearm()` are absorbed without expiring `WHEEL_IDLE_MS`.
+   */
+  begin(t: number, tearingDown = false): void {
     this.on = true; this.last = t; this.peak = 0; this.low = Infinity; this.prev = Infinity
+    this.tearingDown = tearingDown; this.waiting = false
+  }
+
+  /**
+   * The surface behind the reader just appeared: keep absorbing the swipe if
+   * the next event arrives within `WHEEL_IDLE_MS` of `now`, regardless of how
+   * long leaving the reader stalled the main thread.
+   */
+  rearm(now = performance.now()): void {
+    if (!this.on) return
+    this.tearingDown = false
+    this.waiting = true
+    this.rearmedAt = now
+  }
+
+  /** Ends any spent swipe. */
+  clear(): void {
+    this.on = false
+    this.tearingDown = false
+    this.waiting = false
   }
 
   /** Whether an event of `travel` px at time `t` is the spent swipe's; false once it has ended. */
-  feed(travel: number, t: number): boolean {
+  feed(travel: number, t: number, now = performance.now()): boolean {
     if (!this.on) return false
+    if (this.tearingDown) {
+      this.last = t
+      return true
+    }
+    if (this.waiting) {
+      this.waiting = false
+      if (now - this.rearmedAt > WHEEL_IDLE_MS) { this.on = false; return false }
+      this.last = t
+      this.peak = 0; this.low = Infinity; this.prev = Infinity
+      return true
+    }
     const dt = t - this.last
     if (dt > WHEEL_IDLE_MS) { this.on = false; return false }
     this.last = t

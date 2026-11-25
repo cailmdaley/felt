@@ -180,4 +180,18 @@ describe('a spent swipe', () => {
     expect(kept([...swipe, ...inertia, ...ramp])).toBeLessThan(swipe.length + inertia.length + 6)
     expect(kept([...swipe, [30, WHEEL_IDLE_MS + 1]])).toBe(swipe.length)
   })
+
+  it('survives a long reader teardown when rearmed on return, yet still expires if the user pauses after', () => {
+    const spent = new SpentSwipe()
+    spent.begin(1000, true)
+    // Even if an event arrives > WHEEL_IDLE_MS later while teardown is still in flight, it is absorbed.
+    expect(spent.feed(30, 1200, 450)).toBe(true)
+    // Channels appears and rearms the idle clock; the next swipe frame 16ms later is absorbed.
+    spent.rearm(500)
+    expect(spent.feed(30, 1266, 516)).toBe(true)
+    expect(spent.feed(27, 1282, 532)).toBe(true)
+    // If the user actually paused > WHEEL_IDLE_MS after return, the next swipe is free.
+    spent.rearm(600)
+    expect(spent.feed(30, 1500, 600 + WHEEL_IDLE_MS + 10)).toBe(false)
+  })
 })

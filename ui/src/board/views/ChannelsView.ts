@@ -198,6 +198,8 @@ export class ChannelsView implements TemporalView {
   }, true)
   /** The rail's width as it moves. */
   private motionWidth = 0
+  /** A trackpad swipe that just left the reader: its tail moves nothing until it pauses or ramps up again. */
+  private readonly spent = new SpentSwipe()
   /** On a phone, the channel a leaving rail bares, and its seen mark before it was bared. */
   private peeked: { key: string; seen: string | null } | null = null
 
@@ -446,7 +448,7 @@ export class ChannelsView implements TemporalView {
     if (!this.channels.some(channel => channel.key === this.current)) this.resume()
     this.drawRail()
     this.drawChannel()
-    if (returning) this.returnFocus()
+    if (returning) { this.spent.rearm(); this.returnFocus() }
   }
   /** Opens the reader from the item named `from`, which takes the focus back when the reader closes. */
   private leaveFor(from: string | null, open: () => void): void {
@@ -996,7 +998,8 @@ export class ChannelsView implements TemporalView {
     }
     // A trackpad swipe that left the reader is spent: the rest of it moves nothing (railMotion.ts).
     let idle = 0
-    const spent = new SpentSwipe()
+    const spent = this.spent
+    spent.clear()
     let away = 0, awayAt = -Infinity
     const wheel = (event: WheelEvent): void => {
       const over = onReader(event.target)
@@ -1014,7 +1017,7 @@ export class ChannelsView implements TemporalView {
         if (event.timeStamp - awayAt > WHEEL_IDLE_MS) away = 0
         awayAt = event.timeStamp
         away += px
-        if (away <= -LEAVE_PX) { away = 0; this.ctx?.workspace?.returnToOrigin(); spent.begin(Math.max(event.timeStamp, performance.now())) }
+        if (away <= -LEAVE_PX) { away = 0; spent.begin(event.timeStamp, true); this.ctx?.workspace?.returnToOrigin() }
         return
       }
       if (!toward(-px)) return
@@ -1037,6 +1040,7 @@ export class ChannelsView implements TemporalView {
     document.addEventListener('wheel', wheel, { passive: false })
     return () => {
       clearTimeout(idle)
+      spent.clear()
       motion.rest(this.railShown())
       root.removeEventListener('touchstart', down)
       if (touch) follow(touch.on, false)
