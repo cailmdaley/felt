@@ -794,7 +794,7 @@ export function documentFailure(shuttleBase: string, path: string, owner: string
     download.textContent = 'Download'
     notice.append(download)
   }
-  if (missing || unreadable) {
+  if ((missing || unreadable) && !stale) {
     const where = document.createElement('code')
     where.className = 'ws-document-path'
     where.textContent = path

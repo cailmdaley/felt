@@ -1478,7 +1478,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/file')) {
     const fileUrl = new URL(url, 'http://harness.invalid')
     const fault = fileUrl.pathname.endsWith('/api/v1/file') ? fileFaults.get(fileUrl.searchParams.get('path') ?? '') : undefined
-    if (fault) return json({ error: fault === 403 ? 'owner could not read file' : 'file not found' }, fault)
+    if (fault) {
+      ;(request as Record<string, unknown>).status = fault
+      const error = fault === 403 ? 'owner could not read file' : fault === 404 ? 'file not found' : 'owner did not answer'
+      return json({ error }, fault)
+    }
     if (workspaceFixture) {
       const response = workspaceFixture.fileResponse(url, method, init?.headers)
       ;(request as Record<string, unknown>).status = response.status

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl, pinViewportUnits, pageWeight } from './FileViewerPanel.js'
 import { envelope } from './workspace/DocumentBridge.js'
 import { fileTabUrl, resetDocumentResources } from './documentResources.js'
@@ -620,6 +620,35 @@ describe('workspace file viewer hooks', () => {
       '/gone.png': 'file request failed: 404',
       '/locked.png': 'file request failed: 403',
     })
+  })
+
+  it('drops its question to the owner when the viewer goes', async () => {
+    // jsdom implements neither; a disposed media viewer calls both.
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
+    onTestFinished(() => { pause.mockRestore(); load.mockRestore() })
+    let asked: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn((_src: string, init?: RequestInit) => {
+      asked = init?.signal ?? undefined
+      return new Promise<Response>(() => {})
+    }))
+    for (const path of ['/slow.png', '/slow.mp4']) {
+      asked = undefined
+      const viewer = buildFileViewer('', path, 'host-a', undefined, undefined, {})
+      viewer.querySelector('img, video')!.dispatchEvent(new Event('error'))
+      await vi.waitFor(() => expect(asked).toBeDefined())
+      expect(asked!.aborted).toBe(false)
+      disposeFileViewer(viewer)
+      expect(asked!.aborted).toBe(true)
+    }
+  })
+
+  it('names an unreadable file it cannot draw from the owner\'s metadata alone', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: true, readable: false }))))
+    let failure: unknown
+    buildFileViewer('', '/Documents/cube.fits', 'host-a', undefined, undefined, { onState: state => { if (state.status === 'error') failure = state.error } })
+    await vi.waitFor(() => expect(failure).toBeDefined())
+    expect((failure as Error).message).toBe('file request failed: 403')
   })
 
   it('reports missing PDFs and rejects non-PDF responses before opening the viewer', async () => {

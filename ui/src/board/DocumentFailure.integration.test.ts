@@ -39,3 +39,14 @@ describe('an image the reader could not show', () => {
     }
   })
 })
+
+describe('a stale notice over the last loaded copy', () => {
+  it('names an owner that can no longer read the file without the full notice', async () => {
+    const { documentFailure } = await import('./workspace/DocumentHost.js')
+    const notice = documentFailure('', '/Documents/talk/01-title.png', 'host-a', '01-title.png', new Error('file request failed: 403'), true, vi.fn())
+    expect(notice.className).toBe('ws-document-status')
+    expect(notice.querySelector('p')?.textContent).toBe('host-a could not read this file — showing last loaded copy')
+    expect(notice.querySelector('code')).toBeNull()
+    expect(notice.textContent).not.toContain('The worker can send it again.')
+  })
+})

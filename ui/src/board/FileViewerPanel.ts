@@ -187,15 +187,16 @@ export function buildFileViewer(
     img.src = `${src}&presentation=stage`
     img.alt = basename(fullPath)
     let disposed = false
+    const asking = new AbortController()
     img.addEventListener('load', () => {
       if (!disposed) options.onState?.({ status: 'ready' })
     })
     img.addEventListener('error', () => {
-      void nativeFailure(src, 'image format is not supported by this browser').then(error => {
+      void nativeFailure(src, 'image format is not supported by this browser', asking.signal).then(error => {
         if (!disposed) options.onState?.({ status: 'error', error, hasContent: false })
       })
     })
-    viewerDisposers.set(wrap, () => { disposed = true })
+    viewerDisposers.set(wrap, () => { disposed = true; asking.abort() })
     wrap.append(img)
     return wrap
   }
@@ -316,8 +317,9 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   media.addEventListener('pause', () => { state.inline = false })
   media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
   let disposed = false
+  const asking = new AbortController()
   media.addEventListener('error', () => {
-    void nativeFailure(src, 'media format is not supported by this browser').then(error => {
+    void nativeFailure(src, 'media format is not supported by this browser', asking.signal).then(error => {
       if (!disposed) options.onState?.({ status: 'error', error, hasContent: false })
     })
   })
@@ -328,6 +330,7 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   viewerDisposers.set(wrap, () => {
     disposeAudio?.()
     disposed = true
+    asking.abort()
     media.pause()
     players.delete(media)
     mediaViewers.delete(wrap)
@@ -339,15 +342,16 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
 
 /** Why a document a native viewer could not show failed, from its head. */
 function headError(info: Head | null): Error {
-  return new Error(info ? 'file request failed: 404' : 'the daemon could not be reached')
+  return new Error(!info ? 'the daemon could not be reached' : info.readable === false ? 'file request failed: 403' : 'file request failed: 404')
 }
 
 /**
  * Why a native viewer could not show a document: the owner's answer when the
- * bytes never arrived, else that this browser cannot decode what did.
+ * bytes never arrived, else that this browser cannot decode what did. The
+ * question is dropped with the viewer.
  */
-async function nativeFailure(src: string, undecodable: string): Promise<Error> {
-  const status = await byteStatus(src)
+async function nativeFailure(src: string, undecodable: string, signal: AbortSignal): Promise<Error> {
+  const status = await byteStatus(src, signal)
   if (status === null) return new Error('the daemon could not be reached')
   return status < 400 ? new Error(undecodable) : new Error(`file request failed: ${status}`)
 }
@@ -366,7 +370,7 @@ function buildUnsupportedViewer(base: string, path: string, owner: string, optio
   viewerDisposers.set(box, () => { disposed = true })
   void head(fileBytesUrl(base, path, owner), RESOURCE_PRIORITY.selected).then(info => {
     if (disposed) return
-    if (!info?.exists) { options.onState?.({ status: 'error', error: headError(info), hasContent: false }); return }
+    if (!info?.exists || info.readable === false) { options.onState?.({ status: 'error', error: headError(info), hasContent: false }); return }
     if (info.size !== undefined) detail.textContent = `Not drawn here · ${new Intl.NumberFormat().format(info.size)} bytes`
     options.onState?.({ status: 'ready' })
   })

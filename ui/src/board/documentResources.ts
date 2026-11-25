@@ -39,7 +39,8 @@ export const RESOURCE_DEADLINE_MS = 15_000
 /** A settled answer is served again for this long before it revalidates. */
 export const RESOURCE_FRESH_MS = 30_000
 
-export interface Head { exists: boolean; size?: number; modifiedAt?: string; validator?: string }
+/** `readable: false` when the owner knows, without opening it, that it may not read the file. */
+export interface Head { exists: boolean; readable?: false; size?: number; modifiedAt?: string; validator?: string }
 export interface Peek { bytes: Uint8Array; etag?: string; size?: number }
 export interface TextBody { text: string; etag?: string }
 /** A whole-body read the live poller drives; `rank` is what it serves. */
@@ -229,12 +230,12 @@ export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY
     try {
       const response = await fetch(entry.src.replace(/\/file\?/, '/file-info?'), { cache: 'no-store', signal: limit.signal })
       if (!response.ok) return null
-      const info = await response.json() as { exists?: boolean; size?: unknown; modified_at?: unknown }
+      const info = await response.json() as { exists?: boolean; readable?: unknown; size?: unknown; modified_at?: unknown }
       const time = typeof info.modified_at === 'number' ? info.modified_at * 1000 : typeof info.modified_at === 'string' ? Date.parse(info.modified_at) : NaN
       const size = typeof info.size === 'number' && Number.isFinite(info.size) ? info.size : undefined
       const modifiedAt = Number.isFinite(time) ? new Date(time).toISOString() : undefined
       const value: Head = !info.exists ? { exists: false }
-        : { exists: true, size, modifiedAt, validator: modifiedAt !== undefined && size !== undefined ? `${modifiedAt}|${size}` : undefined }
+        : { exists: true, ...info.readable === false ? { readable: false } : {}, size, modifiedAt, validator: modifiedAt !== undefined && size !== undefined ? `${modifiedAt}|${size}` : undefined }
       entry.head = { value, at: Date.now() }
       entry.missing = value.exists ? undefined : entry.head.at
       return value
