@@ -1267,20 +1267,14 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     route(routes, "2026-11-06T10:00:10Z", "fiber-b")
     File.write!(c.path, "")
-    parent = self()
-
-    send_file = fn path, card, session, caption ->
-      send(parent, {:sent, path, card["fiber_id"], session, caption})
-      :ok
-    end
-
+    {send_file, sent} = sender([:ok])
     start_monitor(c, routes: routes, send_file: send_file)
     recovered(c.path, "2026-11-06T10:00:05Z", "the first muted thought, send")
     recovered(c.path, "2026-11-06T10:00:12Z", "a thought about the second card")
     recovered(c.path, "2026-11-06T10:00:30Z", "and the last one")
     record(c.path, "2026-11-06T10:00:40Z", "live words. Send.")
     poll(c)
-    refute_receive {:sent, _, _, _, _}, 20
+    assert %{sending: nil, config: %{"recovered_sends" => []}} = :sys.get_state(worker(c))
 
     jsonl(c.path, %{
       "wall" => "2026-11-06T10:01:00Z",
@@ -1289,11 +1283,12 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
     poll(c)
     sync_tasks(c)
+    sync_sending(c)
 
-    assert_receive {:delivery, %{text: text}}
+    assert_received {:delivery, %{text: text}}
     assert text =~ "live words"
-    refute_receive {:delivery, _}, 20
-    assert_receive {:sent, path, "fiber-b", "voice-recovered-launch", caption}
+    refute_received {:delivery, _}
+    assert [{path, "fiber-b", "voice-recovered-launch", caption}] = sent.()
     assert caption == "Said while muted, 10:00–10:00 (3 min held): nothing was delivered"
 
     assert File.read!(path) == """
@@ -1315,21 +1310,84 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert {:ok, %{rows: [%{"text" => "live words. Send."}]}} =
              Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
 
-    # A replayed batch is not sent twice, and a batch without words sends nothing.
-    send(worker(c), :poll)
-
+    # A batch without words sends nothing.
     jsonl(c.path, %{
       "wall" => "2026-11-06T10:02:00Z",
       "recovery" => %{"utterances" => 0, "seconds" => 4.0}
     })
 
     poll(c)
-    refute_receive {:sent, _, _, _, _}, 50
+    assert %{sending: nil, config: %{"recovered_sends" => []}} = :sys.get_state(worker(c))
+    assert length(sent.()) == 1
     assert File.ls!(Path.dirname(path)) == [Path.basename(path)]
+  end
+
+  test "a recovered document whose send fails is sent again, after a restart too", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    {send_file, sent} = sender([{:error, "events.jsonl is locked"}, :ok])
+    start_monitor(c, routes: routes, send_file: send_file)
+    recovered(c.path, "2026-11-06T10:00:05Z", "a muted thought")
+
+    jsonl(c.path, %{
+      "wall" => "2026-11-06T10:01:00Z",
+      "recovery" => %{"utterances" => 1, "seconds" => 4.0, "left" => 60.0}
+    })
+
+    poll(c)
+    sync_sending(c)
+    assert [{path, "fiber-a", _, _}] = sent.()
+
+    assert File.read!(path) =~
+             "The recovery stopped with 60 s still held; Recover again for the rest."
+
+    assert %{"recovered_sends" => [%{"path" => ^path}]} =
+             Jason.decode!(File.read!(relay_path(c, "launch")))
+
+    stop_supervised!(TranscriptRelay)
+    start_supervised!({TranscriptRelay, Keyword.put(c.opts, :send_file, send_file)})
+    # The coordinator answers once it has restarted the relay's workers.
+    TranscriptRelay.status("launch", server: c.name)
+    poll(c)
+    sync_sending(c)
+    assert [_, {^path, "fiber-a", _, _}] = sent.()
+    assert %{"recovered_sends" => []} = Jason.decode!(File.read!(relay_path(c, "launch")))
+  end
+
+  # A send_file that answers each call with the next of `answers`, and the calls it took.
+  defp sender(answers) do
+    {:ok, calls} = Agent.start_link(fn -> {answers, []} end)
+
+    send_file = fn path, card, session, caption ->
+      Agent.get_and_update(calls, fn {[answer | rest], made} ->
+        {answer, {rest, made ++ [{path, card["fiber_id"], session, caption}]}}
+      end)
+    end
+
+    {send_file, fn -> Agent.get(calls, &elem(&1, 1)) end}
+  end
+
+  # Wait for the worker's recovered-document send, and for the worker to take its answer.
+  defp sync_sending(c) do
+    pid = worker(c)
+    state = :sys.get_state(pid)
+
+    with {ref, _} <- state.sending do
+      task = state.task_handles[ref]
+      monitor = Process.monitor(task.pid)
+
+      receive do
+        {:DOWN, ^monitor, :process, _, _} -> GenServer.call(pid, :status)
+      after
+        5_000 -> flunk("the recovered-document send did not finish")
+      end
+    end
   end
 
   test "a recovered document is filed under a card this host owns, and unaddressed for another host's",
        c do
+    Shuttle.Test.EventFiles.scope!(Path.join(c.root, "events.jsonl"))
     path = Path.join(c.root, "said-while-muted.md")
     File.write!(path, "# Said while muted\n")
     uid = "01KTCA2CG0FB27BDJX3K8G21FP"
@@ -1343,12 +1401,24 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
                "mine"
              )
 
+    theirs = Path.join(c.root, "said-while-muted-elsewhere.md")
+    File.write!(theirs, "# Said while muted\n")
+
     assert :ok =
              Shuttle.Voice.Recovered.send_file(
-               path,
+               theirs,
                %{"fiber_id" => uid, "origin" => "elsewhere"},
                "voice-recovered-b",
                "theirs"
+             )
+
+    # A send the event stream already records is not made again.
+    assert :ok =
+             Shuttle.Voice.Recovered.send_file(
+               path,
+               %{"fiber_id" => uid, "origin" => own},
+               "voice-recovered-a",
+               "again"
              )
 
     sends =
@@ -1357,6 +1427,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
       |> Enum.map(&Jason.decode!/1)
       |> Enum.filter(&(&1["type"] == "file_sent"))
       |> Map.new(&{&1["caption"], &1})
+
+    assert Map.keys(sends) |> Enum.sort() == ["mine", "theirs"]
 
     # The uid the board files a send under: its terminal's ULID, else its session.
     filed = fn send -> Shuttle.ULID.from_tmux(send["tmuxSession"]) || send["sessionId"] end

@@ -381,6 +381,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   # "sent" closes too: it is what the transcriber often hears for "send".
   @closing ~r/(?:^\s*|[,;:.!?]\s*)sen[dt][.!?]*\s*$/iu
   @partial_stale_seconds 60
+  @send_retry_ms 30_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
@@ -415,6 +416,8 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:millisecond) end),
       tasks: %{},
       task_handles: %{},
+      sending: nil,
+      send_after: 0,
       timer: nil
     }
 
@@ -467,6 +470,15 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
   def handle_info({:EXIT, _source, _reason}, state), do: {:noreply, state}
 
+  def handle_info({ref, result}, %{sending: {ref, _}} = state) do
+    Process.demonitor(ref, [:flush])
+    protect(state, fn -> {:noreply, sent_recovered(state, ref, result)} end)
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{sending: {ref, _}} = state) do
+    protect(state, fn -> {:noreply, sent_recovered(state, ref, {:exit, reason})} end)
+  end
+
   def handle_info({ref, result}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
     protect(state, fn -> {:noreply, complete(state, ref, result)} end)
@@ -495,9 +507,10 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       |> ingest(state)
       |> flush_due(state)
 
-    state = persist!(%{state | config: next}) |> launch_deliveries()
+    state = persist!(%{state | config: next}) |> launch_deliveries() |> send_recovered()
 
-    if state.config["ended"] and state.config["outbox"] == [] and map_size(state.tasks) == 0 do
+    if state.config["ended"] and state.config["outbox"] == [] and map_size(state.tasks) == 0 and
+         state.config["recovered_sends"] == [] and is_nil(state.sending) do
       :ok =
         Shuttle.FS.write_atomic(
           state.file,
@@ -572,6 +585,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
           "buffers" => [],
           "outbox" => [],
           "recovered" => [],
+          "recovered_sends" => [],
           "ended" => false
         },
         config
@@ -678,7 +692,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
               {:ok, %{"wall" => wall, "recovery" => summary}}
               when is_binary(wall) and is_map(summary) ->
-                put_recovered(acc, wall, summary, state)
+                put_recovered(acc, wall, summary)
 
               {:ok, %{"wall" => wall} = row}
               when is_binary(wall) and not is_map_key(row, "text") ->
@@ -705,34 +719,80 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   end
 
   # Words recovered from a mute are never routed: they go before the human as
-  # one document, sent apart from the poll as a send of the card in view now.
-  defp put_recovered(%{"recovered" => []} = config, _wall, _summary, _state), do: config
+  # one document, queued as a send of the card in view now. The queue is part of
+  # the durable config, so a send that fails, or that a restart interrupts, is
+  # tried again (`send_recovered/1`).
+  defp put_recovered(%{"recovered" => []} = config, _wall, _summary), do: config
 
-  defp put_recovered(config, wall, summary, state) do
+  defp put_recovered(config, wall, summary) do
     rows = config["recovered"]
 
     {name, markdown} =
       Shuttle.Voice.Recovered.document(config["launch"], rows, config["routes"], summary, wall)
 
     path = Path.join([Shuttle.data_dir(), "voice-recovered", name])
+    :ok = Shuttle.FS.mkdir_p(Path.dirname(path))
+    :ok = Shuttle.FS.write_atomic(path, markdown)
 
-    unless Shuttle.FS.exists?(path) do
-      :ok = Shuttle.FS.mkdir_p(Path.dirname(path))
-      :ok = Shuttle.FS.write_atomic(path, markdown)
-      caption = Shuttle.Voice.Recovered.caption(rows, summary)
-      card = List.last(config["routes"])
-      session = "voice-recovered-" <> config["launch"]
+    send = %{
+      "path" => path,
+      "card" => List.last(config["routes"]),
+      "session" => "voice-recovered-" <> config["launch"],
+      "caption" => Shuttle.Voice.Recovered.caption(rows, summary)
+    }
 
-      Task.start(fn ->
-        with {:error, reason} <- state.send_file.(path, card, session, caption),
-             do:
-               Logger.warning(
-                 "voice: could not send recovered speech #{path}: #{inspect(reason)}"
-               )
-      end)
+    config
+    |> Map.put("recovered", [])
+    |> Map.update!("recovered_sends", fn sends ->
+      if Enum.any?(sends, &(&1["path"] == path)), do: sends, else: sends ++ [send]
+    end)
+  end
+
+  # One recovered document at a time, off the poll; it leaves the queue only
+  # once `shuttle send-file` has recorded it, and a failure waits a while.
+  defp send_recovered(%{sending: nil, config: %{"recovered_sends" => [send | _]}} = state) do
+    if state.clock.() >= state.send_after do
+      send_file = state.send_file
+
+      task =
+        Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+          send_file.(send["path"], send["card"], send["session"], send["caption"])
+        end)
+
+      %{
+        state
+        | sending: {task.ref, send["path"]},
+          task_handles: Map.put(state.task_handles, task.ref, task)
+      }
+    else
+      state
     end
+  end
 
-    Map.put(config, "recovered", [])
+  defp send_recovered(state), do: state
+
+  defp sent_recovered(state, ref, result) do
+    {_, path} = state.sending
+    state = %{state | sending: nil, task_handles: Map.delete(state.task_handles, ref)}
+
+    case result do
+      :ok ->
+        config =
+          Map.update!(
+            state.config,
+            "recovered_sends",
+            &Enum.reject(&1, fn send -> send["path"] == path end)
+          )
+
+        persist!(%{state | config: config})
+
+      reason ->
+        Logger.warning(
+          "voice: could not send recovered speech #{path}, trying again: #{inspect(reason)}"
+        )
+
+        %{state | send_after: state.clock.() + @send_retry_ms}
+    end
   end
 
   defp discarded?(%{"discarded_at" => cut}, at) when is_binary(cut),

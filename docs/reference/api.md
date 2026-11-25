@@ -896,12 +896,14 @@ A 202 with `delivered: null` or an interrupted delivery is unconfirmed; `last` e
 #### Muted speech
 
 While the mic is muted, hark keeps the audio around speech it would have heard, on disk beside the recording's transcript, until the recording process stops: Listen off, or the process ending any other way.
+The one exception is its cap: a process holds the newest six hours of muted speech, and past that drops the oldest, saying so in its transcript.
 A board meeting that ends, by `{meeting: false}` or after twenty quiet minutes, follows again on the same process and keeps what is held.
 Hark registers each recording process in `held/<pid>.json` under its home; `GET /voice` serves the one `meeting.json` names, while Listen is listening, as `muted_speech`, and null otherwise.
 `POST /voice/recover` asks that process to transcribe all of it, through the `held/<pid>.recover` request `hark recover` also creates, and returns the voice state, in which a request not yet taken up already reads `recovering: true`; a request while one is pending or running changes nothing, and one with no listening recorder or nothing held answers 422.
-Hark replays the held speech in a separate process, so live capture continues, and appends the words to the transcript's JSONL as `recovered` rows at the times they were said, then a `recovery` row; recovered audio is dropped.
+Hark replays what it held at the request in batches of at most twenty minutes, each in a separate process, so live capture continues, and appends the words to the transcript's JSONL as `recovered` rows at the times they were said, then one `recovery` row for the request; recovered audio is dropped, and a failed batch stops the recovery with its speech still held (`recovery.left`).
 Recovered words are never routed or delivered, and the day transcript does not take them: they may have been muted on purpose.
 At the `recovery` row the relay writes them as one Markdown document, `<Shuttle.data_dir()>/voice-recovered/<launch>-<time>.md`, grouped by the card and host the route journal had in view when each was said, and sends it with `shuttle send-file` for the card in view now.
+The send waits in the relay's durable record until `send-file` has recorded it: a failed send is tried again after thirty seconds, an interrupted one after a restart, and a send the event stream already records is not made again.
 For a card this host owns, the send's terminal is named for the card's uid, as a worker's is, so the document appears in the card's channel, its Sent Files and under the card in the Library.
 A card another host owns lists only its own host's sends in its Sent Files, so for it the document goes unaddressed: it appears in the Library as this host's own file, not in the card's channel.
 

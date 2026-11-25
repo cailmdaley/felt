@@ -46,7 +46,7 @@ defmodule Shuttle.Voice.Recovered do
     markdown = """
     # Said while muted
 
-    Recovered at #{clock(wall)} from #{minutes(summary["seconds"])} of speech held while the mic was muted#{said}. None of it was delivered; forward what you want.
+    Recovered at #{clock(wall)} from #{minutes(summary["seconds"])} of speech held while the mic was muted#{said}. None of it was delivered; forward what you want.#{left(summary)}
 
     #{body}\
     """
@@ -72,7 +72,8 @@ defmodule Shuttle.Voice.Recovered do
   end
 
   @doc """
-  Put `path` on the board for `card`, the route in view now. A card this host
+  Put `path` on the board for `card`, the route in view now, unless the event
+  stream already records it. A card this host
   owns takes it the way its own worker's send arrives: the send's terminal is
   named for the card's uid (`<leaf>-<ULID>-shuttle`, which a worker's
   dispatch environment carries), so the card's channel, its Sent Files and the
@@ -81,6 +82,13 @@ defmodule Shuttle.Voice.Recovered do
   this host's own file.
   """
   def send_file(path, card, session, caption) do
+    if sent?(path), do: :ok, else: record(path, card, session, caption)
+  end
+
+  # A send recorded before a restart could confirm it is not made twice.
+  defp sent?(path), do: Enum.any?(Shuttle.SentFiles.all_since(0), &(&1.fullPath == path))
+
+  defp record(path, card, session, caption) do
     terminal =
       case card do
         %{"fiber_id" => uid} = card ->
@@ -112,6 +120,11 @@ defmodule Shuttle.Voice.Recovered do
     {:ok, at, _} = DateTime.from_iso8601(iso)
     at
   end
+
+  defp left(%{"left" => left}) when left > 0,
+    do: " The recovery stopped with #{minutes(left)} still held; Recover again for the rest."
+
+  defp left(_summary), do: ""
 
   defp heading(nil), do: "## No card in view"
 
