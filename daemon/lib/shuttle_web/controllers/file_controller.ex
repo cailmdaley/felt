@@ -368,7 +368,7 @@ defmodule ShuttleWeb.FileController do
   # The newest retained send's copy of `path`, a regular file inside the copy
   # store and no link out of it.
   defp sent_copy(path) do
-    with stored when is_binary(stored) <- Shuttle.EventStream.sent_copy(Path.expand(path)),
+    with stored when is_binary(stored) <- Shuttle.EventStream.sent_copy(Shuttle.Env.expand(path)),
          {:ok, %File.Stat{type: :regular} = stat} <- Shuttle.FS.lstat(stored, time: :posix) do
       {:ok, stored, stat}
     else

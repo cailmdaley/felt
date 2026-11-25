@@ -376,10 +376,14 @@ defmodule Shuttle.SentFiles do
   # cwd is left as-is, with nothing to resolve it against.
   defp absolutize(path, cwd) do
     cond do
-      path == "~" or String.starts_with?(path, "~/") -> Shuttle.Env.expand(path)
-      Path.type(path) == :absolute -> Path.expand(path)
-      is_binary(cwd) and cwd != "" -> Path.expand(path, cwd)
-      true -> path
+      path == "~" or String.starts_with?(path, "~/") or Path.type(path) == :absolute ->
+        Shuttle.Env.expand(path)
+
+      is_binary(cwd) and cwd != "" ->
+        Path.expand(path, cwd)
+
+      true ->
+        path
     end
   end
 
