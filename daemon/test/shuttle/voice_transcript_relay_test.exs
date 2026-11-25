@@ -1261,12 +1261,77 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
              TranscriptRelay.status("launch", server: c.name)
   end
 
+  test "words recovered from a mute are never delivered; they reach the board as one document by card",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    route(routes, "2026-11-06T10:00:10Z", "fiber-b")
+    File.write!(c.path, "")
+    parent = self()
+
+    send_file = fn path, uid, caption ->
+      send(parent, {:sent, path, uid, caption})
+      :ok
+    end
+
+    start_monitor(c, routes: routes, send_file: send_file)
+    recovered(c.path, "2026-11-06T10:00:05Z", "the first muted thought, send")
+    recovered(c.path, "2026-11-06T10:00:12Z", "a thought about the second card")
+    recovered(c.path, "2026-11-06T10:00:30Z", "and the last one")
+    record(c.path, "2026-11-06T10:00:40Z", "live words. Send.")
+    poll(c)
+    refute_receive {:sent, _, _, _}, 20
+
+    jsonl(c.path, %{
+      "wall" => "2026-11-06T10:01:00Z",
+      "recovery" => %{"utterances" => 3, "seconds" => 200.0}
+    })
+
+    poll(c)
+    sync_tasks(c)
+
+    assert_receive {:delivery, %{text: text}}
+    assert text =~ "live words"
+    refute_receive {:delivery, _}, 20
+    assert_receive {:sent, path, "fiber-b", caption}
+    assert caption == "Said while muted, 10:00–10:00 (3 min held): nothing was delivered"
+
+    assert File.read!(path) == """
+           # Said while muted
+
+           Recovered at 10:01 from 3 min of speech held while the mic was muted, said 6 Nov 10:00–10:00. None of it was delivered; forward what you want.
+
+           ## fiber-a
+
+           **10:00:05** the first muted thought, send
+
+           ## fiber-b
+
+           **10:00:12** a thought about the second card
+
+           **10:00:30** and the last one
+           """
+
+    assert {:ok, %{rows: [%{"text" => "live words. Send."}]}} =
+             Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
+
+    # A replayed batch is not sent twice.
+    send(worker(c), :poll)
+    refute_receive {:sent, _, _, _}, 20
+  end
+
+  defp recovered(path, at, text),
+    do: jsonl(path, %{"wall" => at, "recovered" => %{"speaker" => "S1", "text" => text}})
+
+  defp jsonl(path, row),
+    do: File.write!(Path.rootname(path) <> ".jsonl", Jason.encode!(row) <> "\n", [:append])
+
   defp start_monitor(c, extra \\ []) do
     if is_nil(extra[:routes]) do
       route(Path.join(c.root, "routes.jsonl"), "2026-11-06T10:00:00Z", "fiber-a")
     end
 
-    opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver, :cold, :played]))
+    opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver, :cold, :played, :send_file]))
     start_supervised!({TranscriptRelay, opts})
 
     row = %{

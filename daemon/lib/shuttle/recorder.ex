@@ -224,6 +224,35 @@ defmodule Shuttle.Recorder do
     end
   end
 
+  @doc """
+  The speech said into the muted mic that `launch`'s hark holds, as
+  `%{seconds, since, recovering}` from its `held.json`, or nil when it holds none.
+  """
+  def held_speech(launch, opts \\ []) do
+    with {:ok, bytes} <- Shuttle.FS.read(Path.join(hark_dir(opts), "held.json")),
+         {:ok, %{"launch" => ^launch, "seconds" => seconds} = held} when is_number(seconds) <-
+           Jason.decode(bytes),
+         recovering = held["recovering"] == true,
+         true <- seconds > 0 or recovering do
+      %{seconds: seconds, since: held["since"], recovering: recovering}
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Asks the live hark to transcribe the muted speech it holds, through the
+  `recover` flag file `hark recover` also creates.
+  """
+  def recover_voice(opts \\ []) do
+    with :ok <- Shuttle.FS.mkdir_p(hark_dir(opts)),
+         :ok <- Shuttle.FS.write(Path.join(hark_dir(opts), "recover"), "") do
+      :ok
+    else
+      {:error, reason} -> {:error, "could not ask hark to recover: #{inspect(reason)}"}
+    end
+  end
+
   @doc false
   def voice_muted?(opts \\ []), do: Shuttle.FS.exists?(Path.join(hark_dir(opts), "voice-muted"))
 

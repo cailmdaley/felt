@@ -368,6 +368,40 @@ defmodule Shuttle.VoiceTest do
     assert %{"discarded" => 0} = discard.()
   end
 
+  test "the live recording's muted speech shows on the state and Recover asks hark for it", c do
+    hark = Path.join(c.root, "hark")
+    show = fn -> api_conn() |> get("/api/v1/voice") |> json_response(200) end
+    recover = fn -> api_conn() |> post("/api/v1/voice/recover", "{}") end
+
+    assert %{"error" => "Listen is not recording"} = recover.() |> json_response(422)
+    refute File.exists?(Path.join(hark, "recover"))
+
+    start_voice(c)
+    assert {:ok, _} = Voice.update(%{"enabled" => true, "muted" => true})
+    held = %{"launch" => "meeting", "seconds" => 0.0, "since" => nil, "recovering" => false}
+    File.write!(Path.join(hark, "held.json"), Jason.encode!(held))
+    assert %{"muted_speech" => nil} = show.()
+
+    held = %{held | "seconds" => 241.5, "since" => "2026-11-25T21:52:03+01:00"}
+    File.write!(Path.join(hark, "held.json"), Jason.encode!(held))
+
+    assert %{
+             "muted_speech" => %{
+               "seconds" => 241.5,
+               "since" => "2026-11-25T21:52:03+01:00",
+               "recovering" => false
+             }
+           } =
+             show.()
+
+    assert %{"muted_speech" => %{"seconds" => 241.5}} = recover.() |> json_response(200)
+    assert File.exists?(Path.join(hark, "recover"))
+
+    # Another launch's leftover is not this recording's.
+    File.write!(Path.join(hark, "held.json"), Jason.encode!(%{held | "launch" => "voice-old"}))
+    assert %{"muted_speech" => nil} = show.()
+  end
+
   test "a relay status timeout preserves the last listening snapshot", c do
     stop_supervised!(Voice)
 

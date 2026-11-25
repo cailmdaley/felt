@@ -48,6 +48,15 @@ defmodule Shuttle.Voice do
          do: {:ok, Map.put(show(opts), :discarded, words)}
   end
 
+  @doc """
+  Asks the live recording to transcribe the speech it holds from while the mic
+  was muted. The words never go to a worker: they reach the board as one
+  document (`Shuttle.Voice.Recovered`).
+  """
+  def recover(opts \\ []) do
+    with :ok <- GenServer.call(server(opts), :recover), do: {:ok, show(opts)}
+  end
+
   @doc "Route to `params` while Follow me is on; otherwise a no-op."
   def target(params, opts \\ []) do
     with {:ok, view} <- GenServer.call(server(opts), {:target, params, DateTime.utc_now()}),
@@ -135,6 +144,12 @@ defmodule Shuttle.Voice do
 
     {:reply, plan, state}
   end
+
+  def handle_call(:recover, _from, %{launch: nil} = state),
+    do: {:reply, {:error, "Listen is not recording"}, state}
+
+  def handle_call(:recover, _from, state),
+    do: {:reply, Recorder.recover_voice(state.capture_opts), state}
 
   def handle_call(:discard, _from, %{launch: nil} = state), do: {:reply, {:ok, 0}, state}
 
@@ -346,6 +361,7 @@ defmodule Shuttle.Voice do
     snapshot
     |> Map.put(:preview, preview)
     |> Map.put(:level, Recorder.mic_level(view.capture_opts))
+    |> Map.put(:muted_speech, view.launch && Recorder.held_speech(view.launch, view.capture_opts))
     |> Map.update!(:error, &(&1 || view.focus_error))
     |> put_mode()
     |> put_pending_words(view)

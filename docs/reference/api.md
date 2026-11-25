@@ -793,6 +793,7 @@ Listen, the dictation relay, needs the hark recorder.
 | `POST /voice/target` | recorder-routed | Route following to `{fiber_id, origin?, name?}`, the board's view; returns voice state, unchanged unless following |
 | `POST /voice/toggle` | recorder-routed | Start Listen unmuted when off; otherwise flip mic mute |
 | `POST /voice/discard` | recorder-routed | Drop unsent buffered words and return the number discarded |
+| `POST /voice/recover` | recorder-routed | Transcribe the speech the recording holds from while the mic was muted; the words reach the board as one document, never a worker |
 | `GET /voice/events` | recorder-routed for `target`, local for `focus` | The board's one live stream: server-sent `target` events (the new target with its `cold`), and with `rex=1` `focus` events `{fiber_id, origin, name}` when Rex's worker changes, voice on or off; every stream carries `page` events from `POST /board/open` (not `open`, which EventSource reserves for the connection) |
 | `GET /voice/audio` | recorder-addressed | Launch-bound phone PCM WebSocket, optionally relayed through a hub |
 
@@ -805,7 +806,7 @@ All recorder control forwarding is one-hop and single-attempt; an uncertain resp
 
 #### Listen
 
-`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, pending, pending_words, sends_in_ms, preview, level, last, error, recorder}`.
+`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, pending, pending_words, sends_in_ms, preview, level, muted_speech, last, error, recorder}`.
 `recorder=<host>` selects the recording daemon independently of the worker's `origin`; without it, the receiving daemon answers locally.
 `sources` is `[]` without hark, `["desktop", "phone"]` on macOS, and `["phone"]` on other hosts.
 `source` is `desktop` or `phone`; `launch` is the active recorder's `voice-…` identity or null.
@@ -819,6 +820,7 @@ Its `cold` says whether that card lacks a live conversation, so its words are dr
 `sends_in_ms` is the time until the quiet gap sends the buffered words, or null with nothing buffered or while speech runs.
 `preview` is `{fiber_id, origin, text}` or null, pinned to the target where the in-progress partial began; it is display-only and clears when muted, disabled, empty or stopped.
 `level` is `{mic, at}` or null, the latest microphone peak in dBFS and its ISO 8601 arrival time, absent after one second without a meter update.
+`muted_speech` is `{seconds, since, recovering}` or null: the seconds of speech said into the muted mic that the live recording holds, when the oldest of it was said, and whether a recovery is running (see [Muted speech](#muted-speech)).
 `last` is `{fiber_id, origin?, text?, at, status, detail?}` or null, with status `delivered`, `unconfirmed` or `failed`.
 `enabled` is persisted intent even when capture fails; invalid settings fail off with a visible configuration error.
 
@@ -890,6 +892,15 @@ Live workers take terminal input through `/deliver` with `live_input: true`; col
 Batches stay ordered per destination; different destinations proceed independently.
 A batch is sent once: an answer of any status, or a delivery task that crashes, finishes it, and a failure is not retried. A batch a restart interrupted is handed to the owner again under the same id, and the owner's record decides whether it may paste.
 A 202 with `delivered: null` or an interrupted delivery is unconfirmed; `last` explains that the words remain in the transcript.
+
+#### Muted speech
+
+While the mic is muted, hark keeps the audio around speech it would have heard, on disk beside the recording's transcript, until Listen or the meeting stops; stopping deletes it.
+Its `held.json` reports the amount, which `GET /voice` serves as `muted_speech` for the live launch.
+`POST /voice/recover` asks hark to transcribe all of it, through the `recover` flag file `hark recover` also creates, and returns the voice state; with no live recording it answers 422.
+Hark replays the held speech in a separate process, so live capture continues, and appends the words to the transcript's JSONL as `recovered` rows at the times they were said, then a `recovery` row; recovered audio is dropped.
+Recovered words are never routed or delivered, and the day transcript does not take them: they may have been muted on purpose.
+At the `recovery` row the relay writes them as one Markdown document, `<Shuttle.data_dir()>/voice-recovered/<launch>-<time>.md`, grouped by the card the route journal had in view when each was said, and sends it with `shuttle send-file` as a send of the card in view now, so it appears in that card's channel and sent files for the human to read and forward.
 
 #### Day transcript
 

@@ -8,6 +8,7 @@ defmodule ShuttleWeb.VoiceController do
   def target(conn, params), do: route(conn, params, :target, "/api/v1/voice/target")
   def toggle(conn, params), do: route(conn, params, :toggle, "/api/v1/voice/toggle")
   def discard(conn, params), do: route(conn, params, :discard, "/api/v1/voice/discard")
+  def recover(conn, params), do: route(conn, params, :recover, "/api/v1/voice/recover")
 
   @doc """
   The board's one live stream. Streams the target as server-sent `target` events,
@@ -142,4 +143,5 @@ defmodule ShuttleWeb.VoiceController do
   defp local(:update, params), do: Voice.update(params)
   defp local(:toggle, _params), do: Voice.toggle()
   defp local(:discard, _params), do: Voice.discard()
+  defp local(:recover, _params), do: Voice.recover()
 end
