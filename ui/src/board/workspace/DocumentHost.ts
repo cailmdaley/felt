@@ -152,6 +152,7 @@ export class DocumentHost {
       state.frame.el.classList.toggle('ws-selected', selected)
       state.frame.el.inert = parked
       state.frame.sheet.inert = !selected
+      if (!selected) this.blurInside(state.frame.sheet)
       state.frame.el.setAttribute('aria-hidden', String(!selected))
       // A neighbour's initial load is allowed only while its channel is visible.
       if (parked) {
@@ -259,11 +260,19 @@ export class DocumentHost {
       state.frame.el.classList.remove('ws-selected', 'ws-receded')
       state.frame.el.inert = true
       state.frame.sheet.inert = true
+      this.blurInside(state.frame.sheet)
       state.frame.el.setAttribute('aria-hidden', 'true')
       state.initialSuspended = !state.loaded && !!state.frame.viewer
       suspendFileViewer(state.frame.viewer)
       suspendFileViewer(state.pending)
       this.saveScroll(state)
+    }
+  }
+
+  /** Drops focus synchronously when a sheet recedes or parks, rather than waiting for inert's next-frame fixup. */
+  private blurInside(el: HTMLElement): void {
+    if (document.activeElement instanceof HTMLElement && el.contains(document.activeElement)) {
+      document.activeElement.blur()
     }
   }
 

@@ -174,21 +174,22 @@ export class WheelAxis {
 /**
  * A trackpad swipe already spent (it left the reader): the rest of it, its
  * inertia dying away, moves nothing. It ends when its events pause, or when
- * they speed up again well past the slowest they have fallen to since they
- * began to slow, which is fingers starting the next swipe. Speeds, not
- * deltas, so frames the browser coalesced read as the travel they carry.
+ * they speed up again well past the slowest sustained pace they have fallen to
+ * since they began to slow, which is fingers starting the next swipe. Speeds,
+ * not deltas, so frames the browser coalesced read as the travel they carry.
  */
 export class SpentSwipe {
   private on = false
   private last = 0
   private peak = 0
   private low = Infinity
+  private prev = Infinity
 
   get active(): boolean { return this.on }
 
   /** The swipe is spent from time `t`. */
   begin(t: number): void {
-    this.on = true; this.last = t; this.peak = 0; this.low = Infinity
+    this.on = true; this.last = t; this.peak = 0; this.low = Infinity; this.prev = Infinity
   }
 
   /** Whether an event of `travel` px at time `t` is the spent swipe's; false once it has ended. */
@@ -200,7 +201,10 @@ export class SpentSwipe {
     const speed = travel / Math.max(dt, 1)
     if (speed > 3 * this.low + 0.3) { this.on = false; return false }
     this.peak = Math.max(this.peak, speed)
-    if (speed < this.peak / 2) this.low = Math.min(this.low, speed)
+    // Two consecutive slow events establish a real slowdown; a single jittered frame does not.
+    const sustained = Math.max(this.prev, speed)
+    this.prev = speed
+    if (sustained < this.peak / 2) this.low = Math.min(this.low, sustained)
     return true
   }
 }

@@ -1014,7 +1014,7 @@ export class ChannelsView implements TemporalView {
         if (event.timeStamp - awayAt > WHEEL_IDLE_MS) away = 0
         awayAt = event.timeStamp
         away += px
-        if (away <= -LEAVE_PX) { away = 0; this.ctx?.workspace?.returnToOrigin(); spent.begin(event.timeStamp) }
+        if (away <= -LEAVE_PX) { away = 0; this.ctx?.workspace?.returnToOrigin(); spent.begin(Math.max(event.timeStamp, performance.now())) }
         return
       }
       if (!toward(-px)) return

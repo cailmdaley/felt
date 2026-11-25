@@ -135,10 +135,6 @@ async function toUnions(page) {
   await pick.waitFor({ state: 'attached' })
   if (await pick.isVisible()) await pick.click()
 }
-const streamScroll = page => page.locator('.kbn-ch .kbn-ch-stream').evaluate(el => {
-  for (let node = el; node; node = node.parentElement) if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(node).overflowY)) return Math.round(node.scrollTop)
-  return Math.round(document.scrollingElement.scrollTop)
-})
 
 /**
  * Channels: a post opens its thread, then the orchestrator and the thread
@@ -160,9 +156,10 @@ export function registerChannelsBackJourneys(test) {
       const posts = page.locator('.kbn-ch .kbn-ch-item .kbn-ch-who')
       await posts.first().waitFor()
       const post = posts.nth(3)
-      await post.scrollIntoViewIfNeeded()
+      await post.evaluate(el => el.scrollIntoView({ block: 'center' }))
       const item = await post.getAttribute('data-item')
-      const scrolled = await streamScroll(page)
+      const postTop = () => post.evaluate(el => Math.round(el.getBoundingClientRect().top))
+      const beforeTop = await postTop()
       const below = await page.evaluate(() => navigation.currentEntry.index)
       await post.click()
       await page.locator('.ws-reader:not(.ws-dormant)').waitFor()
@@ -183,7 +180,8 @@ export function registerChannelsBackJourneys(test) {
       assert.equal(new URL(page.url()).hash, '#/channels', `${way}: one press reaches the channel`)
       assert.equal(await page.locator('.kbn-ch-pick[aria-current="true"], .kbn-ch-pick.kbn-ch-pick-on').first().textContent().catch(() => 'unions').then(t => t.includes('unions')), true)
       assert.equal(await page.evaluate(() => document.activeElement?.dataset.item), item, `${way}: the post opened from has the focus`)
-      assert.equal(await streamScroll(page), scrolled, `${way}: the stream is where it was left`)
+      const afterTop = await postTop()
+      assert.ok(Math.abs(afterTop - beforeTop) <= 2, `${way}: the post stands where it was left (${afterTop} vs ${beforeTop})`)
     }
 
     // A post's file opens in the reader; one back returns to the post, in focus.

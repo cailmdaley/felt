@@ -165,6 +165,8 @@ describe('a spent swipe', () => {
     expect(kept([...swipe, ...tail, coalesced, ...inertia.slice(16)])).toBe(swipe.length + 15 + 1 + 14)
     // A human swipe that slows and speeds up again before it lets go.
     expect(kept([...frames([30, 12, 26, 30]), ...inertia])).toBe(4 + inertia.length)
+    // A single delayed frame under load does not end the spent swipe early.
+    expect(kept([[30, 16], [30, 80], [27, 16], ...inertia])).toBe(3 + inertia.length)
   })
 
   it('ends at the next swipe, however gently it ramps up, or once its events pause', () => {

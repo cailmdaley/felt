@@ -232,6 +232,22 @@ describe('stable document frames', () => {
     expect(onSelect).toHaveBeenCalledWith(fiber.key)
   })
 
+  it('blurs focus inside a sheet synchronously when it recedes or parks', () => {
+    const fiber = { ...docs[0], kind: 'fiber' as const }
+    host.setChannel([fiber, docs[1]], fiber.key)
+    const button = document.createElement('button')
+    host.get(fiber.key)!.viewer!.append(button)
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    host.select(docs[1].key)
+    expect(document.activeElement).not.toBe(button)
+    host.select(fiber.key)
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    host.parkAll()
+    expect(document.activeElement).not.toBe(button)
+  })
+
   it('restores prose scroll after its reading geometry is assigned', async () => {
     const prose = document.createElement('div')
     let laidOut = false, top = 0

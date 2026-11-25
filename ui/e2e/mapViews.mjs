@@ -1,6 +1,6 @@
 // The ways of moving over the work, and the rule they share: moving never
-// opens a conversation. Only a click on a thread moves Rex, quietly, and Back
-// from a file finds everything where it stood.
+// opens a conversation or steers Rex, and Back from a file finds everything
+// where it stood.
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -39,47 +39,42 @@ export function registerMapViewJourneys(test) {
     await until(page, () => document.querySelector('.ws-page.ws-selected .ov-head') && !document.querySelector('.ws-page.ws-selected .ov-ancestor'))
   }
 
-  test('A constitution\'s view: a thread\'s row opens its view one level down and moves Rex; its orchestrators stand above, opened by a click or a pull past the top; keys move nothing', async page => {
+  test('A constitution\'s view: a thread\'s row opens its view one level down; its orchestrators stand above, opened by a click or a pull past the top; moving never steers Rex', async page => {
     await landed(page)
     const rootName = await view(page).locator('.ov-head').getAttribute('title')
-    // The root has a worker too, so a pull that left Rex alone did so by choice.
     await page.evaluate(async name => {
       window.__harness.MOCK_FEED.fibers.find(entry => entry.fiber.name === name).runtime = { state: 'running', phase: 'waiting', session_uuid: 'session-root', tmux_session: 'session-root' }
       await window.__harness.modal.fetchAndRender()
     }, rootName)
-    const quiet = await asked(page)
     await threadRow(page, view(page), 'analysis').click()
     await head(page, 'Response analysis').waitFor()
-    await asks(page, quiet.length + 1)
-    assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
+    assert.deepEqual(await asked(page), [])
     assert.match(await page.locator('.ws-stage-band .ws-band-title').textContent(), /\/analysis$/)
     // Its orchestrators stand above its head.
     const scroller = view(page).locator('.ws-family-scroll')
     assert.deepEqual(await view(page).locator('.ov-ancestor .thread-row-slug').allTextContents(), ['calibration-report'])
-    // Keys move the focus among the rows, and neither they nor scrolling move Rex.
+    // Keys move the focus among the rows, and neither they nor scrolling steer Rex.
     await view(page).locator('.ov-head').focus()
     await page.keyboard.press('k')
     assert.equal(await page.evaluate(() => document.activeElement?.querySelector('.thread-row-slug')?.textContent), 'calibration-report')
     await scroller.evaluate(el => { el.scrollTop = 0 })
-    assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
-    // Pulled past the top, the orchestrator's view opens; a pull is no click, so Rex stays.
-    const pulled = await asked(page)
+    assert.deepEqual(await asked(page), [])
+    // Pulled past the top, the orchestrator's view opens.
     for (let n = 0; n < 4 && !await head(page, rootName).count(); n++) {
       await scroller.hover()
       await page.mouse.wheel(0, -100)
       await page.waitForTimeout(60)
     }
     await head(page, rootName).waitFor()
-    await page.waitForTimeout(500)
-    assert.deepEqual(await asked(page), pulled)
-    // The thread's row again; Rex already stands at its worker.
+    assert.deepEqual(await asked(page), [])
+    // The thread's row again, then a click on an orchestrator's step opens its view too.
     await threadRow(page, view(page), 'analysis').click()
     await head(page, 'Response analysis').waitFor()
-    // A click on an orchestrator's step opens its view too, and moves Rex to its worker.
     await scroller.evaluate(el => { el.scrollTop = 0 })
     await view(page).locator('.ov-ancestor').first().click()
     await head(page, rootName).waitFor()
-    await asks(page, pulled.length + 1)
+    await page.waitForTimeout(150)
+    assert.deepEqual(await asked(page), [])
     // However many views down the reader went, Back is one step to the Desk.
     await pageBack(page)
     await page.locator('.ws-reader.ws-dormant').waitFor()

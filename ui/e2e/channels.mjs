@@ -129,14 +129,27 @@ try {
     await page.keyboard.press('Escape')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-band-title').textContent(), 'cmbx')
     assert.equal(await page.locator('.kbn-ch > .ws-dock .ws-worker-message').getAttribute('data-placeholder'), 'Message cmbx')
-    // Its post carries the deck, the plot and the notes it attached, each on a line of its own as wide as the post:
-    // a page and a figure a third of the screen high, 300px at most, a card 56.
+    // Its post carries the deck, the plot and the notes it attached, each on a line of its own:
+    // a page as wide as the post and a third of the screen high (300px at most), a figure fitted to its aspect ratio inside that box, a card 56.
     const kappa = page.locator('.kbn-ch-item[data-fiber="cmbx/kappa-tsz"]')
     assert.equal(await kappa.locator('.kbn-ch-previews .uf-card').count(), 3)
+    await kappa.locator('.uf-card[data-density="figure"][data-fitted]').waitFor()
     const rowWidth = (await kappa.locator('.uf-row').boundingBox()).width
-    const boxes = await kappa.locator('.uf-card').evaluateAll(cards => cards.map(card => [card.dataset.density, Math.round(card.getBoundingClientRect().width), Math.round(card.getBoundingClientRect().height)]))
+    const boxes = await kappa.locator('.uf-card').evaluateAll(cards => cards.map(card => ({
+      density: card.dataset.density,
+      width: Math.round(card.getBoundingClientRect().width),
+      height: Math.round(card.getBoundingClientRect().height),
+      aspect: Number(card.style.getPropertyValue('--uf-aspect')) || 0,
+    })))
     const fold = Math.round(Math.min(300, 0.33 * height))
-    assert.deepEqual(boxes, [['page', Math.round(rowWidth), fold], ['figure', Math.round(rowWidth), fold], ['card', Math.round(rowWidth), 56]])
+    assert.deepEqual([boxes[0].density, boxes[0].width, boxes[0].height], ['page', Math.round(rowWidth), fold])
+    assert.equal(boxes[1].density, 'figure')
+    assert.ok(boxes[1].aspect > 0, 'the figure reports its aspect ratio')
+    const fitWidth = Math.round(Math.min(rowWidth, fold * boxes[1].aspect))
+    const fitHeight = Math.round(fitWidth / boxes[1].aspect)
+    assert.ok(Math.abs(boxes[1].width - fitWidth) <= 2 && Math.abs(boxes[1].height - fitHeight) <= 2,
+      `the figure fits its aspect (${boxes[1].width}x${boxes[1].height} vs ${fitWidth}x${fitHeight})`)
+    assert.deepEqual([boxes[2].density, boxes[2].width, boxes[2].height], ['card', Math.round(rowWidth), 56])
     // The close for review says its review note, never its outcome.
     assert.match(await page.locator('.kbn-ch-item[data-kind="close"] .kbn-ch-item-text').textContent(), /agree to 4%/)
     assert.equal(await page.locator('.kbn-ch-stream').getByText('validated against 2000 simulations').count(), 0)
