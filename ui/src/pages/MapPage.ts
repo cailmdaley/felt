@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { localHour } from '../sdk/civilDay.js'
-import { daemonErrorMessage, daemonFetch, isDaemonBooting, responseError } from '../board/daemonApi.js'
+import { daemonErrorMessage, daemonFetch, isDaemonBooting, postDaemonJson, responseError } from '../board/daemonApi.js'
 import {
   buildCitadel,
   buildCottage,
@@ -10,6 +10,7 @@ import {
   buildHarborPier,
   buildLighthouse,
   buildObservatory,
+  buildReviewPavilion,
   buildRiparianFlora,
   buildRiverBridge,
   buildSailboatsForLane,
@@ -35,7 +36,7 @@ import {
   computeMountainField,
   createMountainGeometries,
 } from '../map/mountains.js'
-import { collectHosts, hostColor, mergeCompositeSnapshot } from '../map/states.js'
+import { cityState, collectHosts, hostColor, mergeCompositeSnapshot } from '../map/states.js'
 import {
   SEA_Y,
   buildDrapedHexBorders,
@@ -631,6 +632,8 @@ export class MapPage {
   private suppressClick = false
 
   private etag: string | null = null
+  private pollEpoch = 0
+  private readonly pendingVerdicts = new Map<string, 'tempered' | 'composted'>()
   private pollTimer: number | undefined
   private autoLightTimer: number | undefined
   private toastTimer: number | undefined
@@ -954,6 +957,7 @@ export class MapPage {
     const items: Array<[string, string, 'state' | 'shared', string]> = [
       ['◈', 'Working', 'state', 'working'],
       ['✧', 'Asking', 'state', 'ask'],
+      ['◇', 'Review', 'state', 'review'],
       ['⌂', 'Resting', 'state', 'resting'],
       ['◉', 'Tapestry', 'state', 'tapestry'],
     ]
@@ -1068,7 +1072,20 @@ export class MapPage {
         ...data,
         continents: Array.isArray(data.continents) ? data.continents : [],
         areas: Array.isArray(data.areas) ? data.areas : [],
-        cities: Array.isArray(data.cities) ? data.cities.map(n => ({ ...n })) : [],
+        cities: Array.isArray(data.cities)
+          ? data.cities.map(n => ({
+              ...n,
+              state: n.column
+                ? cityState({
+                    column: n.column,
+                    turn: n.turn,
+                    status: n.status,
+                    horizon: n.horizon,
+                    kind: n.kind,
+                  })
+                : n.state,
+            }))
+          : [],
         areaLinks: Array.isArray(data.areaLinks) ? data.areaLinks : [],
         domainLinks: Array.isArray(data.domainLinks) ? data.domainLinks : [],
       }
@@ -1802,11 +1819,17 @@ export class MapPage {
     n.shared = Boolean(this.contMap.get(n.continent)?.shared || this.areaMap.get(n.area)?.shared)
     const working = n.state === 'working'
     const asking = n.state === 'ask'
+    const reviewing = n.state === 'review'
     const settled = n.state === 'closed' || n.state === 'settled'
 
     const lensRing = new THREE.Mesh(
       new THREE.RingGeometry(0.94, 1.04, 36),
-      new THREE.MeshBasicMaterial({ color: '#ffce63', transparent: true, opacity: 1, depthWrite: false }),
+      new THREE.MeshBasicMaterial({
+        color: reviewing ? '#7dd3c4' : '#ffce63',
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+      }),
     )
     lensRing.rotation.x = -Math.PI / 2
     lensRing.position.set(x, y + 0.1, z)
@@ -1822,6 +1845,8 @@ export class MapPage {
     const tier: RenderTier = asking || working || n.isOrchestrator ? 'all' : 'l12'
     if (asking) {
       buildLighthouse(ctx, n, x, y, z, tier)
+    } else if (reviewing) {
+      buildReviewPavilion(ctx, n, x, y, z, seed, tier)
     } else if (n.isOrchestrator) {
       buildCitadel(ctx, n, x, y, z, tier)
     } else if (working) {
@@ -1857,7 +1882,7 @@ export class MapPage {
         if (Array.isArray(meshObj.material)) meshObj.material.forEach(m => m.dispose())
         else meshObj.material.dispose()
       }
-      if (meshObj.geometry && !sharedGeos.has(meshObj.geometry)) {
+      if (!(o instanceof THREE.Sprite) && meshObj.geometry && !sharedGeos.has(meshObj.geometry)) {
         meshObj.geometry.dispose()
       }
     })
@@ -1889,6 +1914,7 @@ export class MapPage {
     for (const bl of this.borderLines) {
       bl.visible = tierVisible(bl.userData.tier as RenderTier, this.lodTier)
     }
+    this.syncReviewSignals()
     this.pickables = [
       ...this.instances.filter(m => {
         const b = m.userData.batch as BatchGroup
@@ -1897,6 +1923,14 @@ export class MapPage {
       ...this.terrainMeshes.filter(tm => tm.mesh.visible).map(tm => tm.mesh),
       ...(this.riverMesh && this.riverMesh.visible ? [this.riverMesh] : []),
     ]
+  }
+
+  private syncReviewSignals(): void {
+    for (const s of this.signals) {
+      if (s.type !== 'review-glow') continue
+      const hit = !this.lens || this.matches(s.n)
+      s.m.visible = (this.lodTier >= 1 || Boolean(s.n.isOrchestrator)) && hit
+    }
   }
 
   private assemble(): void {
@@ -2534,12 +2568,19 @@ export class MapPage {
       const dim = hit ? 1 : 0.06
       const liveCity = !['closed', 'settled'].includes(s.n.state)
       const searchDirect = this.lens?.type === 'search' && this.lens.cityIds.has(s.n.id)
+      const reviewLens = this.lens?.type === 'state' && this.lens.value === 'review'
       s.m.visible =
         s.type === 'lens-ring'
           ? Boolean(this.lens) &&
             this.matches(s.n) &&
             (this.lens?.type === 'search' ? searchDirect || liveCity : this.lens?.type !== 'shared' || liveCity)
-          : dim > 0.1
+          : s.type === 'review-glow'
+            ? (this.lodTier >= 1 || Boolean(s.n.isOrchestrator)) && dim > 0.1
+            : dim > 0.1
+      if (s.type === 'review-glow') {
+        ;((s.m as THREE.Sprite).material as THREE.SpriteMaterial).opacity =
+          (reviewLens ? (this.night ? 0.66 : 0.42) : this.night ? 0.46 : 0.22) * dim
+      }
       if (s.type === 'halo') {
         ;((s.m as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity =
           (this.night ? (s.ask ? 0.88 : 0.86) : s.ask ? 0.24 : 0.16) * dim
@@ -2627,6 +2668,7 @@ export class MapPage {
       const n =
         this.atlas.fibers.find(f => f.state === 'working') ||
         this.atlas.fibers.find(f => f.state === 'ask') ||
+        this.atlas.fibers.find(f => f.state === 'review') ||
         this.atlas.fibers[0]
       if (n) {
         this.target.set(n.x - 1.8, 0, n.z + 4.1)
@@ -2713,16 +2755,25 @@ export class MapPage {
         b.append(mark)
       }
       b.append(dispName)
-      const badge = c.active + c.ask
-      if (badge > 0) {
-        const count = document.createElement('em')
-        count.textContent = String(badge)
-        b.append(count)
+      if (c.ask > 0) {
+        const askBadge = document.createElement('em')
+        askBadge.className = 'badge-ask'
+        askBadge.textContent = String(c.ask)
+        askBadge.title = `${c.ask} asking`
+        b.append(askBadge)
+      }
+      if (c.review > 0) {
+        const reviewBadge = document.createElement('em')
+        reviewBadge.className = 'badge-review'
+        reviewBadge.textContent = `◇ ${c.review}`
+        reviewBadge.title = `${c.review} awaiting review`
+        b.append(reviewBadge)
       }
       const statParts = [`${formatCount(c.total)} fibers`]
       if (c.cities) statParts.push(`${c.cities} threads`)
-      if (c.active) statParts.push(`${c.active} active`)
-      if (c.ask) statParts.push(`${c.ask} ask`)
+      if (c.active) statParts.push(`${c.active} working`)
+      if (c.ask) statParts.push(`${c.ask} asking`)
+      if (c.review) statParts.push(`${c.review} awaiting review`)
       if (c.shared) statParts.push('Shared')
       b.title = `${dispName} · ${statParts.join(' · ')} · Click to zoom`
       b.onclick = () => this.jump(c.name)
@@ -2743,7 +2794,11 @@ export class MapPage {
       this.labelEls.push({
         kind: 'continent',
         isIslet,
-        textLen: dispName.length + (badge > 0 ? 3 : 0) + (c.shared ? 2 : 0),
+        textLen:
+          dispName.length +
+          (c.ask > 0 ? String(c.ask).length + 2 : 0) +
+          (c.review > 0 ? String(c.review).length + 4 : 0) +
+          (c.shared ? 2 : 0),
         el,
         p: new THREE.Vector3(cx, cy, worldZ),
         northP: new THREE.Vector3(northX, cy, northZ),
@@ -2810,13 +2865,20 @@ export class MapPage {
     }
 
     const nodeRank = (n: PlacedCity): number =>
-      n.state === 'ask' ? 4 : n.state === 'working' ? 3 : n.isOrchestrator ? 2 : 1
+      n.state === 'ask' ? 5 : n.state === 'working' ? 4 : n.state === 'review' ? 3 : n.isOrchestrator ? 2 : 1
     const threadNodes = [...this.atlas.fibers]
       .filter(n => !['closed', 'settled'].includes(n.state))
       .sort((a, b) => nodeRank(b) - nodeRank(a) || (b.citedBy || 0) - (a.citedBy || 0))
     for (const n of threadNodes) {
       const el = document.createElement('div')
-      const stCls = n.state === 'ask' ? 'ask' : n.state === 'working' ? 'working' : 'resting'
+      const stCls =
+        n.state === 'ask'
+          ? 'ask'
+          : n.state === 'working'
+            ? 'working'
+            : n.state === 'review'
+              ? 'review'
+              : 'resting'
       el.className = 'node-label ' + stCls + (n.isOrchestrator ? ' orchestrator' : '')
       const dot = document.createElement('span')
       dot.className = 'nl-dot'
@@ -2826,14 +2888,19 @@ export class MapPage {
       txt.textContent = shortName
       el.append(dot, txt)
       const hostLabel = n.origin || n.host
-      el.title = `${n.name} (${n.state}${hostLabel ? ` · ${hostLabel}` : ''})`
+      const stateWord = n.state === 'review' ? 'awaiting review' : n.state
+      el.title = `${n.name} (${stateWord}${hostLabel ? ` · ${hostLabel}` : ''})`
       el.onclick = () => this.pinSelection(n, { x: n.x, y: n.elevation, z: n.z })
       this.labelsEl.append(el)
       this.labelEls.push({
         kind: 'node',
         textLen: shortName.length,
         el,
-        p: new THREE.Vector3(n.x, n.elevation + (n.state === 'ask' ? 2.5 : n.isOrchestrator ? 2.8 : 2.4), n.z),
+        p: new THREE.Vector3(
+          n.x,
+          n.elevation + (n.state === 'ask' ? 2.5 : n.state === 'review' ? 1.55 : n.isOrchestrator ? 2.8 : 2.4),
+          n.z,
+        ),
         node: n,
         continent: this.contMap.get(n.continent),
       })
@@ -3088,8 +3155,16 @@ export class MapPage {
       if (nsc > 0) {
         cityIds.add(n.id)
         activeContIds.add(n.continent)
-        const stateBonus = n.state === 'working' ? 12 : n.state === 'ask' ? 14 : n.state === 'resting' ? 6 : 0
-        const badge = n.state === 'closed' ? (n.tempered === false ? 'DISCARDED' : 'TEMPERED') : n.state.toUpperCase()
+        const stateBonus =
+          n.state === 'ask' ? 14 : n.state === 'working' ? 12 : n.state === 'review' ? 9 : n.state === 'resting' ? 6 : 0
+        const badge =
+          n.state === 'closed'
+            ? n.tempered === false
+              ? 'DISCARDED'
+              : 'TEMPERED'
+            : n.state === 'review'
+              ? 'REVIEW'
+              : n.state.toUpperCase()
         const entry: SearchResultItem = {
           kind: 'city',
           score: nsc + stateBonus,
@@ -3293,8 +3368,8 @@ export class MapPage {
           )
           .sort(
             (a, b) =>
-              (a.state === 'ask' ? 0 : a.state === 'working' ? 1 : a.isOrchestrator ? 2 : 3) -
-                (b.state === 'ask' ? 0 : b.state === 'working' ? 1 : b.isOrchestrator ? 2 : 3) ||
+              (a.state === 'ask' ? 0 : a.state === 'working' ? 1 : a.state === 'review' ? 2 : a.isOrchestrator ? 3 : 4) -
+                (b.state === 'ask' ? 0 : b.state === 'working' ? 1 : b.state === 'review' ? 2 : b.isOrchestrator ? 3 : 4) ||
               a.name.localeCompare(b.name),
           )
         const title = document.createElement('div')
@@ -3312,7 +3387,8 @@ export class MapPage {
             const st = document.createElement('small')
             st.style.color = 'var(--map-muted)'
             const peerHost = pf.origin || pf.host
-            st.textContent = peerHost ? `${pf.state} · ${peerHost}` : pf.state
+            const peerState = pf.state === 'review' ? 'awaiting review' : pf.state
+            st.textContent = peerHost ? `${peerState} · ${peerHost}` : peerState
             li.append(nm, st)
             li.onclick = () => {
               this.flyToCity(pf)
@@ -3395,7 +3471,7 @@ export class MapPage {
             nm.textContent = rf.name
             const st = document.createElement('small')
             st.style.color = 'var(--map-muted)'
-            st.textContent = rf.state
+            st.textContent = rf.state === 'review' ? 'awaiting review' : rf.state
             li.append(nm, st)
             li.onclick = () => {
               this.flyToCity(rf)
@@ -3459,7 +3535,14 @@ export class MapPage {
       badgeCls = 'continent'
     } else if (isCity) {
       const city = item as PlacedCity
-      badgeText = city.state === 'closed' ? (city.tempered === false ? 'DISCARDED' : 'TEMPERED') : (city.state || 'THREAD').toUpperCase()
+      badgeText =
+        city.state === 'closed'
+          ? city.tempered === false
+            ? 'DISCARDED'
+            : 'TEMPERED'
+          : city.state === 'review'
+            ? 'REVIEW'
+            : (city.state || 'THREAD').toUpperCase()
       badgeCls = city.state || ''
     } else {
       const tile = item as TileOwner
@@ -3498,7 +3581,14 @@ export class MapPage {
 
     if (isCity) {
       const city = item as PlacedCity
-      const st = city.state === 'closed' ? (city.tempered === false ? 'discarded' : 'tempered') : city.state
+      const st =
+        city.state === 'closed'
+          ? city.tempered === false
+            ? 'discarded'
+            : 'tempered'
+          : city.state === 'review'
+            ? 'awaiting review'
+            : city.state
       addChip(st)
       const hostName = city.origin || city.host
       if (hostName) addChip(hostName, hostColor(hostName))
@@ -3551,6 +3641,56 @@ export class MapPage {
     this.rdActions.replaceChildren()
     if (cityItem && (cityItem.uid || cityItem.id)) {
       const hostId = cityItem.origin || cityItem.host || ''
+      if (cityItem.state === 'review' && hostId) {
+        const verdictKey = cityItem.uid || cityItem.id
+        const pending = this.pendingVerdicts.get(verdictKey)
+        const temperBtn = document.createElement('button')
+        temperBtn.className = 'rd-btn temper'
+        temperBtn.textContent = pending === 'tempered' ? 'Tempering…' : 'Temper'
+        temperBtn.disabled = Boolean(pending)
+        const discardBtn = document.createElement('button')
+        discardBtn.className = 'rd-btn secondary discard'
+        discardBtn.textContent = pending === 'composted' ? 'Discarding…' : 'Discard'
+        discardBtn.disabled = Boolean(pending)
+        const runVerdict = async (target: 'tempered' | 'composted'): Promise<void> => {
+          if (this.pendingVerdicts.has(verdictKey)) return
+          this.pendingVerdicts.set(verdictKey, target)
+          temperBtn.disabled = true
+          discardBtn.disabled = true
+          if (target === 'tempered') temperBtn.textContent = 'Tempering…'
+          else discardBtn.textContent = 'Discarding…'
+          let ok = false
+          try {
+            ok = await this.verdictCity(cityItem, target, hostId)
+          } finally {
+            this.pendingVerdicts.delete(verdictKey)
+          }
+          if (!ok && !this.disposed) {
+            if (
+              this.pinned &&
+              !this.pinned.isContinent &&
+              !this.pinned.isTile &&
+              (this.pinned.uid || this.pinned.id) === verdictKey
+            ) {
+              this.renderDrawerHeader(this.pinned)
+            } else {
+              temperBtn.disabled = false
+              discardBtn.disabled = false
+              temperBtn.textContent = 'Temper'
+              discardBtn.textContent = 'Discard'
+            }
+          }
+        }
+        temperBtn.onclick = e => {
+          e.stopPropagation()
+          void runVerdict('tempered')
+        }
+        discardBtn.onclick = e => {
+          e.stopPropagation()
+          void runVerdict('composted')
+        }
+        this.rdActions.append(temperBtn, discardBtn)
+      }
       if (hostId) {
         const openLabel = this.opts.route.inRex ? 'Open in Rex' : 'Open thread'
         const rexBtn = document.createElement('button')
@@ -3676,6 +3816,64 @@ export class MapPage {
     this.drawerEl.classList.add('open')
     this.drawerEl.setAttribute('aria-hidden', 'false')
     this.el.classList.add('drawer-open')
+  }
+
+  private async verdictCity(city: PlacedCity, target: 'tempered' | 'composted', host: string): Promise<boolean> {
+    const fiberId = city.uid || city.id
+    const verb = target === 'tempered' ? 'Temper' : 'Discard'
+    const done = target === 'tempered' ? 'Tempered' : 'Discarded'
+    try {
+      await postDaemonJson(
+        this.opts.base.replace(/\/+$/, ''),
+        '/api/v1/transition',
+        { fiber_id: fiberId, target, ...(host ? { origin: host } : {}) },
+        `${verb} failed`,
+      )
+      if (this.disposed || !this.bundle) return true
+      const isTempered = target === 'tempered'
+      this.pollEpoch++
+      this.etag = null
+      this.pendingVerdicts.delete(fiberId)
+      this.bundle = {
+        ...this.bundle,
+        cities: this.bundle.cities.map(c =>
+          (city.uid && c.uid === city.uid) || c.id === city.id
+            ? {
+                ...c,
+                state: 'closed',
+                status: 'closed',
+                column: isTempered ? 'tempered' : 'discarded',
+                turn: 'none',
+                tempered: isTempered,
+              }
+            : c,
+        ),
+      }
+      this.assemble()
+      const frame = this.rdBody.firstElementChild
+      if (
+        frame instanceof HTMLIFrameElement &&
+        frame.classList.contains('rd-preview-frame') &&
+        frame.dataset.threadSrc &&
+        this.pinned &&
+        !this.pinned.isContinent &&
+        !this.pinned.isTile &&
+        (this.pinned.uid || this.pinned.id) === fiberId
+      ) {
+        const src = frame.dataset.threadSrc
+        const fresh = document.createElement('iframe')
+        fresh.className = 'rd-preview-frame'
+        fresh.title = frame.title
+        fresh.dataset.threadSrc = src
+        fresh.src = src
+        this.rdBody.replaceChildren(fresh)
+      }
+      this.showToast(`${done} · ${city.name}`)
+      return true
+    } catch (err) {
+      this.showToast(`${verb} failed · ${daemonErrorMessage(err)}`)
+      return false
+    }
   }
 
   private async focusCity(city: PlacedCity, uid: string, host: string): Promise<void> {
@@ -3815,7 +4013,14 @@ export class MapPage {
       const title = document.createElement('strong')
       const sub = document.createElement('small')
       if (!n.isTile) {
-        const st = n.state === 'closed' ? (n.tempered === false ? 'discarded' : 'tempered') : n.state
+        const st =
+          n.state === 'closed'
+            ? n.tempered === false
+              ? 'discarded'
+              : 'tempered'
+            : n.state === 'review'
+              ? 'awaiting review'
+              : n.state
         const hostName = n.origin || n.host
         title.textContent = n.name
         sub.textContent = hostName ? `${st} · ${hostName}` : st
@@ -3906,17 +4111,18 @@ export class MapPage {
 
   private async pollComposite(): Promise<void> {
     if (this.disposed || !this.bundle) return
+    const epoch = this.pollEpoch
     const headers: Record<string, string> = {}
     if (this.etag) headers['If-None-Match'] = this.etag
     try {
       const url = `${this.opts.base.replace(/\/+$/, '')}/api/v1/fibers/composite`
       const resp = await daemonFetch(url, { headers })
-      if (this.disposed || resp.status === 304) return
+      if (this.disposed || epoch !== this.pollEpoch || resp.status === 304) return
       if (!resp.ok) return
       const nextEtag = resp.headers.get('ETag')
-      if (nextEtag) this.etag = nextEtag
       const data: unknown = await resp.json()
-      if (this.disposed || !this.bundle) return
+      if (this.disposed || !this.bundle || epoch !== this.pollEpoch) return
+      if (nextEtag) this.etag = nextEtag
 
       const merged = mergeCompositeSnapshot(this.bundle.cities, data)
       const mergedOrigins = merged.origins ? { ...(this.bundle.origins || {}), ...merged.origins } : this.bundle.origins

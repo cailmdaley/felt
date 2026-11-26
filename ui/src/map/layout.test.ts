@@ -263,11 +263,13 @@ describe('map layout geometry & determinism', () => {
 })
 
 describe('cityState & composite snapshot merge', () => {
-  it('preserves column + turn priority so asking workers stay ask even when runtime.state is running', () => {
+  it('separates urgent asks from awaiting review and keeps idle live workers working', () => {
     expect(cityState({ column: 'in_flight', turn: 'question' })).toBe('ask')
     expect(cityState({ column: 'in_flight', turn: 'blocked' })).toBe('ask')
-    expect(cityState({ column: 'in_flight', turn: 'idle' })).toBe('ask')
-    expect(cityState({ column: 'awaiting_review', turn: null })).toBe('ask')
+    expect(cityState({ column: 'in_flight', turn: 'idle' })).toBe('working')
+    expect(cityState({ column: 'awaiting_review', turn: null })).toBe('review')
+    expect(cityState({ column: 'awaiting_review', turn: 'none' })).toBe('review')
+    expect(cityState({ column: 'orchestrator_review', turn: 'none' })).toBe('resting')
     expect(cityState({ column: 'in_flight', turn: null })).toBe('working')
     expect(cityState({ column: 'tempered', turn: 'question' })).toBe('closed')
     expect(cityState({ column: 'discarded' })).toBe('closed')
@@ -288,17 +290,67 @@ describe('cityState & composite snapshot merge', () => {
         {
           uid: '01ARZ3NDEKTSV4RRFFQ69G5FA3',
           column: 'in_flight',
-          turn: null,
+          turn: 'idle',
           origin: 'beta',
           runtime: { state: 'running' },
         },
+        {
+          uid: '01ARZ3NDEKTSV4RRFFQ69G5FA7',
+          column: 'awaiting_review',
+          turn: 'none',
+          origin: 'alpha',
+        },
       ],
     })
-    expect(merged.matched).toBe(2)
+    expect(merged.matched).toBe(3)
     expect(merged.changed).toBe(true)
     expect(merged.cities.find(c => c.id === 'atlas/core/lead')?.state).toBe('ask')
     expect(merged.cities.find(c => c.id === 'atlas/core/lead')?.host).toBe('delta')
     expect(merged.cities.find(c => c.id === 'atlas/core/check')?.state).toBe('working')
+    expect(merged.cities.find(c => c.id === 'atlas/sim/plot')?.state).toBe('review')
+
+    const atlas = layout({ ...base, cities: merged.cities })
+    const atlasCont = atlas.continents.find(c => c.id === 'atlas')!
+    expect(atlasCont.ask).toBe(2)
+    expect(atlasCont.review).toBe(1)
+
+    // Roles/resting urgent turns vs quiet turns, and active-only non-empty ask semantics
+    expect(cityState({ column: 'roles', turn: 'question' })).toBe('ask')
+    expect(cityState({ column: 'roles', turn: 'none' })).toBe('resting')
+    expect(cityState({ column: 'resting', turn: 'blocked' })).toBe('ask')
+    expect(cityState({ column: 'resting', turn: 'idle' })).toBe('resting')
+
+    expect(cityState({ column: 'resting', turn: 'none', status: 'open', ask: { text: 'stale question' } })).toBe('resting')
+    expect(cityState({ column: 'in_flight', turn: 'working', status: 'active', ask: {} })).toBe('working')
+    expect(cityState({ column: 'in_flight', turn: 'working', status: 'active', ask: { text: '   ' } })).toBe('working')
+    expect(cityState({ column: 'in_flight', turn: 'working', status: 'active', ask: { text: 'Need decision' } })).toBe('ask')
+    expect(cityState({ column: null, turn: null, status: 'active', ask: { text: 'Offline ask' } })).toBe('ask')
+    expect(cityState({ column: null, turn: null, status: 'open', ask: { text: 'Stale offline ask' } })).toBe('draft')
+    expect(cityState({ column: 'awaiting_review', turn: 'none', status: 'closed', ask: { text: 'old ask' } })).toBe('review')
+
+    // Explicit state map honors 'For the human' and does not treat orchestrator 'To review' as human review
+    const explicit = mergeCompositeSnapshot(base.cities, {
+      fibers: [
+        { uid: '01ARZ3NDEKTSV4RRFFQ69G5FA3', state: 'For the human' },
+        { uid: '01ARZ3NDEKTSV4RRFFQ69G5FA7', state: 'To review' },
+      ],
+    })
+    expect(explicit.cities.find(c => c.id === 'atlas/core/check')?.state).toBe('review')
+    expect(explicit.cities.find(c => c.id === 'atlas/sim/plot')?.state).toBe('resting')
+
+    // Transitioning review -> tempered / discarded decrements continent review count
+    const settledReview = mergeCompositeSnapshot(merged.cities, {
+      fibers: [
+        { uid: '01ARZ3NDEKTSV4RRFFQ69G5FA7', column: 'tempered', turn: 'none', status: 'closed', tempered: true },
+        { uid: '01ARZ3NDEKTSV4RRFFQ69G5FA8', column: 'discarded', turn: 'none', status: 'closed', tempered: false },
+      ],
+    })
+    expect(settledReview.cities.find(c => c.id === 'atlas/sim/plot')?.state).toBe('closed')
+    expect(settledReview.cities.find(c => c.id === 'atlas/sim/plot')?.tempered).toBe(true)
+    expect(settledReview.cities.find(c => c.id === 'atlas/docs/guide')?.state).toBe('closed')
+    expect(settledReview.cities.find(c => c.id === 'atlas/docs/guide')?.tempered).toBe(false)
+    const afterAtlas = layout({ ...base, cities: settledReview.cities })
+    expect(afterAtlas.continents.find(c => c.id === 'atlas')?.review).toBe(0)
 
     // Host list and deterministic dot colors
     const hosts = collectHosts({ origins: merged.origins, cities: merged.cities })

@@ -131,19 +131,34 @@ defmodule Shuttle.MapTerrainTest do
     end
   end
 
-  describe "city_state/5" do
-    test "maps live columns, turns, and fallback document status" do
+  describe "city_state/6" do
+    test "maps live columns, turns, active asks, and fallback document status" do
       assert MapTerrain.city_state("tempered", nil, "closed", nil, "oneshot") == "closed"
       assert MapTerrain.city_state("discarded", nil, "closed", nil, "oneshot") == "closed"
       assert MapTerrain.city_state("in_flight", "question", "active", nil, "oneshot") == "ask"
       assert MapTerrain.city_state("in_flight", "blocked", "active", nil, "oneshot") == "ask"
-      assert MapTerrain.city_state("in_flight", "idle", "active", nil, "oneshot") == "ask"
-      assert MapTerrain.city_state("awaiting_review", "none", "closed", nil, "oneshot") == "ask"
+      assert MapTerrain.city_state("in_flight", "idle", "active", nil, "oneshot") == "working"
+      assert MapTerrain.city_state("awaiting_review", "none", "closed", nil, "oneshot") == "review"
       assert MapTerrain.city_state("in_flight", "working", "active", nil, "oneshot") == "working"
       assert MapTerrain.city_state("drafts", "none", "open", nil, "oneshot") == "draft"
       assert MapTerrain.city_state("resting", "none", "open", "stashed", "oneshot") == "resting"
 
+      assert MapTerrain.city_state("roles", "question", "open", nil, "standing") == "ask"
+      assert MapTerrain.city_state("roles", "none", "open", nil, "standing") == "resting"
+      assert MapTerrain.city_state("resting", "blocked", "open", "stashed", "oneshot") == "ask"
+      assert MapTerrain.city_state("resting", "idle", "open", "stashed", "oneshot") == "resting"
+
+      # Active non-empty ask promotes to ask; stale/empty/whitespace asks do not
+      assert MapTerrain.city_state("resting", "none", "open", "stashed", "oneshot", %{"text" => "stale"}) == "resting"
+      assert MapTerrain.city_state("in_flight", "working", "active", nil, "oneshot", %{}) == "working"
+      assert MapTerrain.city_state("in_flight", "working", "active", nil, "oneshot", %{"text" => "   "}) == "working"
+      assert MapTerrain.city_state("in_flight", "working", "active", nil, "oneshot", %{"text" => "Need input"}) == "ask"
+      assert MapTerrain.city_state("awaiting_review", "none", "closed", nil, "oneshot", %{"text" => "old ask"}) == "review"
+
       assert MapTerrain.city_state(nil, nil, "closed", nil, "oneshot") == "closed"
+      assert MapTerrain.city_state(nil, nil, "active", nil, "oneshot", %{"text" => "Offline ask"}) == "ask"
+      assert MapTerrain.city_state(nil, nil, "active", nil, "oneshot", %{"text" => "  "}) == "resting"
+      assert MapTerrain.city_state(nil, nil, "open", nil, "oneshot", %{"text" => "Stale ask"}) == "draft"
       assert MapTerrain.city_state(nil, nil, "open", "stashed", "oneshot") == "resting"
       assert MapTerrain.city_state(nil, nil, "open", nil, "standing") == "resting"
       assert MapTerrain.city_state(nil, nil, "active", nil, "oneshot") == "resting"

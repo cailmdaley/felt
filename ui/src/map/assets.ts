@@ -409,6 +409,68 @@ export function buildLighthouse(ctx: AssetContext, n: PlacedCity, x: number, y: 
   halo(n, x, y, z, true)
 }
 
+// 3b. Awaiting-Review Pavilion / Archive Lantern (~1.22u total height)
+// Calm, grounded domed pavilion with open colonnade and steady warm lantern —
+// no sweeping beam, no pulsing ground ring, and no world-zoom flare.
+export function buildReviewPavilion(
+  ctx: AssetContext,
+  n: PlacedCity,
+  x: number,
+  y: number,
+  z: number,
+  seed: number,
+  tier: RenderTier = 'l12',
+): void {
+  const { box, cyl, put, ao, root, textures, signals } = ctx
+  const angle = (Math.floor(seed * 6) * Math.PI) / 3
+  ao(x, y, z, 1.18, tier)
+
+  // Tiered hexagonal stone plinth & entry step
+  put('hex', 'rock', x, y + 0.04, z, 0.56, 0.08, 0.56, n, angle, 0, null, tier)
+  put('hex', 'trim', x, y + 0.1, z, 0.46, 0.055, 0.46, n, angle, 0, null, tier)
+  const [stepX, stepZ] = rotPoint(x, z, 0, 0.48, angle)
+  box('trim', stepX, y + 0.045, stepZ, 0.28, 0.05, 0.14, n, 0, angle, tier)
+
+  // Low stone balustrade ring & six slender pavilion columns
+  put('hex', 'wall', x, y + 0.18, z, 0.39, 0.11, 0.39, n, angle, 0, null, tier)
+  for (let k = 0; k < 6; k++) {
+    const a = angle + (k * Math.PI) / 3 + Math.PI / 6
+    const px = x + Math.cos(a) * 0.34
+    const pz = z + Math.sin(a) * 0.34
+    cyl('wall', px, y + 0.44, pz, 0.036, 0.44, n, 0, tier)
+    box('trim', px, y + 0.67, pz, 0.085, 0.04, 0.085, n, 0, a, tier)
+  }
+
+  // Central archive plinth & warm steady glass lantern
+  cyl('trim', x, y + 0.28, z, 0.16, 0.14, n, 0, tier)
+  cyl('amber', x, y + 0.46, z, 0.135, 0.24, n, 1.35, tier)
+  cyl('metal', x, y + 0.59, z, 0.15, 0.035, n, 0, tier)
+
+  // Entablature cornice, verdigris cupola dome & brass finial
+  put('hex', 'trim', x, y + 0.71, z, 0.43, 0.065, 0.43, n, angle, 0, null, tier)
+  cyl('copper', x, y + 0.77, z, 0.38, 0.055, n, 0, tier)
+  put('dome', 'dome', x, y + 0.79, z, 0.35, 0.31, 0.35, n, 0, 0, null, tier)
+  cyl('copper', x, y + 1.11, z, 0.075, 0.05, n, 0, tier)
+  cyl('metal', x, y + 1.17, z, 0.018, 0.1, n, 0, tier)
+  box('amber', x, y + 1.23, z, 0.045, 0.045, 0.045, n, 1.1, 0, tier)
+
+  // Soft steady lantern aura (never pulses, hidden at World zoom unless Review lens is active)
+  const reviewGlow = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: textures.lanternGlow,
+      color: '#f2d394',
+      transparent: true,
+      opacity: 0.42,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  )
+  reviewGlow.position.set(x, y + 0.52, z)
+  reviewGlow.scale.set(0.95, 0.95, 1)
+  root.add(reviewGlow)
+  signals.push({ type: 'review-glow', m: reviewGlow, n })
+}
+
 // 4. Tapestry Observatory
 export function buildObservatory(
   ctx: AssetContext,

@@ -902,7 +902,7 @@ defmodule Shuttle.MapTerrain do
           %{} = s ->
             cities = Map.update(cities, root, 1, &(&1 + 1))
             l = live_by_uid[r["uid"]]
-            st = city_state(l && l.column, l && l.turn, r["status"], r["horizon"], s["kind"])
+            st = city_state(l && l.column, l && l.turn, r["status"], r["horizon"], s["kind"], s["ask"])
             active = if st in ["closed", "settled"], do: active, else: Map.update(active, root, 1, &(&1 + 1))
             {sizes, cities, active}
 
@@ -1149,7 +1149,7 @@ defmodule Shuttle.MapTerrain do
                 "area" => area,
                 "parent" => parent,
                 "depth" => rel_depth,
-                "state" => city_state(l && l.column, l && l.turn, r["status"], r["horizon"], s["kind"]),
+                "state" => city_state(l && l.column, l && l.turn, r["status"], r["horizon"], s["kind"], s["ask"]),
                 "tempered" => tempered?,
                 "column" => l && l.column,
                 "turn" => l && l.turn,
@@ -1376,12 +1376,13 @@ defmodule Shuttle.MapTerrain do
   defp continent_kind(_), do: "project"
 
   @doc false
-  def city_state(column, turn, status, horizon, kind) do
+  def city_state(column, turn, status, horizon, kind, ask \\ nil) do
     cond do
       is_binary(column) and column != "" ->
         cond do
           column in ["tempered", "discarded"] -> "closed"
-          turn in ["question", "blocked", "idle"] or column == "awaiting_review" -> "ask"
+          turn in ["question", "blocked"] or (status == "active" and has_active_ask?(ask)) -> "ask"
+          column == "awaiting_review" -> "review"
           column == "in_flight" -> "working"
           column == "drafts" -> "draft"
           true -> "resting"
@@ -1390,6 +1391,9 @@ defmodule Shuttle.MapTerrain do
       status == "closed" ->
         "closed"
 
+      status == "active" and has_active_ask?(ask) ->
+        "ask"
+
       horizon == "stashed" or kind == "standing" or status == "active" ->
         "resting"
 
@@ -1397,6 +1401,10 @@ defmodule Shuttle.MapTerrain do
         "draft"
     end
   end
+
+  defp has_active_ask?(text) when is_binary(text), do: String.trim(text) != ""
+  defp has_active_ask?(%{"text" => text}) when is_binary(text), do: String.trim(text) != ""
+  defp has_active_ask?(_), do: false
 
   defp find_shuttle_parent(parts, by_id) when length(parts) > 1 do
     Enum.find_value((length(parts) - 1)..1//-1, fn idx ->

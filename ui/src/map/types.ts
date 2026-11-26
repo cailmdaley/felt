@@ -1,6 +1,6 @@
 import type * as THREE from 'three'
 
-export type CityState = 'working' | 'ask' | 'resting' | 'draft' | 'closed'
+export type CityState = 'working' | 'ask' | 'review' | 'resting' | 'draft' | 'closed'
 export type BiomeId = 'mediterranean' | 'temperate' | 'savanna' | 'nordic'
 export type HeightMode = 'citations' | 'depth' | 'recency'
 export type LightingMode = 'auto' | 'day' | 'night'
@@ -176,6 +176,7 @@ export interface PlacedContinent extends ContinentInput {
   land: number
   active: number
   ask: number
+  review: number
 }
 
 export interface CoarseCell extends Axial, WorldXZ {
@@ -586,7 +587,7 @@ export interface BoatEntry {
 }
 
 export interface SignalEntry {
-  type: 'halo' | 'forge-ring' | 'forge-glow' | 'lens-ring' | 'ring' | 'lantern-glow' | 'beam' | 'ask-ring'
+  type: 'halo' | 'forge-ring' | 'forge-glow' | 'lens-ring' | 'ring' | 'lantern-glow' | 'beam' | 'ask-ring' | 'review-glow'
   m: THREE.Object3D
   mesh?: THREE.Mesh
   n: PlacedCity

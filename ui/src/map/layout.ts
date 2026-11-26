@@ -1353,6 +1353,7 @@ export function layout(
       land: fine.size,
       active: local.filter(n => n.state === 'working').length,
       ask: local.filter(n => n.state === 'ask').length,
+      review: local.filter(n => n.state === 'review').length,
     }
     placedContinents.push(placedCont)
     placedContById.set(c.id, placedCont)

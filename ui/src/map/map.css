@@ -308,6 +308,11 @@
   color: var(--map-gold);
 }
 
+.pg-map .map-search-results .res-badge.review {
+  background: color-mix(in srgb, #4c8b82 20%, transparent);
+  color: #366962;
+}
+
 .pg-map .map-search-results .res-title {
   font-weight: 500;
   overflow: hidden;
@@ -573,10 +578,20 @@
   white-space: nowrap;
   min-width: 17px;
   padding: 0 4.5px;
-  margin-right: -2px;
   border-radius: 3px;
   background: #bd7035;
   color: #fff6dd;
+}
+
+.pg-map .continent-label em:last-child {
+  margin-right: -2px;
+}
+
+.pg-map .continent-label em.badge-review {
+  font-weight: 500;
+  background: color-mix(in srgb, #4c8b82 16%, transparent);
+  color: #356760;
+  border: 1px solid color-mix(in srgb, #4c8b82 32%, transparent);
 }
 
 .pg-map .area-label {
@@ -685,6 +700,16 @@
   border-radius: 1px;
   transform: rotate(45deg);
   box-shadow: 0 0 4px #e5a43266;
+}
+
+.pg-map .node-label.review .nl-dot {
+  background: #4c8b82;
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+.pg-map .node-label.review {
+  border-color: color-mix(in srgb, #4c8b82 48%, var(--map-line));
 }
 
 .pg-map .node-label.orchestrator .nl-dot {
@@ -957,6 +982,11 @@
   color: var(--map-gold);
 }
 
+.pg-map .rd-badge.review {
+  background: color-mix(in srgb, #4c8b82 20%, transparent);
+  color: #356760;
+}
+
 .pg-map .rd-badge.continent {
   background: color-mix(in srgb, var(--map-gold) 24%, transparent);
   color: var(--map-gold);
@@ -1111,6 +1141,20 @@
   opacity: 0.88;
 }
 
+.pg-map .rd-btn.temper {
+  background: #3d756d;
+  color: #f6f3e8;
+}
+
+.pg-map .rd-btn.temper:hover {
+  opacity: 0.88;
+}
+
+.pg-map .rd-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .pg-map .rd-btn.secondary {
   border: 1px solid var(--map-line);
   color: var(--map-ink);
@@ -1118,6 +1162,11 @@
 
 .pg-map .rd-btn.secondary:hover {
   background: color-mix(in srgb, var(--map-ink) 10%, transparent);
+}
+
+.pg-map .rd-btn.secondary.discard:hover {
+  border-color: color-mix(in srgb, #b85636 52%, var(--map-line));
+  color: #b85636;
 }
 
 /* Toast */
@@ -1140,6 +1189,28 @@
 .pg-map.night .continent-label em {
   background: #d29950;
   color: #172536;
+}
+
+.pg-map.night .continent-label em.badge-review {
+  background: color-mix(in srgb, #6bb5aa 18%, transparent);
+  color: #a9dbd2;
+  border-color: color-mix(in srgb, #6bb5aa 34%, transparent);
+}
+
+.pg-map.night .map-search-results .res-badge.review,
+.pg-map.night .rd-badge.review {
+  background: color-mix(in srgb, #6bb5aa 22%, transparent);
+  color: #9dd4ca;
+}
+
+.pg-map.night .rd-btn.temper {
+  background: #5ca499;
+  color: #10202b;
+}
+
+.pg-map.night .rd-btn.secondary.discard:hover {
+  border-color: color-mix(in srgb, #e0865c 52%, var(--map-line));
+  color: #e89b74;
 }
 
 .pg-map.night .continent-label button {
@@ -1169,6 +1240,11 @@
 .pg-map.night .node-label.ask .nl-dot {
   background: #ffd670;
   box-shadow: 0 0 6px #ffd67088;
+}
+
+.pg-map.night .node-label.review .nl-dot {
+  background: #7bc7bc;
+  box-shadow: 0 0 5px #7bc7bc55;
 }
 
 .pg-map.night .node-label.resting .nl-dot {

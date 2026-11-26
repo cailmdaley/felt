@@ -34,6 +34,7 @@
  */
 import { addChannelsFixtures, addDeskFixtures } from './channels-fixtures.js'
 import { addChangeFixtures, bakeFixtureChange, listFixturePRs } from './change-fixtures.js'
+import { mapTerrainFixture } from './map-fixtures.js'
 import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
 import { addFamilyFixtures, addFrontierFixtures, addRemotePageFixture, addThreadFixtures, addThreadReviewFixtures } from './thread-fixtures.js'
@@ -1516,6 +1517,9 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         `cannot arm ${BARE_FOLLOW_UP}: its shuttle: block has no project_dir ` +
         `(set it as you arm it: shuttle reopen ${BARE_FOLLOW_UP} --project-dir <dir>)`,
     }, 422)
+  }
+  if (url.includes('/api/v1/map/terrain')) {
+    return json(mapTerrainFixture())
   }
   if (url.includes('/api/v1/')) return json({ ok: true })
 

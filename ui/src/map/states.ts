@@ -2,12 +2,13 @@ import { hash } from './layout.js'
 import type { CityInput, CityState, TerrainBundle } from './types.js'
 
 /**
- * One map from the daemon's Desk column and turn to the atlas's five city
- * states. `turn` is whose move it is; the human's move is a lit beacon.
- * A constitution with no live row (its owner unreachable, or long tempered)
- * falls back to what its document says.
+ * One map from the daemon's Desk column and turn to the atlas's six city
+ * states. Urgent human turns (`question`, `blocked`, or an active `ask`)
+ * light a lighthouse (`ask`); closed work waiting on a human verdict renders
+ * as a calm review pavilion (`review`); an idle live worker that asked nothing
+ * stays `working`. A constitution with no live row falls back to its document.
  */
-export const STATES: readonly CityState[] = ['working', 'ask', 'resting', 'draft', 'closed']
+export const STATES: readonly CityState[] = ['working', 'ask', 'review', 'resting', 'draft', 'closed']
 
 export interface CityStateInput {
   column?: string | null
@@ -15,17 +16,29 @@ export interface CityStateInput {
   status?: string | null
   horizon?: string | null
   kind?: string | null
+  ask?: unknown
 }
 
-export function cityState({ column, turn, status, horizon, kind }: CityStateInput): CityState {
+function hasActiveAsk(ask: unknown): boolean {
+  if (typeof ask === 'string') return ask.trim() !== ''
+  if (ask && typeof ask === 'object' && 'text' in ask) {
+    const text = (ask as { text?: unknown }).text
+    return typeof text === 'string' && text.trim() !== ''
+  }
+  return false
+}
+
+export function cityState({ column, turn, status, horizon, kind, ask }: CityStateInput): CityState {
   if (column) {
     if (column === 'tempered' || column === 'discarded' || column === 'composted') return 'closed'
-    if (turn === 'question' || turn === 'blocked' || turn === 'idle' || column === 'awaiting_review') return 'ask'
+    if (turn === 'question' || turn === 'blocked' || (status === 'active' && hasActiveAsk(ask))) return 'ask'
+    if (column === 'awaiting_review') return 'review'
     if (column === 'in_flight') return 'working'
     if (column === 'drafts') return 'draft'
     return 'resting'
   }
   if (status === 'closed') return 'closed'
+  if (status === 'active' && hasActiveAsk(ask)) return 'ask'
   if (horizon === 'stashed' || kind === 'standing' || status === 'active') return 'resting'
   return 'draft'
 }
@@ -81,7 +94,8 @@ interface RawSnapshotRecord {
   outcome?: string
   rex_session?: string
   session?: string
-  shuttle?: { kind?: string; host?: string }
+  ask?: unknown
+  shuttle?: { kind?: string; host?: string; ask?: unknown }
   runtime?: { state?: string; rex_session?: string }
   fiber?: {
     id?: string
@@ -89,7 +103,7 @@ interface RawSnapshotRecord {
     status?: string
     horizon?: string
     outcome?: string
-    shuttle?: { kind?: string; host?: string }
+    shuttle?: { kind?: string; host?: string; ask?: unknown }
   }
 }
 
@@ -103,9 +117,13 @@ export interface SnapshotMergeResult {
 const EXPLICIT_STATE_MAP: Record<string, CityState> = {
   Working: 'working',
   Asking: 'ask',
+  Review: 'review',
+  'For the human': 'review',
   Resting: 'resting',
   Settled: 'closed',
   asking: 'ask',
+  review: 'review',
+  awaiting_review: 'review',
   running: 'working',
   working: 'working',
   ask: 'ask',
@@ -154,9 +172,10 @@ export function mergeCompositeSnapshot(
       derived = cityState({
         column: r.column,
         turn: r.turn,
-        status: r.status ?? r.fiber?.status,
+        status: r.status ?? r.fiber?.status ?? n.status,
         horizon: r.horizon ?? r.fiber?.horizon,
         kind: shuttle.kind ?? n.kind,
+        ask: r.ask ?? shuttle.ask,
       })
     } else if (explicitState) {
       derived = explicitState
