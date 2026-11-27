@@ -29,22 +29,22 @@ import {
   nest,
   world,
 } from '../map/layout.js'
-import '../map/map.css'
 import {
-  buildDetailMountainRanges,
-  buildWorldCordilleras,
-  computeMountainField,
-  createMountainGeometries,
-} from '../map/mountains.js'
+  DEFAULT_TERRAIN_PARAMS,
+  solveArchipelagoGeomorphology,
+  type GeomorphologyResult,
+} from '../map/geomorphology.js'
+import '../map/map.css'
+import { buildAlpineConiferBelts, computeMountainField } from '../map/mountains.js'
 import { cityState, collectHosts, hostColor, mergeCompositeSnapshot } from '../map/states.js'
 import {
   SEA_Y,
+  buildDelaunayTerrain,
   buildDrapedHexBorders,
-  buildErodedTerrain,
   buildRiverWaterMesh,
-  createErodedSampler,
   makeTerrainDetailTexture,
   type ErodedTerrainResult,
+  type RiverWaterResult,
 } from '../map/terrainMesh.js'
 import type {
   AreaInput,
@@ -76,6 +76,7 @@ import type {
   SignalEntry,
   SmokeEntry,
   TerrainBundle,
+  TerrainParams,
   TerrainSampler,
   TileOwner,
   WorldXZ,
@@ -387,6 +388,72 @@ const BIOMES: Record<'day' | 'night', Record<BiomeId, BiomePalette>> = {
   },
 }
 
+function makeCanopyGeometry(): THREE.BufferGeometry {
+  const base = new THREE.IcosahedronGeometry(0.5, 1)
+  const pos = base.attributes.position as THREE.BufferAttribute
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i)
+    const y = pos.getY(i)
+    const z = pos.getZ(i)
+    const k = `${Math.round(x * 100)},${Math.round(y * 100)},${Math.round(z * 100)}`
+    const jitter = 0.89 + hash('canopy:' + k) * 0.22
+    pos.setXYZ(i, x * jitter, y * (0.94 + hash('canopyY:' + k) * 0.14), z * jitter)
+  }
+  const geo = base.index ? base.toNonIndexed() : base
+  if (geo !== base) base.dispose()
+  geo.computeVertexNormals()
+  return geo
+}
+
+function makeGableGeometry(): THREE.BufferGeometry {
+  const shape = new THREE.Shape()
+  shape.moveTo(-0.5, -0.5)
+  shape.lineTo(-0.5, -0.4)
+  shape.lineTo(0, 0.5)
+  shape.lineTo(0.5, -0.4)
+  shape.lineTo(0.5, -0.5)
+  shape.closePath()
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false, steps: 1 })
+  geo.translate(0, 0, -0.5)
+  geo.computeVertexNormals()
+  return geo
+}
+
+function makeHipCapGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4)
+  geo.rotateY(Math.PI / 4)
+  geo.computeVertexNormals()
+  return geo
+}
+
+function makeHullGeometry(): THREE.BufferGeometry {
+  const shape = new THREE.Shape()
+  shape.moveTo(0, 0.5)
+  shape.quadraticCurveTo(0.48, 0.16, 0.42, -0.36)
+  shape.lineTo(0.28, -0.5)
+  shape.lineTo(-0.28, -0.5)
+  shape.lineTo(-0.42, -0.36)
+  shape.quadraticCurveTo(-0.48, 0.16, 0, 0.5)
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false, steps: 1 })
+  geo.rotateX(Math.PI / 2)
+  geo.translate(0, 0.5, 0)
+  geo.computeVertexNormals()
+  return geo
+}
+
+function makeSailGeometry(): THREE.BufferGeometry {
+  const shape = new THREE.Shape()
+  shape.moveTo(-0.48, -0.5)
+  shape.lineTo(0.48, -0.42)
+  shape.quadraticCurveTo(0.08, 0.06, -0.44, 0.5)
+  shape.closePath()
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false, steps: 1 })
+  geo.rotateY(-Math.PI / 2)
+  geo.translate(0.5, 0, 0)
+  geo.computeVertexNormals()
+  return geo
+}
+
 function visH(rawH: number): number {
   const scaled = Math.max(0.15, Math.min(1.05, rawH * 0.38 + 0.06))
   return Math.round(scaled / 0.085) * 0.085
@@ -510,6 +577,11 @@ export class MapPage {
   private readonly worldBtn = document.createElement('button')
   private readonly searchTrigger = document.createElement('button')
   private readonly topRight = document.createElement('div')
+  private readonly terrainWrap = document.createElement('div')
+  private readonly terrainTrigger = document.createElement('button')
+  private readonly terrainPopover = document.createElement('div')
+  private readonly terrainTimeEl = document.createElement('span')
+  private readonly terrainInputs = new Map<keyof TerrainParams, { input: HTMLInputElement; val: HTMLSpanElement }>()
   private readonly modeGroup = document.createElement('div')
   private readonly modeButtons = new Map<LightingMode, HTMLButtonElement>()
   private readonly drawerEl = document.createElement('aside')
@@ -562,6 +634,16 @@ export class MapPage {
   private searchOpen = false
   private searchResults: SearchResultItem[] = []
   private searchIndex = 0
+  private terrainOpen = false
+  private terrainParams: TerrainParams = { ...DEFAULT_TERRAIN_PARAMS }
+  private lastSolveMs = 0
+  private terrainRebuildTimer: number | undefined
+  private lastAssembledTerrainParamsKey = ''
+  private geoCache: {
+    key: string
+    geoResult: GeomorphologyResult
+    mountainField: MountainField
+  } | null = null
 
   // Three.js engine state (created once terrain loads)
   private renderer: THREE.WebGLRenderer | null = null
@@ -583,7 +665,7 @@ export class MapPage {
   private batches = new Map<string, BatchGroup>()
   private instances: THREE.InstancedMesh[] = []
   private terrainMeshes: ErodedTerrainResult[] = []
-  private riverMesh: THREE.Mesh | null = null
+  private riverWater: RiverWaterResult | null = null
   private borderLines: THREE.LineSegments[] = []
   private seaLaneLines: THREE.Mesh[] = []
   private smokes: SmokeEntry[] = []
@@ -669,6 +751,7 @@ export class MapPage {
     clearTimeout(this.toastTimer)
     clearTimeout(this.suppressClickTimer)
     clearTimeout(this.focusTimer)
+    clearTimeout(this.terrainRebuildTimer)
     this.abortController?.abort()
     this.abortController = null
 
@@ -691,7 +774,7 @@ export class MapPage {
       this.geos = null
     }
     if (this.textures) {
-      for (const tex of Object.values(this.textures)) tex.dispose()
+      for (const tex of new Set(Object.values(this.textures))) tex.dispose()
       this.textures = null
     }
     this.terrainDetailTex?.dispose()
@@ -743,8 +826,117 @@ export class MapPage {
     this.searchTrigger.append(kbd, document.createTextNode(' Search'))
     this.jumpsNav.append(this.worldBtn, sep, this.searchTrigger)
 
-    // Top-right lighting toggle
+    // Top-right Terrain playground + lighting toggle
     this.topRight.className = 'map-top-right'
+    this.terrainWrap.className = 'terrain-wrap'
+    this.terrainTrigger.className = 'terrain-btn'
+    this.terrainTrigger.textContent = 'Terrain'
+    this.terrainTrigger.title = 'Terrain playground (T)'
+    this.terrainTrigger.setAttribute('aria-haspopup', 'true')
+    this.terrainTrigger.setAttribute('aria-expanded', 'false')
+
+    this.terrainPopover.className = 'map-terrain-popover'
+    this.terrainPopover.setAttribute('role', 'dialog')
+    this.terrainPopover.setAttribute('aria-label', 'Terrain parameters')
+    this.terrainPopover.setAttribute('aria-hidden', 'true')
+
+    const tpHead = document.createElement('div')
+    tpHead.className = 'tp-head'
+    const tpTitle = document.createElement('span')
+    tpTitle.className = 'tp-title'
+    tpTitle.textContent = 'Terrain'
+    this.terrainTimeEl.className = 'tp-time'
+    this.terrainTimeEl.textContent = '—'
+    const tpClose = document.createElement('button')
+    tpClose.className = 'tp-close'
+    tpClose.title = 'Close terrain controls'
+    tpClose.textContent = '×'
+    tpClose.onclick = e => {
+      e.stopPropagation()
+      this.setTerrainOpen(false)
+    }
+    tpHead.append(tpTitle, this.terrainTimeEl, tpClose)
+    this.terrainPopover.append(tpHead)
+
+    const sliderSpecs: ReadonlyArray<{
+      key: keyof TerrainParams
+      label: string
+      min: number
+      max: number
+      step: number
+      fmt: (v: number) => string
+    }> = [
+      { key: 'uplift', label: 'Uplift', min: 0.4, max: 1.8, step: 0.05, fmt: v => v.toFixed(2) },
+      { key: 'erosionK', label: 'Erosion', min: 0.3, max: 2.0, step: 0.05, fmt: v => v.toFixed(2) },
+      { key: 'aCrit', label: 'Valleys', min: 4, max: 36, step: 1, fmt: v => String(Math.round(v)) },
+      { key: 'valleySmooth', label: 'Smoothing', min: 0.3, max: 2.2, step: 0.05, fmt: v => v.toFixed(2) },
+      { key: 'crestSharpness', label: 'Crests', min: 0.5, max: 1.0, step: 0.02, fmt: v => v.toFixed(2) },
+      { key: 'lakeLevel', label: 'Lakes', min: 0.0, max: 1.8, step: 0.05, fmt: v => v.toFixed(2) },
+    ]
+    for (const spec of sliderSpecs) {
+      const row = document.createElement('label')
+      row.className = 'tp-row'
+      const top = document.createElement('div')
+      top.className = 'tp-row-top'
+      const nameSpan = document.createElement('span')
+      nameSpan.textContent = spec.label
+      const valSpan = document.createElement('span')
+      valSpan.className = 'tp-val'
+      valSpan.textContent = spec.fmt(this.terrainParams[spec.key])
+      top.append(nameSpan, valSpan)
+
+      const inp = document.createElement('input')
+      inp.type = 'range'
+      inp.min = String(spec.min)
+      inp.max = String(spec.max)
+      inp.step = String(spec.step)
+      inp.value = String(this.terrainParams[spec.key])
+      inp.addEventListener('input', () => {
+        const nextV = Number(inp.value)
+        this.terrainParams = { ...this.terrainParams, [spec.key]: nextV }
+        valSpan.textContent = spec.fmt(nextV)
+        this.scheduleTerrainRebuild(180)
+      })
+      inp.addEventListener('change', () => {
+        const nextV = Number(inp.value)
+        this.terrainParams = { ...this.terrainParams, [spec.key]: nextV }
+        valSpan.textContent = spec.fmt(nextV)
+        this.scheduleTerrainRebuild(0)
+      })
+      row.append(top, inp)
+      this.terrainPopover.append(row)
+      this.terrainInputs.set(spec.key, { input: inp, val: valSpan })
+    }
+
+    const tpFoot = document.createElement('div')
+    tpFoot.className = 'tp-foot'
+    const seedBtn = document.createElement('button')
+    seedBtn.className = 'tp-btn'
+    seedBtn.textContent = 'New seed'
+    seedBtn.onclick = e => {
+      e.stopPropagation()
+      this.terrainParams = { ...this.terrainParams, seed: (this.terrainParams.seed + 1) % 9999 }
+      this.scheduleTerrainRebuild(0)
+    }
+    const resetBtn = document.createElement('button')
+    resetBtn.className = 'tp-btn'
+    resetBtn.textContent = 'Reset'
+    resetBtn.onclick = e => {
+      e.stopPropagation()
+      this.terrainParams = { ...DEFAULT_TERRAIN_PARAMS }
+      for (const spec of sliderSpecs) {
+        const entry = this.terrainInputs.get(spec.key)
+        if (entry) {
+          entry.input.value = String(this.terrainParams[spec.key])
+          entry.val.textContent = spec.fmt(this.terrainParams[spec.key])
+        }
+      }
+      this.scheduleTerrainRebuild(0)
+    }
+    tpFoot.append(seedBtn, resetBtn)
+    this.terrainPopover.append(tpFoot)
+    this.terrainWrap.append(this.terrainTrigger, this.terrainPopover)
+
     this.modeGroup.className = 'map-mode'
     this.modeGroup.setAttribute('aria-label', 'Lighting')
     for (const [mode, label] of [
@@ -760,7 +952,7 @@ export class MapPage {
       this.modeButtons.set(mode, btn)
       this.modeGroup.append(btn)
     }
-    this.topRight.append(this.modeGroup)
+    this.topRight.append(this.terrainWrap, this.modeGroup)
 
     // Reader drawer
     this.drawerEl.className = 'map-drawer'
@@ -886,6 +1078,10 @@ export class MapPage {
       const open = this.hostsWrap.classList.toggle('open')
       this.hostsTrigger.setAttribute('aria-expanded', String(open))
     }
+    this.terrainTrigger.onclick = e => {
+      e.stopPropagation()
+      this.setTerrainOpen(!this.terrainOpen)
+    }
     this.clearLensBtn.onclick = () => {
       this.locked = null
       if (this.searchOpen) this.closeSearch()
@@ -938,6 +1134,67 @@ export class MapPage {
       this.resizeObserver = new ResizeObserver(() => this.onResize())
       this.resizeObserver.observe(this.el)
     }
+  }
+
+  private setTerrainOpen(open: boolean): void {
+    this.terrainOpen = open
+    this.terrainWrap.classList.toggle('open', open)
+    this.terrainTrigger.classList.toggle('selected', open)
+    this.terrainTrigger.setAttribute('aria-expanded', String(open))
+    this.terrainPopover.setAttribute('aria-hidden', String(!open))
+  }
+
+  private terrainParamsKey(tp: TerrainParams): string {
+    return [
+      tp.uplift,
+      tp.erosionK,
+      tp.aCrit,
+      tp.valleySmooth,
+      tp.crestSharpness,
+      tp.lakeLevel,
+      tp.seed,
+      tp.iterations,
+    ].join('|')
+  }
+
+  private tileLayoutKey(atlas: AtlasLayout): string {
+    const parts: string[] = [
+      this.heightMode,
+      String(atlas.tiles.length),
+      String(atlas.continents.length),
+      String(atlas.isthmuses.length),
+    ]
+    for (const c of atlas.continents) {
+      parts.push(`${c.id}:${c.land}`)
+    }
+    for (const isth of atlas.isthmuses) {
+      parts.push(`i:${isth.a}-${isth.b}:${isth.cells.length}`)
+    }
+    for (const t of atlas.tiles) {
+      parts.push(`${t.q},${t.r},${t.continent},${t.height.toFixed(3)},${t.citedBy || 0}`)
+    }
+    for (const n of atlas.fibers) {
+      parts.push(`c:${n.q},${n.r},${n.isOrchestrator ? 1 : 0}`)
+    }
+    return parts.join(';')
+  }
+
+  private scheduleTerrainRebuild(delayMs: number): void {
+    clearTimeout(this.terrainRebuildTimer)
+    if (this.terrainParamsKey(this.terrainParams) === this.lastAssembledTerrainParamsKey) return
+    if (delayMs <= 0) {
+      if (!this.disposed && this.bundle) this.assemble()
+      return
+    }
+    this.terrainRebuildTimer = window.setTimeout(() => {
+      if (
+        !this.disposed &&
+        this.bundle &&
+        this.terrainParamsKey(this.terrainParams) !== this.lastAssembledTerrainParamsKey
+      ) {
+        this.assemble()
+      }
+    }, delayMs)
   }
 
   private renderHostsTriggerLabel(activeLens: LensState | null): void {
@@ -1090,6 +1347,7 @@ export class MapPage {
         domainLinks: Array.isArray(data.domainLinks) ? data.domainLinks : [],
       }
       this.areaMap = new Map(this.bundle.areas.map(a => [a.id, a]))
+      this.geoCache = null
 
       if (!this.initThree()) {
         this.loadingMsg.textContent = 'WebGL is unavailable in this environment.'
@@ -1219,12 +1477,16 @@ export class MapPage {
       this.geos = {
         box: new THREE.BoxGeometry(1, 1, 1),
         hex: new THREE.CylinderGeometry(0.985, 1, 1, 6),
-        hexSkirt: new THREE.CylinderGeometry(0.97, 1, 1, 6),
         cyl: new THREE.CylinderGeometry(1, 1, 1, 12),
+        taperCyl: new THREE.CylinderGeometry(0.76, 1, 1, 12),
         dome: new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-        peak: new THREE.ConeGeometry(1, 1, 5),
         ao: aoPlane,
-        ...createMountainGeometries(),
+        canopy: makeCanopyGeometry(),
+        conifer: new THREE.ConeGeometry(0.5, 1, 7),
+        gable: makeGableGeometry(),
+        hipCap: makeHipCapGeometry(),
+        hull: makeHullGeometry(),
+        sail: makeSailGeometry(),
       }
 
       this.terrainDetailTex = makeTerrainDetailTexture(renderer)
@@ -1567,6 +1829,60 @@ export class MapPage {
       { w: 64, h: 128 },
     )
 
+    T_MAP.wall = this.makeCanvasTex(
+      renderer,
+      128,
+      (ctx, S) => {
+        const rnd = prng(1313)
+        ctx.fillStyle = '#f6f5f0'
+        ctx.fillRect(0, 0, S, S)
+        for (let row = 0; row < 8; row++) {
+          const y = row * 16
+          ctx.fillStyle = row % 2 ? 'rgba(255,254,248,.16)' : 'rgba(155,146,128,.10)'
+          ctx.fillRect(0, y, S, 15)
+          ctx.fillStyle = 'rgba(116,108,94,.13)'
+          ctx.fillRect(0, y + 15, S, 1)
+        }
+        for (let i = 0; i < 240; i++) {
+          const x = Math.floor(rnd() * S)
+          const y = Math.floor(rnd() * S)
+          ctx.fillStyle = rnd() > 0.5 ? 'rgba(255,255,250,.18)' : 'rgba(128,120,106,.12)'
+          ctx.fillRect(x, y, 2, 2)
+        }
+      },
+      { repeat: [1, 1] },
+    )
+
+    T_MAP.roof = this.makeCanvasTex(
+      renderer,
+      128,
+      (ctx, S) => {
+        const rnd = prng(1414)
+        ctx.fillStyle = '#f3f1ee'
+        ctx.fillRect(0, 0, S, S)
+        for (let row = 0; row < 10; row++) {
+          const y = Math.round(row * 12.8)
+          ctx.fillStyle = row % 2 ? 'rgba(255,252,246,.15)' : 'rgba(118,96,88,.14)'
+          ctx.fillRect(0, y, S, 11)
+          ctx.fillStyle = 'rgba(72,56,52,.22)'
+          ctx.fillRect(0, y + 11, S, 1.5)
+          const off = (row % 2) * 8
+          for (let col = 0; col < 8; col++) {
+            ctx.fillStyle = 'rgba(84,66,60,.14)'
+            ctx.fillRect((col * 16 + off) % S, y, 1, 11)
+          }
+        }
+        for (let i = 0; i < 160; i++) {
+          const x = Math.floor(rnd() * S)
+          const y = Math.floor(rnd() * S)
+          ctx.fillStyle = rnd() > 0.5 ? 'rgba(255,250,244,.14)' : 'rgba(92,74,68,.12)'
+          ctx.fillRect(x, y, 2, 2)
+        }
+      },
+      { repeat: [1, 1] },
+    )
+    T_MAP.active = T_MAP.roof
+
     T_MAP.ao = this.makeCanvasTex(renderer, 64, (ctx, S) => {
       const g = ctx.createRadialGradient(S / 2, S / 2, S * 0.08, S / 2, S / 2, S * 0.48)
       g.addColorStop(0, 'rgba(255,255,255,.72)')
@@ -1709,7 +2025,9 @@ export class MapPage {
       signals: this.signals,
       halo: this.halo,
       sampleHeight: (x, z) => (this.terrainSampler ? this.terrainSampler.sampleHeight(x, z) : 0.26),
+      sampleSlope: (x, z) => (this.terrainSampler ? this.terrainSampler.sampleSlope(x, z) : 0),
       isInRiver: (x, z) => (this.terrainSampler ? this.terrainSampler.isInRiver(x, z) : false),
+      isInWater: (x, z) => (this.terrainSampler ? this.terrainSampler.isInWater(x, z) : false),
       isNearMountain: t => {
         if (!this.mountainField?.l2) return false
         for (const [dq, dr] of DIRECTIONS) {
@@ -1862,11 +2180,11 @@ export class MapPage {
     }
     const tx = x + 0.64
     const tz = z - 0.54
-    if (!this.terrainSampler?.isInRiver(tx, tz)) {
+    if (!this.terrainSampler?.isInWater(tx, tz) && (this.terrainSampler?.sampleSlope(tx, tz) ?? 0) <= 0.62) {
       const ty = this.terrainSampler ? this.terrainSampler.sampleHeight(tx, tz) : y
-      if (ty > 0.03) {
+      if (ty > SEA_Y + 0.14) {
         const sp = seed > 0.62 ? 'cypress' : seed > 0.32 ? 'oak' : 'pine'
-        buildTree(ctx, tx, ty, tz, 0.62 + seed * 0.22, n, sp, 'leaf', 'l12')
+        buildTree(ctx, tx, ty, tz, 0.62 + seed * 0.22, n, sp, 'leaf', 'l12', seed * Math.PI * 2)
       }
     }
   }
@@ -1907,9 +2225,10 @@ export class MapPage {
       const vis = tierVisible(tm.mesh.userData.tier as RenderTier, this.lodTier)
       tm.mesh.visible = vis
       tm.shoalMesh.visible = vis
+      if (tm.lakeMesh) tm.lakeMesh.visible = vis
     }
-    if (this.riverMesh) {
-      this.riverMesh.visible = tierVisible(this.riverMesh.userData.tier as RenderTier, this.lodTier)
+    if (this.riverWater) {
+      this.riverWater.mesh.visible = tierVisible(this.riverWater.mesh.userData.tier as RenderTier, this.lodTier)
     }
     for (const bl of this.borderLines) {
       bl.visible = tierVisible(bl.userData.tier as RenderTier, this.lodTier)
@@ -1921,7 +2240,7 @@ export class MapPage {
         return m.visible && b.pickable !== false && b.items.some(i => i.owner)
       }),
       ...this.terrainMeshes.filter(tm => tm.mesh.visible).map(tm => tm.mesh),
-      ...(this.riverMesh && this.riverMesh.visible ? [this.riverMesh] : []),
+      ...(this.riverWater && this.riverWater.mesh.visible ? [this.riverWater.mesh] : []),
     ]
   }
 
@@ -1941,7 +2260,7 @@ export class MapPage {
     this.batches = new Map()
     this.instances = []
     this.terrainMeshes = []
-    this.riverMesh = null
+    this.riverWater = null
     this.borderLines = []
     this.seaLaneLines = []
     this.smokes = []
@@ -1967,13 +2286,32 @@ export class MapPage {
       for (const sa of c.subAreas || []) subAreaById.set(sa.id, sa)
     }
 
-    this.terrainSampler = createErodedSampler(atlas, this.tileMap, this.contMap)
+    const tpKey = this.terrainParamsKey(this.terrainParams)
+    const geoCacheKey = `${tpKey}##${this.tileLayoutKey(atlas)}`
+    let geoResult: GeomorphologyResult
+    if (this.geoCache && this.geoCache.key === geoCacheKey) {
+      this.mountainField = this.geoCache.mountainField
+      geoResult = this.geoCache.geoResult
+    } else {
+      this.mountainField = computeMountainField(atlas, this.tileMap, cityAt)
+      geoResult = solveArchipelagoGeomorphology(
+        atlas,
+        this.tileMap,
+        this.contMap,
+        this.mountainField,
+        this.terrainParams,
+      )
+      this.geoCache = { key: geoCacheKey, geoResult, mountainField: this.mountainField }
+    }
+    this.lastAssembledTerrainParamsKey = tpKey
+    this.lastSolveMs = geoResult.stats.solveMs
+    this.terrainTimeEl.textContent = `${Math.round(this.lastSolveMs)} ms`
+    this.terrainSampler = geoResult.sampler
     this.heights = new Map()
     for (const t of atlas.tiles) {
       const tk = key(t)
       this.heights.set(tk, this.terrainSampler.cityElevations.get(tk) ?? this.terrainSampler.sampleHeight(t.x, t.z))
     }
-    this.mountainField = computeMountainField(atlas, this.tileMap, cityAt)
 
     const sea = new THREE.Mesh(
       new THREE.PlaneGeometry(2400, 2400),
@@ -2096,36 +2434,24 @@ export class MapPage {
       }
     }
 
-    const terrainL0 = buildErodedTerrain(atlas.level1, {
-      radius: RADIUS * 2,
-      subdiv: 2,
-      sampler: this.terrainSampler,
-      ownerForTile: l0OwnerFor,
-      contMap: this.contMap,
-      detailTexture: this.terrainDetailTex,
-      tier: 'l0',
-      mountainMap: this.mountainField.l1,
-    })
-    this.root.add(terrainL0.mesh, terrainL0.shoalMesh)
-    this.terrainMeshes.push(terrainL0)
-
-    const terrainL12 = buildErodedTerrain(atlas.level2, {
-      radius: RADIUS,
-      subdiv: 4,
-      sampler: this.terrainSampler,
-      ownerForTile: l2OwnerFor,
-      contMap: this.contMap,
-      detailTexture: this.terrainDetailTex,
-      tier: 'l12',
+    const l1Map = new Map(atlas.level1.map(c => [key(c), c]))
+    const terrain = buildDelaunayTerrain({
+      patches: geoResult.patches,
+      tileMap: this.tileMap,
+      l1Map,
       l3Tiles: atlas.level3,
+      ownerForL1: l0OwnerFor,
+      ownerForL2: l2OwnerFor,
       ownerForL3: l3OwnerFor,
-      mountainMap: this.mountainField.l2,
+      contMap: this.contMap,
+      detailTexture: this.terrainDetailTex,
     })
-    this.root.add(terrainL12.mesh, terrainL12.shoalMesh)
-    this.terrainMeshes.push(terrainL12)
+    this.root.add(terrain.mesh, terrain.shoalMesh)
+    if (terrain.lakeMesh) this.root.add(terrain.lakeMesh)
+    this.terrainMeshes.push(terrain)
 
-    this.riverMesh = buildRiverWaterMesh(this.terrainSampler, this.textures.river)
-    this.root.add(this.riverMesh)
+    this.riverWater = buildRiverWaterMesh(this.terrainSampler, this.textures.river)
+    this.root.add(this.riverWater.mesh)
 
     const bL0 = buildDrapedHexBorders(atlas.level1, RADIUS * 2, p => world(nest(p)), this.terrainSampler)
     bL0.userData = { tier: 'l0' }
@@ -2170,9 +2496,8 @@ export class MapPage {
     this.pinGroup.visible = false
     this.root.add(this.pinGroup)
 
-    buildWorldCordilleras(assetCtx, this.mountainField, this.terrainSampler, l0OwnerFor)
     buildWorldWoodlands(assetCtx, atlas, this.mountainField, this.terrainSampler, l0OwnerFor)
-    buildDetailMountainRanges(assetCtx, this.mountainField, this.heights, l2OwnerFor)
+    buildAlpineConiferBelts(assetCtx, this.mountainField, l2OwnerFor, 'l12')
 
     for (const t of atlas.level2) {
       const tk = key(t)
@@ -2389,8 +2714,9 @@ export class MapPage {
         })
       } else {
         const rockRole = batch.role === 'rock' || batch.role === 'granite' || batch.role === 'slate'
+        const archTexRole = batch.role === 'wall' || batch.role === 'roof' || batch.role === 'active'
         const tex =
-          batch.kind === 'hex' || batch.kind === 'hexSkirt' || rockRole || batch.role === 'river'
+          batch.kind === 'hex' || rockRole || archTexRole || batch.role === 'river'
             ? this.textures[rockRole ? 'rock' : batch.role] || null
             : null
         const rough =
@@ -2417,11 +2743,12 @@ export class MapPage {
           emissive: '#ffffff',
           emissiveIntensity: batch.glow,
           flatShading:
-            batch.kind === 'hexSkirt' ||
-            batch.kind === 'peak' ||
-            batch.kind === 'crag' ||
-            batch.kind === 'ridge' ||
-            batch.kind === 'snow',
+            batch.kind === 'canopy' ||
+            batch.kind === 'conifer' ||
+            batch.kind === 'gable' ||
+            batch.kind === 'hipCap' ||
+            batch.kind === 'hull' ||
+            batch.kind === 'sail',
         })
         stdMat.onBeforeCompile = shader => {
           shader.fragmentShader = shader.fragmentShader.replace(
@@ -2484,13 +2811,8 @@ export class MapPage {
     for (const tm of this.terrainMeshes) {
       tm.updateColors(p, bp, this.lens, this.night, this.matches)
     }
-    if (this.riverMesh) {
-      const mat = this.riverMesh.material as THREE.MeshStandardMaterial
-      mat.color.set(this.night ? '#255c78' : '#4696ab')
-      mat.emissive.set(this.night ? '#123850' : '#1e5b6e')
-      mat.roughness = this.night ? 0.22 : 0.2
-      mat.metalness = 0.14
-      mat.emissiveIntensity = this.lens ? 0.04 : this.night ? 0.16 : 0.09
+    if (this.riverWater) {
+      this.riverWater.updateColors(p, this.lens, this.night, this.matches)
     }
     for (const line of this.seaLaneLines) {
       const mat = line.material as THREE.MeshBasicMaterial
@@ -2696,24 +3018,13 @@ export class MapPage {
     this.worldBtn.classList.remove('selected')
   }
 
-  private syncRenderTarget(curSpan: number): void {
+  private syncRenderTarget(_curSpan: number): void {
     if (!this.pixelRT) return
     const { width, height } = this.viewportSize()
     this.dpr = Math.min(window.devicePixelRatio || 1, 2)
-    let nextScale: number
-    let nextFilter: THREE.TextureFilter
-    if (curSpan > 75) {
-      nextScale = 1
-      nextFilter = THREE.LinearFilter
-    } else if (curSpan > 36) {
-      nextScale = 1.5
-      nextFilter = THREE.LinearFilter
-    } else {
-      nextScale = 2
-      nextFilter = THREE.NearestFilter
-    }
-    const rw = Math.max(1, Math.round((width * this.dpr) / nextScale))
-    const rh = Math.max(1, Math.round((height * this.dpr) / nextScale))
+    const nextFilter = THREE.LinearFilter
+    const rw = Math.max(1, Math.round(width * this.dpr))
+    const rh = Math.max(1, Math.round(height * this.dpr))
     if (rw !== this.rtW || rh !== this.rtH) {
       this.rtW = rw
       this.rtH = rh
@@ -2936,8 +3247,22 @@ export class MapPage {
     const maxX = wideDrawer ? width * 0.5 - 18 : width - 18
     const occupied = [
       { x: 18, y: 14, w: 240, h: 44 },
-      { x: wideDrawer ? width * 0.5 - 205 : width - 205, y: 14, w: 188, h: 48 },
+      { x: wideDrawer ? width * 0.5 - 292 : width - 292, y: 14, w: 274, h: 48 },
     ]
+    if (this.terrainOpen) {
+      const rootRect = this.el.getBoundingClientRect()
+      const popRect = this.terrainPopover.getBoundingClientRect()
+      if (popRect.width > 0 && popRect.height > 0) {
+        occupied.push({
+          x: popRect.left - rootRect.left - 4,
+          y: popRect.top - rootRect.top - 4,
+          w: popRect.width + 8,
+          h: popRect.height + 8,
+        })
+      } else {
+        occupied.push({ x: wideDrawer ? width * 0.5 - 260 : width - 260, y: 64, w: 244, h: 310 })
+      }
+    }
     if (this.searchOpen) occupied.push({ x: width / 2 - 240, y: 56, w: 480, h: 340 })
 
     const contOffsets: ReadonlyArray<[number, number]> = [
@@ -3932,22 +4257,30 @@ export class MapPage {
       this.hostsWrap.classList.remove('open')
       this.hostsTrigger.setAttribute('aria-expanded', 'false')
     }
+    if (this.terrainOpen && !this.terrainWrap.contains(e.target as Node)) {
+      this.setTerrainOpen(false)
+    }
   }
 
   private readonly onWindowKeydown = (e: KeyboardEvent): void => {
     const active = document.activeElement
-    if (
-      e.key === '/' &&
-      !this.searchOpen &&
-      active !== this.searchInput &&
-      !(active && ['INPUT', 'TEXTAREA'].includes(active.tagName))
-    ) {
+    const typing = Boolean(
+      active &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || (active as HTMLElement).isContentEditable),
+    )
+    if (e.key === '/' && !this.searchOpen && active !== this.searchInput && !typing) {
       e.preventDefault()
       this.openSearch('')
+    } else if ((e.key === 't' || e.key === 'T') && !e.metaKey && !e.ctrlKey && !e.altKey && !this.searchOpen && !typing) {
+      e.preventDefault()
+      this.setTerrainOpen(!this.terrainOpen)
     } else if (e.key === 'Escape') {
       if (this.searchOpen) {
         e.preventDefault()
         this.closeSearch()
+      } else if (this.terrainOpen) {
+        e.preventDefault()
+        this.setTerrainOpen(false)
       } else if (this.pinned) {
         e.preventDefault()
         this.clearPin()
@@ -3958,7 +4291,7 @@ export class MapPage {
   private readonly onWheel = (e: WheelEvent): void => {
     const targetEl = e.target as Element | null
     if (!this.el.contains(targetEl)) return
-    if (targetEl?.closest?.('.map-search-results, .hosts-popover, .map-drawer')) return
+    if (targetEl?.closest?.('.map-search-results, .hosts-popover, .map-drawer, .map-terrain-popover')) return
     e.preventDefault()
     this.wantedSpan = THREE.MathUtils.clamp(this.wantedSpan * Math.exp(e.deltaY * 0.0011), 7, 250)
   }

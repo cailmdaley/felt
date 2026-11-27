@@ -1,9 +1,10 @@
-// Procedural high-craft architectural miniatures & sub-hex micro-relief for the Fleet diorama.
-// Every builder emits instanced primitives into the renderer's batch tables (20–40 parts per structure)
-// plus soft radial contact-AO discs so structures sit grounded on the hex terrain.
+// Procedural high-craft architectural miniatures & organic flora for the Fleet diorama.
+// Every builder emits instanced primitives (pitched gable roofs, hipped turret caps, tapered stone
+// cylinders, faceted organic tree canopies & conifers, tapered sailboat hulls & triangular sails)
+// plus soft radial contact-AO discs so every structure sits flush on the eroded Delaunay terrain.
 import * as THREE from 'three'
 import { DIRECTIONS, hash, key, world } from './layout.js'
-import { fbm2 } from './terrainMesh.js'
+import { SEA_Y, fbm2 } from './terrainMesh.js'
 import type {
   AreaInput,
   AssetContext,
@@ -20,6 +21,9 @@ import type {
   TerrainSampler,
   WorldXZ,
 } from './types.js'
+
+const MAX_TREE_SLOPE = 0.62
+const MIN_TREE_Y = SEA_Y + 0.14
 
 function rotPoint(x: number, z: number, dx: number, dz: number, angle: number): [number, number] {
   const c = Math.cos(angle)
@@ -39,32 +43,32 @@ export function buildTree(
   tier: RenderTier = 'all',
   rot = 0,
 ): void {
-  const { box } = ctx
+  const { cyl, put } = ctx
   if (species === 'cypress') {
-    box('trunk', x, y + scale * 0.1, z, 0.08 * scale, 0.2 * scale, 0.08 * scale, owner, 0, rot, tier)
-    box('spruce', x, y + scale * 0.32, z, 0.23 * scale, 0.28 * scale, 0.23 * scale, owner, 0, rot, tier)
-    box(tint, x, y + scale * 0.56, z, 0.17 * scale, 0.28 * scale, 0.17 * scale, owner, 0, rot, tier)
-    box('canopyLight', x, y + scale * 0.77, z, 0.1 * scale, 0.18 * scale, 0.1 * scale, owner, 0, rot, tier)
+    cyl('trunk', x, y + scale * 0.09, z, 0.038 * scale, 0.18 * scale, owner, 0, tier)
+    put('conifer', 'spruce', x, y + scale * 0.34, z, 0.24 * scale, 0.36 * scale, 0.24 * scale, owner, rot, 0, null, tier)
+    put('conifer', tint, x, y + scale * 0.56, z, 0.19 * scale, 0.36 * scale, 0.19 * scale, owner, rot + 0.7, 0, null, tier)
+    put('conifer', 'canopyLight', x, y + scale * 0.76, z, 0.13 * scale, 0.28 * scale, 0.13 * scale, owner, rot + 1.4, 0, null, tier)
   } else if (species === 'pine' || species === 'spruce') {
     const baseRole = 'spruce'
     const midRole = tint === 'spruce' ? 'leaf' : tint
     const topRole = tint === 'spruce' ? 'valley' : 'canopyLight'
-    box('trunk', x, y + scale * 0.11, z, 0.09 * scale, 0.22 * scale, 0.09 * scale, owner, 0, rot, tier)
-    box(baseRole, x, y + scale * 0.28, z, 0.4 * scale, 0.2 * scale, 0.4 * scale, owner, 0, rot, tier)
-    box(midRole, x, y + scale * 0.46, z, 0.28 * scale, 0.21 * scale, 0.28 * scale, owner, 0, rot, tier)
-    box(topRole, x, y + scale * 0.63, z, 0.16 * scale, 0.19 * scale, 0.16 * scale, owner, 0, rot, tier)
+    cyl('trunk', x, y + scale * 0.1, z, 0.044 * scale, 0.2 * scale, owner, 0, tier)
+    put('conifer', baseRole, x, y + scale * 0.31, z, 0.48 * scale, 0.3 * scale, 0.48 * scale, owner, rot, 0, null, tier)
+    put('conifer', midRole, x, y + scale * 0.49, z, 0.36 * scale, 0.29 * scale, 0.36 * scale, owner, rot + 0.55, 0, null, tier)
+    put('conifer', topRole, x, y + scale * 0.66, z, 0.24 * scale, 0.27 * scale, 0.24 * scale, owner, rot + 1.1, 0, null, tier)
   } else if (species === 'willow') {
-    box('trunk', x, y + scale * 0.11, z, 0.09 * scale, 0.22 * scale, 0.09 * scale, owner, 0, rot, tier)
-    box('valley', x, y + scale * 0.28, z, 0.5 * scale, 0.17 * scale, 0.5 * scale, owner, 0, rot, tier)
-    box('leaf', x - 0.04 * scale, y + scale * 0.41, z + 0.04 * scale, 0.41 * scale, 0.18 * scale, 0.41 * scale, owner, 0, rot, tier)
-    box('canopyLight', x + 0.05 * scale, y + scale * 0.51, z - 0.05 * scale, 0.28 * scale, 0.14 * scale, 0.28 * scale, owner, 0, rot, tier)
+    cyl('trunk', x, y + scale * 0.11, z, 0.046 * scale, 0.22 * scale, owner, 0, tier)
+    put('canopy', 'valley', x, y + scale * 0.29, z, 0.54 * scale, 0.26 * scale, 0.54 * scale, owner, rot, 0, null, tier)
+    put('canopy', 'leaf', x - 0.06 * scale, y + scale * 0.41, z + 0.05 * scale, 0.45 * scale, 0.25 * scale, 0.44 * scale, owner, rot + 0.9, 0, null, tier)
+    put('canopy', 'canopyLight', x + 0.07 * scale, y + scale * 0.49, z - 0.06 * scale, 0.32 * scale, 0.2 * scale, 0.32 * scale, owner, rot + 1.8, 0, null, tier)
   } else {
     const shadeRole = tint === 'meadow' ? 'leaf' : 'valley'
     const crownRole = tint === 'meadow' ? 'meadow' : 'canopyLight'
-    box('trunk', x, y + scale * 0.12, z, 0.095 * scale, 0.24 * scale, 0.095 * scale, owner, 0, rot, tier)
-    box(shadeRole, x, y + scale * 0.31, z, 0.45 * scale, 0.18 * scale, 0.45 * scale, owner, 0, rot, tier)
-    box(tint, x - 0.055 * scale, y + scale * 0.44, z + 0.05 * scale, 0.37 * scale, 0.2 * scale, 0.36 * scale, owner, 0, rot, tier)
-    box(crownRole, x + 0.055 * scale, y + scale * 0.55, z - 0.05 * scale, 0.29 * scale, 0.16 * scale, 0.28 * scale, owner, 0, rot, tier)
+    cyl('trunk', x, y + scale * 0.12, z, 0.048 * scale, 0.24 * scale, owner, 0, tier)
+    put('canopy', shadeRole, x, y + scale * 0.33, z, 0.48 * scale, 0.31 * scale, 0.48 * scale, owner, rot, 0, null, tier)
+    put('canopy', tint, x - 0.07 * scale, y + scale * 0.46, z + 0.06 * scale, 0.4 * scale, 0.29 * scale, 0.39 * scale, owner, rot + 1.1, 0, null, tier)
+    put('canopy', crownRole, x + 0.07 * scale, y + scale * 0.55, z - 0.06 * scale, 0.32 * scale, 0.24 * scale, 0.31 * scale, owner, rot + 2.2, 0, null, tier)
   }
 }
 
@@ -102,9 +106,10 @@ function buildGroveCluster(
   tier: RenderTier,
   seedKey: string,
 ): number {
-  const { ao, sampleHeight, isInRiver } = ctx
+  const { ao, sampleHeight, sampleSlope, isInWater } = ctx
+  if (isInWater(cx, cz)) return 0
   const cy = sampleHeight(cx, cz)
-  if (cy < 0.045 || isInRiver(cx, cz)) return 0
+  if (cy < MIN_TREE_Y || cy > 1.32 || sampleSlope(cx, cz) > MAX_TREE_SLOPE) return 0
 
   let placed = 0
   const baseAng = hash(seedKey + ':ga') * Math.PI * 2
@@ -113,12 +118,12 @@ function buildGroveCluster(
     const r = i === 0 ? hash(seedKey + ':r0') * spread * 0.28 : spread * (0.58 + hash(seedKey + ':r' + i) * 0.42)
     const px = cx + Math.cos(a) * r
     const pz = cz + Math.sin(a) * r
-    if (isInRiver(px, pz)) continue
+    if (isInWater(px, pz)) continue
     const py = sampleHeight(px, pz)
-    if (py < 0.045) continue
+    if (py < MIN_TREE_Y || py > 1.35 || sampleSlope(px, pz) > MAX_TREE_SLOPE) continue
     const { species, tint } = pickBiomeTree(biome, hash(seedKey + ':sp' + i), coniferBias)
     const sc = scaleMin + hash(seedKey + ':sc' + i) * (scaleMax - scaleMin)
-    const rot = hash(seedKey + ':rt' + i) * 0.8
+    const rot = hash(seedKey + ':rt' + i) * Math.PI * 2
     buildTree(ctx, px, py, pz, sc, owner, species, tint, tier, rot)
     placed++
   }
@@ -128,7 +133,7 @@ function buildGroveCluster(
   return placed
 }
 
-// 1. Orchestrator Citadel
+// 1. Orchestrator Citadel (pitched gable keep + hipped copper turret spires + faceted smoke)
 export function buildCitadel(ctx: AssetContext, n: PlacedCity, x: number, y: number, z: number, tier: RenderTier = 'all'): void {
   const { box, cyl, put, ao, hostColor, halo } = ctx
   ao(x, y, z, 1.85, tier)
@@ -144,11 +149,10 @@ export function buildCitadel(ctx: AssetContext, n: PlacedCity, x: number, y: num
   box('trim', x, y + 0.93, z - 0.04, 0.98, 0.06, 0.82, n, 0, 0, tier)
   box('wall', x, y + 1.18, z - 0.04, 0.78, 0.46, 0.64, n, 0, 0, tier)
 
+  // True pitched gable keep roof with overhanging eaves + copper ridge crest
   const roofRole = n.state === 'working' ? 'active' : 'roof'
-  for (let k = 0; k < 5; k++) {
-    box(roofRole, x, y + 1.44 + k * 0.065, z - 0.04, 0.88 - k * 0.14, 0.065, 0.74 - k * 0.04, n, 0, 0, tier)
-  }
-  box('copper', x, y + 1.78, z - 0.04, 0.22, 0.045, 0.58, n, 0, 0, tier)
+  put('gable', roofRole, x, y + 1.61, z - 0.04, 0.92, 0.4, 0.78, n, 0, 0, null, tier)
+  box('copper', x, y + 1.82, z - 0.04, 0.08, 0.055, 0.8, n, 0, 0, tier)
 
   const turretCoords: ReadonlyArray<[number, number]> = [
     [-0.46, -0.38],
@@ -169,10 +173,9 @@ export function buildCitadel(ctx: AssetContext, n: PlacedCity, x: number, y: num
       box('white', x + tx + mx, y + 0.21 + tall, z + tz + mz, 0.075, 0.1, 0.075, n, 0, 0, tier)
     }
     if (idx < 2) {
-      box('copper', x + tx, y + 0.27 + tall, z + tz, 0.24, 0.09, 0.24, n, 0, 0, tier)
-      box('copper', x + tx, y + 0.36 + tall, z + tz, 0.16, 0.09, 0.16, n, 0, 0, tier)
-      box('copper', x + tx, y + 0.44 + tall, z + tz, 0.09, 0.08, 0.09, n, 0, 0, tier)
-      box('amber', x + tx, y + 0.51 + tall, z + tz, 0.05, 0.06, 0.05, n, 1.0, 0, tier)
+      // Four-sided hipped copper spire
+      put('hipCap', 'copper', x + tx, y + 0.41 + tall, z + tz, 0.32, 0.34, 0.32, n, 0, 0, null, tier)
+      box('amber', x + tx, y + 0.6 + tall, z + tz, 0.05, 0.06, 0.05, n, 1.0, 0, tier)
     }
   }
 
@@ -195,29 +198,29 @@ export function buildCitadel(ctx: AssetContext, n: PlacedCity, x: number, y: num
   }
 
   const hostCol = hostColor(n.origin || n.host)
-  cyl('metal', x + 0.46, y + 2.22, z - 0.38, 0.022, 0.96, n, 0, tier)
-  box('amber', x + 0.46, y + 2.72, z - 0.38, 0.06, 0.06, 0.06, n, 1.2, 0, tier)
-  put('box', 'host', x + 0.63, y + 2.52, z - 0.38, 0.3, 0.2, 0.028, n, 0.08, 0.25, hostCol, tier)
-  put('box', 'host', x + 0.84, y + 2.49, z - 0.35, 0.2, 0.15, 0.024, n, -0.14, 0.25, hostCol, tier)
+  cyl('metal', x + 0.46, y + 2.24, z - 0.38, 0.022, 0.96, n, 0, tier)
+  box('amber', x + 0.46, y + 2.74, z - 0.38, 0.06, 0.06, 0.06, n, 1.2, 0, tier)
+  put('box', 'host', x + 0.63, y + 2.54, z - 0.38, 0.3, 0.2, 0.028, n, 0.08, 0.25, hostCol, tier)
+  put('box', 'host', x + 0.84, y + 2.51, z - 0.35, 0.2, 0.15, 0.024, n, -0.14, 0.25, hostCol, tier)
 
   if (n.state === 'working') {
     const cx = x - 0.26
     const cz = z - 0.24
-    box('rock', cx, y + 1.66, cz, 0.16, 0.36, 0.16, n, 0, 0, tier)
-    box('metal', cx, y + 1.86, cz, 0.2, 0.05, 0.2, n, 0, 0, tier)
-    box('amber', cx, y + 1.89, cz, 0.1, 0.035, 0.1, n, 2.2, 0, tier)
+    put('taperCyl', 'rock', cx, y + 1.72, cz, 0.095, 0.42, 0.095, n, 0, 0, null, tier)
+    cyl('metal', cx, y + 1.94, cz, 0.095, 0.045, n, 0, tier)
+    cyl('amber', cx, y + 1.97, cz, 0.055, 0.03, n, 2.2, tier)
     for (let k = 0; k < 3; k++) {
       const item = put(
-        'box',
+        'canopy',
         'smoke',
         cx + k * 0.045,
-        y + 2.02 + k * 0.22,
+        y + 2.08 + k * 0.22,
         cz,
-        0.14 + k * 0.04,
-        0.13 + k * 0.03,
-        0.14 + k * 0.04,
+        0.18 + k * 0.05,
+        0.16 + k * 0.04,
+        0.18 + k * 0.05,
         n,
-        k * 0.5,
+        k * 0.9,
         0,
         null,
         tier,
@@ -228,7 +231,7 @@ export function buildCitadel(ctx: AssetContext, n: PlacedCity, x: number, y: num
   }
 }
 
-// 2. Working Forge / Workshop
+// 2. Working Forge / Workshop (pitched gable roof + tapered stone chimney + organic smoke)
 export function buildForge(ctx: AssetContext, n: PlacedCity, x: number, y: number, z: number, tier: RenderTier = 'all'): void {
   const { box, cyl, put, ao, smokes, halo } = ctx
   ao(x, y, z, 1.68, tier)
@@ -248,10 +251,9 @@ export function buildForge(ctx: AssetContext, n: PlacedCity, x: number, y: numbe
   box('trunk', x - 0.06, y + 0.52, z + d / 2 + 0.01, w + 0.04, 0.048, 0.04, n, 0, 0, tier)
   box('trunk', x - 0.06, y + 0.52, z - d / 2 - 0.01, w + 0.04, 0.048, 0.04, n, 0, 0, tier)
 
-  for (let k = 0; k < 6; k++) {
-    box('active', x - 0.06, y + 0.96 + k * 0.068, z, w + 0.24 - k * 0.15, 0.068, d + 0.22, n, 0, 0, tier)
-  }
-  box('trunk', x - 0.06, y + 1.38, z, 0.12, 0.05, d + 0.26, n, 0, 0, tier)
+  // Steep pitched gable workshop roof + timber ridge beam
+  put('gable', 'active', x - 0.06, y + 1.16, z, w + 0.24, 0.46, d + 0.22, n, 0, 0, null, tier)
+  box('trunk', x - 0.06, y + 1.4, z, 0.08, 0.055, d + 0.26, n, 0, 0, tier)
 
   for (const dx of [-0.24, 0.2]) {
     box('amber', x - 0.06 + dx, y + 0.66, z + d / 2 + 0.016, 0.16, 0.22, 0.028, n, 2.6, 0, tier)
@@ -272,24 +274,25 @@ export function buildForge(ctx: AssetContext, n: PlacedCity, x: number, y: numbe
   box('trunk', fx + 0.08, y + 0.16, fz + 0.16, 0.11, 0.12, 0.11, n, 0, 0, tier)
   box('metal', fx + 0.08, y + 0.24, fz + 0.16, 0.14, 0.06, 0.08, n, 0, 0.3, tier)
 
+  // Tapered masonry & brick forge chimney stack + organic faceted smoke puffs
   const cx = x + 0.34
   const cz = z - 0.24
-  box('rock', cx, y + 0.62, cz, 0.3, 1.05, 0.3, n, 0, 0, tier)
-  box('active', cx, y + 1.48, cz, 0.24, 0.85, 0.24, n, 0, 0, tier)
-  box('metal', cx, y + 1.94, cz, 0.32, 0.1, 0.32, n, 0, 0, tier)
-  box('amber', cx, y + 2.0, cz, 0.16, 0.05, 0.16, n, 2.6, 0, tier)
+  put('taperCyl', 'rock', cx, y + 0.62, cz, 0.18, 1.05, 0.18, n, 0, 0, null, tier)
+  put('taperCyl', 'active', cx, y + 1.5, cz, 0.145, 0.84, 0.145, n, 0, 0, null, tier)
+  cyl('metal', cx, y + 1.94, cz, 0.155, 0.09, n, 0, tier)
+  cyl('amber', cx, y + 2.0, cz, 0.095, 0.045, n, 2.6, tier)
   for (let k = 0; k < 5; k++) {
     const item = put(
-      'box',
+      'canopy',
       'smoke',
       cx + k * 0.075,
       y + 2.18 + k * 0.27,
       cz,
-      0.24 + k * 0.055,
-      0.22 + k * 0.035,
-      0.24 + k * 0.055,
+      0.28 + k * 0.065,
+      0.24 + k * 0.045,
+      0.28 + k * 0.065,
       n,
-      k * 0.4,
+      k * 0.8,
       0,
       null,
       tier,
@@ -301,12 +304,12 @@ export function buildForge(ctx: AssetContext, n: PlacedCity, x: number, y: numbe
   box('trunk', x - 0.54, y + 0.32, z + 0.16, 0.17, 0.15, 0.17, n, 0, -0.3, tier)
   cyl('metal', x + 0.58, y + 0.34, z + 0.4, 0.022, 0.58, n, 0, tier)
   box('amber', x + 0.58, y + 0.65, z + 0.4, 0.11, 0.13, 0.11, n, 2.4, 0, tier)
-  box('roof', x + 0.58, y + 0.74, z + 0.4, 0.16, 0.04, 0.16, n, 0, 0, tier)
+  put('hipCap', 'roof', x + 0.58, y + 0.76, z + 0.4, 0.18, 0.08, 0.18, n, 0, 0, null, tier)
 
   halo(n, x, y, z, false)
 }
 
-// 3. Asking Lighthouse (~2.24u total height)
+// 3. Asking Lighthouse (~2.28u total height — smooth tapered stone shaft + conical copper spire)
 export function buildLighthouse(ctx: AssetContext, n: PlacedCity, x: number, y: number, z: number, tier: RenderTier = 'all'): void {
   const { box, cyl, put, ao, root, textures, signals, halo } = ctx
   ao(x, y, z, 1.38, tier)
@@ -314,23 +317,24 @@ export function buildLighthouse(ctx: AssetContext, n: PlacedCity, x: number, y: 
   put('hex', 'rock', x, y + 0.04, z, 0.54, 0.08, 0.54, n, 0, 0, null, tier)
   put('hex', 'trim', x, y + 0.11, z, 0.45, 0.06, 0.45, n, 0, 0, null, tier)
 
+  // Keeper's cottage with pitched gable roof
   const cx = x - 0.3
   const cz = z + 0.14
   box('wall', cx, y + 0.265, cz, 0.34, 0.25, 0.3, n, 0, 0, tier)
-  box('roof', cx, y + 0.415, cz, 0.4, 0.05, 0.36, n, 0, 0, tier)
-  box('roof', cx, y + 0.46, cz, 0.26, 0.04, 0.28, n, 0, 0, tier)
+  put('gable', 'roof', cx, y + 0.45, cz, 0.4, 0.15, 0.36, n, 0, 0, null, tier)
   box('amber', cx, y + 0.27, cz + 0.155, 0.08, 0.1, 0.02, n, 2.2, 0, tier)
 
+  // Smoothly tapered lighthouse shaft bands
   const bands = ['rock', 'white', 'active', 'white']
   for (let k = 0; k < 4; k++) {
-    const r = 0.26 - k * 0.0233
+    const rBot = 0.28 * Math.pow(0.91, k)
     const cy = y + 0.14 + (k + 0.5) * 0.355
-    cyl(bands[k], x, cy, z, r, 0.365, n, 0, tier)
+    put('taperCyl', bands[k], x, cy, z, rBot, 0.365, rBot, n, 0, 0, null, tier)
     if (k === 0 || k === 2) {
-      cyl('metal', x, cy + 0.175, z, r + 0.015, 0.032, n, 0, tier)
+      cyl('metal', x, cy + 0.175, z, rBot * 0.89 + 0.014, 0.032, n, 0, tier)
     }
     if (k === 1 || k === 3) {
-      box('amber', x, cy, z + r + 0.008, 0.042, 0.1, 0.02, n, 1.9, 0, tier)
+      box('amber', x, cy, z + rBot * 0.92 + 0.006, 0.042, 0.1, 0.02, n, 1.9, 0, tier)
     }
   }
 
@@ -348,11 +352,10 @@ export function buildLighthouse(ctx: AssetContext, n: PlacedCity, x: number, y: 
     box('white', x + Math.cos(a) * 0.195, y + 1.76, z + Math.sin(a) * 0.195, 0.024, 0.28, 0.024, n, 0, a, tier)
   }
 
-  box('copper', x, y + 1.96, z, 0.3, 0.065, 0.3, n, 0, 0, tier)
-  box('copper', x, y + 2.025, z, 0.22, 0.065, 0.22, n, 0, 0, tier)
-  box('copper', x, y + 2.085, z, 0.13, 0.055, 0.13, n, 0, 0, tier)
-  cyl('metal', x, y + 2.165, z, 0.016, 0.13, n, 0, tier)
-  box('amber', x, y + 2.24, z, 0.048, 0.048, 0.048, n, 2.5, 0, tier)
+  // Sleek conical copper cupola cap
+  put('conifer', 'copper', x, y + 2.04, z, 0.42, 0.26, 0.42, n, 0, 0, null, tier)
+  cyl('metal', x, y + 2.2, z, 0.016, 0.13, n, 0, tier)
+  box('amber', x, y + 2.27, z, 0.048, 0.048, 0.048, n, 2.5, 0, tier)
 
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(0.42, 0.024, 8, 48),
@@ -409,9 +412,7 @@ export function buildLighthouse(ctx: AssetContext, n: PlacedCity, x: number, y: 
   halo(n, x, y, z, true)
 }
 
-// 3b. Awaiting-Review Pavilion / Archive Lantern (~1.22u total height)
-// Calm, grounded domed pavilion with open colonnade and steady warm lantern —
-// no sweeping beam, no pulsing ground ring, and no world-zoom flare.
+// 3b. Awaiting-Review Pavilion / Archive Lantern (~1.24u total height)
 export function buildReviewPavilion(
   ctx: AssetContext,
   n: PlacedCity,
@@ -425,36 +426,31 @@ export function buildReviewPavilion(
   const angle = (Math.floor(seed * 6) * Math.PI) / 3
   ao(x, y, z, 1.18, tier)
 
-  // Tiered hexagonal stone plinth & entry step
   put('hex', 'rock', x, y + 0.04, z, 0.56, 0.08, 0.56, n, angle, 0, null, tier)
   put('hex', 'trim', x, y + 0.1, z, 0.46, 0.055, 0.46, n, angle, 0, null, tier)
   const [stepX, stepZ] = rotPoint(x, z, 0, 0.48, angle)
   box('trim', stepX, y + 0.045, stepZ, 0.28, 0.05, 0.14, n, 0, angle, tier)
 
-  // Low stone balustrade ring & six slender pavilion columns
   put('hex', 'wall', x, y + 0.18, z, 0.39, 0.11, 0.39, n, angle, 0, null, tier)
   for (let k = 0; k < 6; k++) {
     const a = angle + (k * Math.PI) / 3 + Math.PI / 6
     const px = x + Math.cos(a) * 0.34
     const pz = z + Math.sin(a) * 0.34
-    cyl('wall', px, y + 0.44, pz, 0.036, 0.44, n, 0, tier)
+    put('taperCyl', 'wall', px, y + 0.44, pz, 0.04, 0.44, 0.04, n, 0, 0, null, tier)
     box('trim', px, y + 0.67, pz, 0.085, 0.04, 0.085, n, 0, a, tier)
   }
 
-  // Central archive plinth & warm steady glass lantern
   cyl('trim', x, y + 0.28, z, 0.16, 0.14, n, 0, tier)
   cyl('amber', x, y + 0.46, z, 0.135, 0.24, n, 1.35, tier)
-  cyl('metal', x, y + 0.59, z, 0.15, 0.035, n, 0, tier)
+  put('conifer', 'metal', x, y + 0.61, z, 0.3, 0.06, 0.3, n, angle, 0, null, tier)
 
-  // Entablature cornice, verdigris cupola dome & brass finial
   put('hex', 'trim', x, y + 0.71, z, 0.43, 0.065, 0.43, n, angle, 0, null, tier)
   cyl('copper', x, y + 0.77, z, 0.38, 0.055, n, 0, tier)
   put('dome', 'dome', x, y + 0.79, z, 0.35, 0.31, 0.35, n, 0, 0, null, tier)
-  cyl('copper', x, y + 1.11, z, 0.075, 0.05, n, 0, tier)
-  cyl('metal', x, y + 1.17, z, 0.018, 0.1, n, 0, tier)
-  box('amber', x, y + 1.23, z, 0.045, 0.045, 0.045, n, 1.1, 0, tier)
+  put('hipCap', 'copper', x, y + 1.13, z, 0.14, 0.09, 0.14, n, angle, 0, null, tier)
+  cyl('metal', x, y + 1.2, z, 0.018, 0.09, n, 0, tier)
+  box('amber', x, y + 1.25, z, 0.045, 0.045, 0.045, n, 1.1, 0, tier)
 
-  // Soft steady lantern aura (never pulses, hidden at World zoom unless Review lens is active)
   const reviewGlow = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: textures.lanternGlow,
@@ -501,7 +497,7 @@ export function buildObservatory(
   box('trim', ox, y + 0.035, oz + 0.51, 0.24, 0.04, 0.12, n, 0, 0, tier)
 }
 
-// 5. Resting Cottage
+// 5. Resting Cottage (true pitched gable roof + dormer gable + tapered stone chimney)
 export function buildCottage(
   ctx: AssetContext,
   n: PlacedCity,
@@ -511,7 +507,7 @@ export function buildCottage(
   seed: number,
   tier: RenderTier = 'l12',
 ): void {
-  const { box, cyl, ao } = ctx
+  const { box, cyl, put, ao } = ctx
   const angle = (Math.floor(seed * 6) * Math.PI) / 3
   const rot = (dx: number, dz: number): [number, number] => rotPoint(x, z, dx, dz, angle)
   ao(x, y, z, 1.36, tier)
@@ -530,21 +526,22 @@ export function buildCottage(
     }
   }
 
-  const pitch = 0.055 + hash(n.id + 'pitch') * 0.025
-  for (let k = 0; k < 5; k++) {
-    box('roof', x, y + h + 0.12 + k * pitch, z, w + 0.18 - k * 0.14, 0.065, d + 0.16, n, 0, angle, tier)
-  }
-  box('copper', x, y + h + 0.13 + 5 * pitch, z, 0.11, 0.045, d + 0.18, n, 0, angle, tier)
+  // Pitched gable roof + copper ridge crest
+  const roofH = 0.34 + hash(n.id + 'pitch') * 0.1
+  put('gable', 'roof', x, y + h + 0.1 + roofH * 0.5, z, w + 0.2, roofH, d + 0.18, n, angle, 0, null, tier)
+  box('copper', x, y + h + 0.11 + roofH, z, 0.075, 0.045, d + 0.2, n, 0, angle, tier)
 
+  // Dormer with miniature gable roof
   const [dmX, dmZ] = rot(0.14, d * 0.24)
-  box('wall', dmX, y + h + 0.2, dmZ, 0.22, 0.18, 0.22, n, 0, angle, tier)
-  box('roof', dmX, y + h + 0.31, dmZ, 0.26, 0.05, 0.26, n, 0, angle, tier)
+  box('wall', dmX, y + h + 0.2, dmZ, 0.2, 0.17, 0.22, n, 0, angle, tier)
+  put('gable', 'roof', dmX, y + h + 0.33, dmZ, 0.26, 0.1, 0.26, n, angle, 0, null, tier)
   const [dmWX, dmWZ] = rot(0.14, d * 0.35 + 0.01)
   box('amber', dmWX, y + h + 0.2, dmWZ, 0.09, 0.1, 0.02, n, 0.95, angle, tier)
 
+  // Tapered stone chimney
   const [chX, chZ] = rot(-0.24, -0.16)
-  box('rock', chX, y + h + 0.28, chZ, 0.15, 0.38, 0.15, n, 0, angle, tier)
-  box('trim', chX, y + h + 0.48, chZ, 0.18, 0.045, 0.18, n, 0, angle, tier)
+  put('taperCyl', 'rock', chX, y + h + 0.3, chZ, 0.088, 0.42, 0.088, n, angle, 0, null, tier)
+  cyl('trim', chX, y + h + 0.52, chZ, 0.092, 0.042, n, 0, tier)
 
   for (const dx of [-w * 0.27, w * 0.27]) {
     const [wx, wz] = rot(dx, d / 2 + 0.014)
@@ -556,7 +553,7 @@ export function buildCottage(
   const [doorX, doorZ] = rot(0, d / 2 + 0.018)
   box('trunk', doorX, y + 0.24, doorZ, 0.14, 0.3, 0.04, n, 0, angle, tier)
   const [hoodX, hoodZ] = rot(0, d / 2 + 0.06)
-  box('roof', hoodX, y + 0.41, hoodZ, 0.22, 0.04, 0.12, n, 0, angle, tier)
+  put('gable', 'roof', hoodX, y + 0.43, hoodZ, 0.24, 0.075, 0.14, n, angle, 0, null, tier)
 
   for (const dx of [-0.36, -0.18, 0.18, 0.36]) {
     const [fx, fz] = rot(dx, d / 2 + 0.24)
@@ -566,16 +563,16 @@ export function buildCottage(
     const [rx, rz] = rot(dx, d / 2 + 0.24)
     box('trim', rx, y + 0.13, rz, 0.2, 0.028, 0.025, n, 0, angle, tier)
     const [gx, gz] = rot(dx, d / 2 + 0.14)
-    box('leaf', gx, y + 0.08, gz, 0.16, 0.07, 0.1, n, 0, angle, tier)
+    put('canopy', 'leaf', gx, y + 0.09, gz, 0.18, 0.1, 0.14, n, angle, 0, null, tier)
   }
 
   const [lx, lz] = rot(0.42, d / 2 + 0.2)
   cyl('metal', lx, y + 0.26, lz, 0.018, 0.46, n, 0, tier)
   box('amber', lx, y + 0.51, lz, 0.095, 0.11, 0.095, n, 1.9, angle, tier)
-  box('roof', lx, y + 0.58, lz, 0.14, 0.038, 0.14, n, 0, angle, tier)
+  put('hipCap', 'roof', lx, y + 0.6, lz, 0.16, 0.075, 0.16, n, angle, 0, null, tier)
 }
 
-// 6. Tempered Village
+// 6. Tempered Village (pitched gable cottages + organic grove clusters)
 export function buildTemperedVillage(
   ctx: AssetContext,
   n: PlacedCity,
@@ -599,18 +596,17 @@ export function buildTemperedVillage(
     box('rock', cx, y + 0.025, cz, 0.36, 0.03, 0.3, n, 0, turn, tier)
     box('trim', cx, y + 0.045, cz, 0.32, 0.032, 0.26, n, 0, turn, tier)
     box('wall', cx, y + 0.145, cz, 0.27, 0.17, 0.22, n, 0, turn, tier)
-    box(seed > 0.38 ? 'roof' : 'copper', cx, y + 0.245, cz, 0.32, 0.042, 0.26, n, 0, turn, tier)
+    put('gable', seed > 0.38 ? 'roof' : 'copper', cx, y + 0.285, cz, 0.34, 0.13, 0.28, n, turn, 0, null, tier)
     const [hx, hz] = rot(-0.2, 0.06)
-    box('leaf', hx, y + 0.055, hz, 0.28, 0.065, 0.08, n, 0, turn, tier)
+    put('canopy', 'leaf', hx, y + 0.075, hz, 0.3, 0.1, 0.13, n, turn, 0, null, tier)
     const [gx, gz] = rot(0.18, 0.18)
     buildGroveCluster(ctx, gx, gz, seed > 0.44 ? 3 : 2, 0.2, 0.62, 0.84, n, biome, 0.12, tier, n.id + ':gg')
     if (hash(n.id + ':ob') < 0.14) {
       const [ox, oz] = rot(0.24, -0.22)
       put('hex', 'rock', ox, y + 0.03, oz, 0.2, 0.06, 0.2, n, turn, 0, null, tier)
-      box('rock', ox, y + 0.21, oz, 0.095, 0.3, 0.095, n, 0, turn, tier)
+      put('taperCyl', 'rock', ox, y + 0.21, oz, 0.062, 0.3, 0.062, n, turn, 0, null, tier)
       box('shared', ox, y + 0.27, oz, 0.11, 0.038, 0.11, n, 0.85, turn, tier)
-      box('white', ox, y + 0.38, oz, 0.08, 0.05, 0.08, n, 0, turn, tier)
-      box('white', ox, y + 0.43, oz, 0.045, 0.05, 0.045, n, 0, turn, tier)
+      put('hipCap', 'white', ox, y + 0.42, oz, 0.1, 0.12, 0.1, n, turn, 0, null, tier)
     }
     return
   }
@@ -621,8 +617,8 @@ export function buildTemperedVillage(
     const ang = turn + rRot
     box('trim', cx, y + 0.052, cz, w + 0.05, 0.036, d + 0.05, n, 0, ang, tier)
     box('wall', cx, y + 0.068 + h / 2, cz, w, h, d, n, 0, ang, tier)
-    box(roofRole, cx, y + 0.078 + h, cz, w + 0.07, 0.044, d + 0.07, n, 0, ang, tier)
-    box(roofRole, cx, y + 0.114 + h, cz, w * 0.62, 0.036, d * 0.66, n, 0, ang, tier)
+    const roofH = Math.min(0.17, Math.max(0.11, w * 0.42))
+    put('gable', roofRole, cx, y + 0.068 + h + roofH * 0.5, cz, w + 0.09, roofH, d + 0.08, n, ang, 0, null, tier)
     if (lit) {
       const [wx, wz] = rotPoint(cx, cz, 0, d * 0.5 + 0.008, ang)
       box('amber', wx, y + 0.07 + h * 0.54, wz, 0.065, 0.075, 0.018, n, 0.72, ang, tier)
@@ -638,15 +634,15 @@ export function buildTemperedVillage(
     const [tx, tz] = rot(0.16, 0.2)
     buildTree(ctx, tx, y + 0.035, tz, 0.44, n, seed > 0.5 ? 'cypress' : 'oak', 'leaf', tier)
     const [gx, gz] = rot(-0.16, 0.22)
-    box('leaf', gx, y + 0.062, gz, 0.28, 0.055, 0.11, n, 0, turn, tier)
+    put('canopy', 'leaf', gx, y + 0.072, gz, 0.28, 0.09, 0.14, n, turn, 0, null, tier)
   } else if (variant === 1) {
     box('rock', x, y + 0.018, z, 0.86, 0.032, 0.82, n, 0, turn, tier)
     box('trim', x, y + 0.03, z, 0.76, 0.026, 0.72, n, 0, turn, tier)
     box('sand', x, y + 0.042, z, 0.6, 0.018, 0.56, n, 0, turn, tier)
     lowCottage(-0.22, 0, 0.28, 0.48, 0.2, 'roof', 0, true)
     const [px, pz] = rot(0.06, -0.04)
-    box('trim', px, y + 0.068, pz, 0.22, 0.045, 0.22, n, 0, turn, tier)
-    box('river', px, y + 0.095, pz, 0.14, 0.025, 0.14, n, 0.2, turn, tier)
+    put('hex', 'trim', px, y + 0.068, pz, 0.14, 0.05, 0.14, n, turn, 0, null, tier)
+    put('hex', 'river', px, y + 0.095, pz, 0.1, 0.025, 0.1, n, turn, 0.2, null, tier)
     const [wx, wz] = rot(0.14, -0.32)
     box('trim', wx, y + 0.075, wz, 0.36, 0.07, 0.055, n, 0, turn, tier)
     const [tx, tz] = rot(0.22, 0.2)
@@ -657,7 +653,7 @@ export function buildTemperedVillage(
     box('trim', x, y + 0.042, z, 0.5, 0.018, 0.46, n, 0, turn, tier)
     lowCottage(0, -0.16, 0.42, 0.26, 0.19, seed > 0.5 ? 'roof' : 'copper', 0, true)
     const [hx, hz] = rot(0, 0.28)
-    box('leaf', hx, y + 0.058, hz, 0.34, 0.055, 0.08, n, 0, turn, tier)
+    put('canopy', 'leaf', hx, y + 0.07, hz, 0.34, 0.09, 0.12, n, turn, 0, null, tier)
     const [t1x, t1z] = rot(-0.23, 0.16)
     const [t2x, t2z] = rot(0.23, 0.16)
     buildTree(ctx, t1x, y + 0.03, t1z, 0.46, n, 'cypress', 'valley', tier)
@@ -668,12 +664,12 @@ export function buildTemperedVillage(
     lowCottage(0, -0.2, 0.48, 0.26, 0.2, 'roof', 0, true)
     lowCottage(-0.2, 0.12, 0.26, 0.28, 0.17, 'copper', Math.PI / 2, false)
     const [hx, hz] = rot(0.28, 0.06)
-    box('leaf', hx, y + 0.062, hz, 0.09, 0.055, 0.26, n, 0, turn, tier)
+    put('canopy', 'leaf', hx, y + 0.072, hz, 0.12, 0.09, 0.28, n, turn, 0, null, tier)
     const [tx, tz] = rot(0.18, 0.2)
     buildTree(ctx, tx, y + 0.035, tz, 0.42, n, 'cypress', 'leaf', tier)
   }
 
-  if (y > 0.04 && rawH < 1.38) {
+  if (y > MIN_TREE_Y && rawH < 1.38) {
     const ang = turn + 0.65
     const gx = x + Math.cos(ang) * 0.66
     const gz = z + Math.sin(ang) * 0.66
@@ -683,7 +679,7 @@ export function buildTemperedVillage(
 
 // 7. Discarded closed work: weathered corner ruins
 export function buildDiscardedRuin(ctx: AssetContext, n: PlacedCity, x: number, y: number, z: number, tier: RenderTier = 'l12'): void {
-  const { box, ao } = ctx
+  const { box, put, ao } = ctx
   const seed = hash(n.id + ':r')
   const angle = (Math.floor(seed * 6) * Math.PI) / 3 + 0.35
   n.scenery = 'ruin'
@@ -693,10 +689,10 @@ export function buildDiscardedRuin(ctx: AssetContext, n: PlacedCity, x: number, 
   box('rock', rx, y + 0.085, rz, 0.19, 0.17, 0.16, n, 0, angle, tier)
   box('wall', rx + Math.cos(angle + 1.35) * 0.16, y + 0.06, rz + Math.sin(angle + 1.35) * 0.16, 0.16, 0.12, 0.14, n, 0, angle + 0.45, tier)
   box('rock', rx + Math.cos(angle - 1.25) * 0.15, y + 0.045, rz + Math.sin(angle - 1.25) * 0.15, 0.14, 0.09, 0.12, n, 0, angle - 0.35, tier)
-  box('leaf', rx - Math.cos(angle) * 0.13, y + 0.045, rz - Math.sin(angle) * 0.13, 0.15, 0.08, 0.15, n, 0, 0, tier)
+  put('canopy', 'leaf', rx - Math.cos(angle) * 0.13, y + 0.06, rz - Math.sin(angle) * 0.13, 0.18, 0.11, 0.18, n, angle, 0, null, tier)
 }
 
-// 8. Harbor Pier & Waterfront Warehouse
+// 8. Harbor Pier & Waterfront Warehouse (pitched gable roof)
 export function buildHarborPier(
   ctx: AssetContext,
   shorePt: WorldXZ,
@@ -704,7 +700,7 @@ export function buildHarborPier(
   owner: PickOwner,
   tier: RenderTier = 'all',
 ): void {
-  const { box, cyl, ao } = ctx
+  const { box, cyl, put, ao } = ctx
   const angle = Math.atan2(seaPt.x - shorePt.x, seaPt.z - shorePt.z)
   const ux = Math.sin(angle)
   const uz = Math.cos(angle)
@@ -717,8 +713,7 @@ export function buildHarborPier(
   ao(wx, wy, wz, 0.92, tier)
   box('rock', wx, wy + 0.05, wz, 0.44, 0.1, 0.34, owner, 0, angle, tier)
   box('wall', wx, wy + 0.21, wz, 0.38, 0.24, 0.28, owner, 0, angle, tier)
-  box('roof', wx, wy + 0.35, wz, 0.44, 0.055, 0.34, owner, 0, angle, tier)
-  box('roof', wx, wy + 0.4, wz, 0.28, 0.045, 0.3, owner, 0, angle, tier)
+  put('gable', 'roof', wx, wy + 0.41, wz, 0.46, 0.17, 0.34, owner, angle, 0, null, tier)
   box('amber', wx + ux * 0.15, wy + 0.22, wz + uz * 0.15, 0.09, 0.1, 0.03, owner, 1.4, angle, tier)
 
   const dockX = shorePt.x + ux * 0.56
@@ -744,7 +739,7 @@ export function buildHarborPier(
     const cx = shorePt.x - ux * 0.24 + px * 0.44
     const cz = shorePt.z - uz * 0.24 + pz * 0.44
     const cy = ctx.sampleHeight(cx, cz)
-    if (cy > 0.02) buildSharedBoundaryCairn(ctx, cx, cy, cz, owner, angle, tier)
+    if (cy > MIN_TREE_Y && !ctx.isInWater(cx, cz)) buildSharedBoundaryCairn(ctx, cx, cy, cz, owner, angle, tier)
   }
 }
 
@@ -760,14 +755,14 @@ export function buildSharedBoundaryCairn(
   const { box, put, ao } = ctx
   ao(x, y, z, 0.56, tier)
   put('hex', 'rock', x, y + 0.035, z, 0.2, 0.07, 0.2, owner, angle, 0, null, tier)
-  box('trim', x, y + 0.16, z, 0.125, 0.22, 0.125, owner, 0, angle, tier)
+  put('taperCyl', 'trim', x, y + 0.16, z, 0.082, 0.22, 0.082, owner, angle, 0, null, tier)
   box('shared', x, y + 0.23, z, 0.145, 0.05, 0.145, owner, 0.65, angle, tier)
-  box('wall', x, y + 0.29, z, 0.1, 0.06, 0.1, owner, 0, angle, tier)
+  put('hipCap', 'wall', x, y + 0.3, z, 0.12, 0.09, 0.12, owner, angle, 0, null, tier)
 }
 
-// 9. White-Sailed Boats gliding along cross-ocean sea lanes
+// 9. White-Sailed Boats (tapered wooden hull + slender mast + triangular canvas sails)
 export function buildSailboatsForLane(ctx: AssetContext, lane: SeaLane, laneIdx: number): void {
-  const { box, boats } = ctx
+  const { box, cyl, put, boats } = ctx
   const seaPts = lane.points.filter(p => p.sea)
   if (seaPts.length < 4) return
   const boatCount = lane.points.length >= 16 ? 2 : 1
@@ -776,12 +771,12 @@ export function buildSailboatsForLane(ctx: AssetContext, lane: SeaLane, laneIdx:
     const dir = b % 2 === 0 ? 1 : -1
     const p0 = seaPts[Math.floor(phase0 * (seaPts.length - 1))]
     const y0 = -0.23
-    const hull = box('trunk', p0.x, y0 + 0.03, p0.z, 0.18, 0.06, 0.46, null, 0, 0, 'all')
-    const deck = box('trim', p0.x, y0 + 0.065, p0.z - 0.04, 0.14, 0.035, 0.22, null, 0, 0, 'all')
-    const mast = box('trunk', p0.x, y0 + 0.24, p0.z + 0.02, 0.028, 0.36, 0.028, null, 0, 0, 'all')
-    const mainSail = box('white', p0.x, y0 + 0.24, p0.z - 0.03, 0.045, 0.24, 0.24, null, 0.18, 0, 'all')
-    const jibSail = box('white', p0.x, y0 + 0.21, p0.z + 0.13, 0.035, 0.17, 0.14, null, 0.18, 0, 'all')
-    const wake = box('foam', p0.x, y0 - 0.015, p0.z - 0.26, 0.2, 0.01, 0.34, null, 0, 0, 'all')
+    const hull = put('hull', 'trunk', p0.x, y0 + 0.03, p0.z, 0.21, 0.075, 0.54, null, 0, 0, null, 'all')
+    const deck = box('trim', p0.x, y0 + 0.07, p0.z - 0.04, 0.14, 0.028, 0.24, null, 0, 0, 'all')
+    const mast = cyl('trunk', p0.x, y0 + 0.25, p0.z + 0.02, 0.016, 0.38, null, 0, 'all')
+    const mainSail = put('sail', 'white', p0.x, y0 + 0.26, p0.z - 0.02, 0.04, 0.32, 0.28, null, 0, 0.18, null, 'all')
+    const jibSail = put('sail', 'white', p0.x, y0 + 0.22, p0.z + 0.14, 0.03, 0.22, 0.17, null, 0, 0.18, null, 'all')
+    const wake = box('foam', p0.x, y0 - 0.015, p0.z - 0.28, 0.18, 0.01, 0.34, null, 0, 0, 'all')
     boats.push({
       pts: seaPts,
       phase0,
@@ -809,7 +804,7 @@ export function buildCountryside(
   area: Pick<AreaInput, 'recentRatio' | 'decisionCount'> | undefined,
   tier: RenderTier,
 ): void {
-  const { box, put, ao, sampleHeight, isInRiver, isNearMountain } = ctx
+  const { box, put, ao, sampleHeight, sampleSlope, isInWater, isNearMountain } = ctx
   const k = key(t)
   const seed = hash(k + 'notes')
   const turn = (Math.floor(hash(k + 'nturn') * 6) * Math.PI) / 3
@@ -818,29 +813,28 @@ export function buildCountryside(
   const decisionCount = t.decisionCount ?? area?.decisionCount ?? 0
   const groundAt = (px: number, pz: number): number => sampleHeight(px, pz)
 
-  if (isInRiver(x, z)) return
+  if (isInWater(x, z) || sampleSlope(x, z) > MAX_TREE_SLOPE) return
 
   const obeliskChance = Math.min(0.11, 0.024 + decisionCount * 0.0038)
   if (decisionCount > 0 && !t.coast && !t.river && hash(k + 'obelisk') < obeliskChance) {
     const ox = x + (hash(k + 'ox') - 0.5) * 0.18
     const oz = z + (hash(k + 'oz') - 0.5) * 0.18
-    if (isInRiver(ox, oz)) return
+    if (isInWater(ox, oz) || sampleSlope(ox, oz) > 0.45) return
     const oy = groundAt(ox, oz)
-    if (oy < 0.04) return
+    if (oy < MIN_TREE_Y || oy > 1.25) return
     ao(ox, oy, oz, 0.84, tier)
     put('hex', 'rock', ox, oy + 0.032, oz, 0.34, 0.064, 0.34, owner, turn, 0, null, tier)
     put('hex', 'trim', ox, oy + 0.075, oz, 0.24, 0.045, 0.24, owner, turn, 0, null, tier)
-    box('rock', ox, oy + 0.28, oz, 0.125, 0.39, 0.125, owner, 0, turn, tier)
+    put('taperCyl', 'rock', ox, oy + 0.28, oz, 0.078, 0.39, 0.078, owner, turn, 0, null, tier)
     box('shared', ox, oy + 0.35, oz, 0.145, 0.052, 0.145, owner, 0.78, turn, tier)
-    box('white', ox, oy + 0.5, oz, 0.1, 0.055, 0.1, owner, 0, turn, tier)
-    box('white', ox, oy + 0.555, oz, 0.055, 0.055, 0.055, owner, 0, turn, tier)
+    put('hipCap', 'white', ox, oy + 0.53, oz, 0.12, 0.13, 0.12, owner, turn, 0, null, tier)
     for (let s = 0; s < 3; s++) {
       const a = turn + s * ((Math.PI * 2) / 3) + 0.4
       const sx = ox + Math.cos(a) * 0.36
       const sz = oz + Math.sin(a) * 0.36
-      if (isInRiver(sx, sz)) continue
+      if (isInWater(sx, sz) || sampleSlope(sx, sz) > MAX_TREE_SLOPE) continue
       const sy = groundAt(sx, sz)
-      if (sy < 0.04) continue
+      if (sy < MIN_TREE_Y) continue
       if (s === 0) {
         buildTree(ctx, sx, sy, sz, 0.64, owner, biome === 'nordic' ? 'pine' : 'cypress', 'leaf', tier, turn)
       } else {
@@ -859,12 +853,12 @@ export function buildCountryside(
   const coastPenalty = t.coast ? -0.24 : 0
   const woodScore = groveNoise + maturityBoost + valleyBoost + foothillBoost + citeBoost + coastPenalty
 
-  if (recentRatio >= 0.22 && !t.coast && !t.river && woodScore < 0.28 && seed > 0.56) {
+  if (recentRatio >= 0.22 && !t.coast && !t.river && woodScore < 0.28 && seed > 0.56 && sampleSlope(x, z) < 0.32) {
     const gy = groundAt(x, z)
-    if (gy < 0.045) return
+    if (gy < MIN_TREE_Y || gy > 0.85) return
     ao(x, gy, z, 0.96, tier)
     const [wx, wz] = rotPoint(x, z, 0, -0.44, turn)
-    if (!isInRiver(wx, wz)) {
+    if (!isInWater(wx, wz)) {
       const wy = groundAt(wx, wz)
       box('rock', wx, wy + 0.032, wz, 0.78, 0.064, 0.08, owner, 0, turn, tier)
       box('trim', wx, wy + 0.068, wz, 0.76, 0.02, 0.07, owner, 0, turn, tier)
@@ -872,7 +866,7 @@ export function buildCountryside(
     for (let j = 0; j < 3; j++) {
       const off = (j - 1) * 0.25 + 0.04
       const [tx, tz] = rotPoint(x, z, 0, off, turn)
-      if (isInRiver(tx, tz)) continue
+      if (isInWater(tx, tz)) continue
       const ty = groundAt(tx, tz)
       box('trim', tx, ty + 0.018, tz, 0.76 - j * 0.06, 0.032, 0.2, owner, 0, turn, tier)
       box(j % 2 === 0 ? 'crop' : 'meadow', tx, ty + 0.04, tz, 0.7 - j * 0.06, 0.028, 0.15, owner, 0, turn, tier)
@@ -880,9 +874,9 @@ export function buildCountryside(
     }
     for (let j = 0; j < 2; j++) {
       const [ox, oz] = rotPoint(x, z, j === 0 ? 0.42 : -0.4, j === 0 ? 0.16 : -0.14, turn)
-      if (!isInRiver(ox, oz)) {
+      if (!isInWater(ox, oz) && sampleSlope(ox, oz) <= MAX_TREE_SLOPE) {
         const oy = groundAt(ox, oz)
-        if (oy > 0.045) buildTree(ctx, ox, oy, oz, 0.56 + j * 0.08, owner, 'oak', 'canopyLight', tier, turn + j * 0.4)
+        if (oy >= MIN_TREE_Y) buildTree(ctx, ox, oy, oz, 0.56 + j * 0.08, owner, 'oak', 'canopyLight', tier, turn + j * 0.4)
       }
     }
     return
@@ -973,9 +967,11 @@ export function buildWorldWoodlands(
         const a = turn + 1.2
         const px = c.x + Math.cos(a) * 0.65
         const pz = c.z + Math.sin(a) * 0.65
-        const py = terrainSampler.sampleHeight(px, pz)
-        if (py > 0.05 && !nearHeroCity(px, pz)) {
-          buildGroveCluster(ctx, px, pz, 2, 0.42, 1.05, 1.38, owner, biome, 0.25, 'l0', ck + ':fhbl')
+        if (!terrainSampler.isInWater(px, pz) && terrainSampler.sampleSlope(px, pz) <= MAX_TREE_SLOPE) {
+          const py = terrainSampler.sampleHeight(px, pz)
+          if (py >= MIN_TREE_Y && py < 1.35 && !nearHeroCity(px, pz)) {
+            buildGroveCluster(ctx, px, pz, 2, 0.42, 1.05, 1.38, owner, biome, 0.42, 'l0', ck + ':fhbl')
+          }
         }
       }
       continue
@@ -999,36 +995,47 @@ export function buildWorldWoodlands(
         const hx = c.x + (outX / ol) * 0.92
         const hz = c.z + (outZ / ol) * 0.92
         const hy = terrainSampler.sampleHeight(hx, hz)
-        if (hy > 0.04 && !nearHeroCity(hx, hz)) {
+        if (hy >= MIN_TREE_Y && !terrainSampler.isInWater(hx, hz) && !nearHeroCity(hx, hz)) {
           buildSharedBoundaryCairn(ctx, hx, hy, hz, owner, Math.atan2(outX, outZ), 'l0')
           cairnsByCont.set(c.continent, prevCount + 1)
         }
       }
     }
 
-    if (recentRatio >= 0.22 && !c.coast && woodScore < 0.24 && seed > 0.34 && !nearHeroCity(c.x, c.z)) {
+    if (
+      recentRatio >= 0.22 &&
+      !c.coast &&
+      woodScore < 0.24 &&
+      seed > 0.34 &&
+      !nearHeroCity(c.x, c.z) &&
+      !terrainSampler.isInWater(c.x, c.z) &&
+      terrainSampler.sampleSlope(c.x, c.z) < 0.32
+    ) {
       const cy = terrainSampler.sampleHeight(c.x, c.z)
-      if (cy > 0.05) {
+      if (cy >= MIN_TREE_Y && cy < 0.85) {
         ao(c.x, cy, c.z, 2.25, 'l0')
         for (let j = 0; j < 3; j++) {
           const off = (j - 1) * 0.52
           const [tx, tz] = rotPoint(c.x, c.z, 0, off, turn)
+          if (terrainSampler.isInWater(tx, tz)) continue
           const ty = terrainSampler.sampleHeight(tx, tz)
-          if (ty < 0.04) continue
+          if (ty < MIN_TREE_Y) continue
           box('trim', tx, ty + 0.03, tz, 1.56 - j * 0.12, 0.05, 0.4, owner, 0, turn, 'l0')
           box(j % 2 === 0 ? 'crop' : 'meadow', tx, ty + 0.065, tz, 1.44 - j * 0.12, 0.045, 0.3, owner, 0, turn, 'l0')
         }
         const [ox, oz] = rotPoint(c.x, c.z, 0.78, 0.42, turn)
-        const oy = terrainSampler.sampleHeight(ox, oz)
-        if (oy > 0.05 && !nearHeroCity(ox, oz)) {
-          buildTree(ctx, ox, oy, oz, 1.18, owner, 'oak', 'canopyLight', 'l0', turn)
+        if (!terrainSampler.isInWater(ox, oz) && terrainSampler.sampleSlope(ox, oz) <= MAX_TREE_SLOPE) {
+          const oy = terrainSampler.sampleHeight(ox, oz)
+          if (oy >= MIN_TREE_Y && !nearHeroCity(ox, oz)) {
+            buildTree(ctx, ox, oy, oz, 1.18, owner, 'oak', 'canopyLight', 'l0', turn)
+          }
         }
       }
       continue
     }
 
     if (woodScore > -0.04 || (!c.coast && seed > 0.34)) {
-      const puffCount = woodScore > 0.34 ? 7 : woodScore > 0.1 ? 5 : 4
+      const puffCount = woodScore > 0.34 ? 6 : woodScore > 0.1 ? 4 : 3
       const coniferBias = biome === 'nordic' ? 0.58 : c.height > 1.15 ? 0.4 : 0.14
       let placed = 0
       const baseAng = turn + seed * 1.9
@@ -1037,23 +1044,23 @@ export function buildWorldWoodlands(
         const r = j === 0 ? hash(ck + ':lr0') * 0.25 : Math.sqrt((j + 0.3) / puffCount) * 1.38
         const px = c.x + Math.cos(a) * r
         const pz = c.z + Math.sin(a) * r
-        if (nearHeroCity(px, pz)) continue
+        if (nearHeroCity(px, pz) || terrainSampler.isInWater(px, pz)) continue
         const py = terrainSampler.sampleHeight(px, pz)
-        if (py < 0.06) continue
+        if (py < MIN_TREE_Y || py > 1.3 || terrainSampler.sampleSlope(px, pz) > MAX_TREE_SLOPE) continue
         const { species, tint } = pickBiomeTree(biome, hash(ck + ':lsp' + j), coniferBias)
-        const sc = 1.52 + hash(ck + ':lsc' + j) * 0.56
-        buildTree(ctx, px, py, pz, sc, owner, species, tint, 'l0', Math.floor(hash(ck + ':lrt' + j) * 4) * Math.PI * 0.25)
+        const sc = 1.4 + hash(ck + ':lsc' + j) * 0.5
+        buildTree(ctx, px, py, pz, sc, owner, species, tint, 'l0', hash(ck + ':lrt' + j) * Math.PI * 2)
         placed++
       }
-      if (placed > 0) {
+      if (placed > 0 && !terrainSampler.isInWater(c.x, c.z)) {
         const cy = terrainSampler.sampleHeight(c.x, c.z)
-        if (cy > 0.04) ao(c.x, cy, c.z, 2.95, 'l0')
+        if (cy >= MIN_TREE_Y) ao(c.x, cy, c.z, 2.75, 'l0')
       }
     }
   }
 }
 
-// 12. Riparian Groves & Reed Tufts along Catmull-Rom river bends
+// 12. Riparian Groves & Reed Tufts along Chaikin-smoothed organic river bends
 export function buildRiparianFlora(
   ctx: AssetContext,
   sampler: TerrainSampler,
@@ -1061,7 +1068,7 @@ export function buildRiparianFlora(
   mountainField: MountainField,
   placedBridgePts: WorldXZ[] = [],
 ): void {
-  const { box, ao, sampleHeight, isInRiver } = ctx
+  const { box, ao, sampleHeight, sampleSlope, isInWater } = ctx
   const MOUNTAIN_CLASSES = new Set<MountainClass>(['ridge', 'peak', 'high_peak'])
 
   const cities = atlas.fibers || []
@@ -1098,7 +1105,7 @@ export function buildRiparianFlora(
       const tLen = Math.hypot(tx, tz) || 1
       const nx = -tz / tLen
       const nz = tx / tLen
-      const hw = p.halfW || 0.21
+      const hw = p.halfW || 0.16
 
       if (p.arc >= nextReedArc) {
         nextReedArc = p.arc + 0.62 + hash(`rd:${rIdx}:${i}`) * 0.48
@@ -1106,9 +1113,9 @@ export function buildRiparianFlora(
         const dist = hw + 0.13 + hash(`rdd:${rIdx}:${i}`) * 0.08
         const rx = p.x + nx * side * dist
         const rz = p.z + nz * side * dist
-        if (!nearBlocked(rx, rz)) {
+        if (!nearBlocked(rx, rz) && !sampler.isInLake(rx, rz) && sampleSlope(rx, rz) < 0.55) {
           const ry = sampleHeight(rx, rz)
-          if (ry > 0.01) {
+          if (ry > SEA_Y + 0.08 && ry < 1.1) {
             for (let b = 0; b < 3; b++) {
               const bx = rx + (b - 1) * 0.055 * (tx / tLen)
               const bz = rz + (b - 1) * 0.055 * (tz / tLen)
@@ -1124,12 +1131,12 @@ export function buildRiparianFlora(
         for (const side of [-1, 1]) {
           const hSide = hash(`rts:${rIdx}:${i}:${side}`)
           if (hSide < 0.36) continue
-          const bankDist = Math.max(0.44, Math.min(0.68, hw + 0.27 + hash(`rtd:${rIdx}:${i}:${side}`) * 0.18))
+          const bankDist = Math.max(0.42, Math.min(0.68, hw + 0.25 + hash(`rtd:${rIdx}:${i}:${side}`) * 0.18))
           const px = p.x + nx * side * bankDist
           const pz = p.z + nz * side * bankDist
-          if (isInRiver(px, pz) || nearBlocked(px, pz) || tooCloseTree(px, pz)) continue
+          if (isInWater(px, pz) || nearBlocked(px, pz) || tooCloseTree(px, pz)) continue
           const s = sampler.sample(px, pz)
-          if (s.h < 0.045 || s.inPad) continue
+          if (s.h < MIN_TREE_Y || s.h > 1.2 || s.inPad || s.slope > MAX_TREE_SLOPE) continue
           const mClass = s.ownTile ? mountainField.l2.get(key(s.ownTile))?.mClass : undefined
           if (mClass && MOUNTAIN_CLASSES.has(mClass)) continue
 

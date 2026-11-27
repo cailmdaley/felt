@@ -426,10 +426,23 @@ export interface RiverSegment {
   continent: string
 }
 
+export interface TerrainParams {
+  uplift: number
+  erosionK: number
+  aCrit: number
+  valleySmooth: number
+  crestSharpness: number
+  talusSlope: number
+  lakeLevel: number
+  iterations: number
+  seed: number
+}
+
 export interface NaturalSample {
   h: number
   baseH: number
   ridge: number
+  slope: number
   ownTile: FineTile | null
   nearestTile: FineTile | null
   landRatio: number
@@ -439,12 +452,15 @@ export interface TerrainSample {
   h: number
   baseH: number
   ridge: number
+  slope: number
   ownTile: FineTile | null
   nearestTile: FineTile | null
   isRiver: boolean
   riverBank: boolean
   riverOwner: TileOwner | null
   riverDist: number
+  isLake: boolean
+  lakeY: number | null
   inPad: boolean
 }
 
@@ -452,9 +468,13 @@ export interface TerrainSampler {
   sample(x: number, z: number): TerrainSample
   sampleNatural(x: number, z: number): NaturalSample
   sampleHeight(x: number, z: number): number
+  sampleSlope(x: number, z: number): number
   isInRiver(x: number, z: number): boolean
+  isInLake(x: number, z: number): boolean
+  isInWater(x: number, z: number): boolean
   nearestRiver(x: number, z: number): { dist: number; seg: RiverSegment } | null
   riverSurfaceY(x: number, z: number): number
+  lakeSurfaceY(x: number, z: number): number | null
   cityElevations: Map<string, number>
   riverPaths: SampledRiverPath[]
 }
@@ -529,14 +549,16 @@ export interface MountainField {
 export type GeometryKind =
   | 'box'
   | 'hex'
-  | 'hexSkirt'
   | 'cyl'
+  | 'taperCyl'
   | 'dome'
-  | 'peak'
   | 'ao'
-  | 'crag'
-  | 'ridge'
-  | 'snow'
+  | 'canopy'
+  | 'conifer'
+  | 'gable'
+  | 'hipCap'
+  | 'hull'
+  | 'sail'
 
 export interface BatchItem {
   x: number
@@ -648,6 +670,8 @@ export interface AssetContext {
   signals: SignalEntry[]
   halo(n: PlacedCity, x: number, y: number, z: number, ask?: boolean): void
   sampleHeight(x: number, z: number): number
+  sampleSlope(x: number, z: number): number
   isInRiver(x: number, z: number): boolean
+  isInWater(x: number, z: number): boolean
   isNearMountain(t: FineTile): boolean
 }
